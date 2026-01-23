@@ -16,6 +16,19 @@ Este repositório inicia a implementação por etapas do sistema de RH on-premis
 - `docs/`: documentação da arquitetura, modelo de dados e fluxos.
 - `backend/`: API FastAPI inicial (saúde e configuração base).
 
+## Executar stack completa (Docker)
+
+```bash
+cp backend/.env.example backend/.env
+docker compose up --build
+```
+
+Endpoint de saúde:
+
+```
+GET http://localhost:8000/api/health
+```
+
 ## Executar backend (local)
 
 ```bash

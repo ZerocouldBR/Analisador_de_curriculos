@@ -1,5 +1,19 @@
 # Backend API (FastAPI)
 
+## Executar com Docker Compose
+
+```bash
+cp .env.example .env
+cd ..
+docker compose up --build
+```
+
+Endpoint de saúde:
+
+```
+GET http://localhost:8000/api/health
+```
+
 ## Executar localmente
 
 ```bash
