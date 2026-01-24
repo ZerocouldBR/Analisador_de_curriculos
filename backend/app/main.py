@@ -1,5 +1,7 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.api.routes import api_router
 from app.core.config import settings
@@ -72,6 +74,18 @@ def create_app() -> FastAPI:
             "name": "MIT",
         }
     )
+
+    # CORS middleware for frontend
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://frontend:3000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Prometheus instrumentation
+    Instrumentator().instrument(application).expose(application, endpoint="/metrics")
 
     application.include_router(api_router, prefix="/api")
 

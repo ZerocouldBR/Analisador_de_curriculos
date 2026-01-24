@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'analisador-curriculos'
+
+scrape_configs:
+  # FastAPI Application Metrics
+  - job_name: 'fastapi'
+    static_configs:
+      - targets: ['api:8000']
+        labels:
+          service: 'api'
+
+  # Celery Worker Metrics (via Flower)
+  - job_name: 'celery'
+    static_configs:
+      - targets: ['flower:5555']
+        labels:
+          service: 'celery'
+
+  # Redis Metrics
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+        labels:
+          service: 'redis'
+
+  # PostgreSQL Metrics (requires postgres_exporter if needed)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['db:5432']
+        labels:
+          service: 'postgres'
+
+  # Prometheus Self-Monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
