@@ -88,9 +88,14 @@ async def reprocess_document(
         )
 
     try:
-        DocumentService.process_document(db, document, current_user.id)
+        from app.tasks.document_tasks import process_document_task
+        task = process_document_task.delay(document.id, current_user.id)
 
-        return {"message": "Documento reprocessado com sucesso"}
+        return {
+            "message": "Documento enfileirado para reprocessamento",
+            "task_id": task.id,
+            "document_id": document.id
+        }
 
     except Exception as e:
         raise HTTPException(

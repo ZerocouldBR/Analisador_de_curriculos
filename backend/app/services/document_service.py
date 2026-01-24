@@ -114,11 +114,12 @@ class DocumentService:
         db.add(audit)
         db.commit()
 
-        # Processar documento em background (extrair texto, etc.)
+        # Processar documento em background usando Celery
         try:
-            DocumentService.process_document(db, document, user_id)
+            from app.tasks.document_tasks import process_document_task
+            process_document_task.delay(document.id, user_id)
         except Exception as e:
-            print(f"Erro ao processar documento: {e}")
+            print(f"Erro ao enfileirar processamento do documento: {e}")
             # Não falhar upload por erro de processamento
 
         return document
