@@ -10,12 +10,37 @@ from sqlalchemy import (
     Date,
     Float,
     Index,
+    Table,
 )
 from sqlalchemy.dialects.postgresql import JSONB, ARRAY
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 
 from app.db.database import Base
+
+
+# Tabela de associação User-Role (many-to-many)
+user_roles = Table(
+    'user_roles',
+    Base.metadata,
+    Column('user_id', Integer, ForeignKey('users.id', ondelete='CASCADE'), primary_key=True),
+    Column('role_id', Integer, ForeignKey('roles.id', ondelete='CASCADE'), primary_key=True),
+    Column('assigned_at', DateTime, default=datetime.utcnow)
+)
+
+
+class Role(Base):
+    """Roles para RBAC (Role-Based Access Control)"""
+    __tablename__ = "roles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False, index=True)
+    description = Column(Text)
+    permissions = Column(JSONB, default={})  # Armazena permissões granulares
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relacionamentos
+    users = relationship("User", secondary=user_roles, back_populates="roles")
 
 
 class User(Base):
@@ -25,11 +50,13 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
     name = Column(String, nullable=False)
-    status = Column(String, default="active")
+    status = Column(String, default="active")  # active, inactive, suspended
+    is_superuser = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
 
     # Relacionamentos
+    roles = relationship("Role", secondary=user_roles, back_populates="users")
     audit_logs = relationship("AuditLog", back_populates="user")
 
 

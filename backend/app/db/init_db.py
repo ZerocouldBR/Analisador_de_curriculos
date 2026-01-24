@@ -7,6 +7,7 @@ from sqlalchemy import text
 from app.db.database import engine, Base
 from app.db.models import (
     User,
+    Role,
     Candidate,
     CandidateProfile,
     Document,
@@ -25,6 +26,7 @@ def init_db():
     Inicializa o banco de dados:
     1. Cria extensão pgvector
     2. Cria todas as tabelas
+    3. Inicializa roles padrão (opcional)
     """
     print("Inicializando banco de dados...")
 
@@ -47,6 +49,8 @@ def init_db():
         raise
 
     print("✓ Banco de dados inicializado com sucesso!")
+    print("\nPara inicializar roles e superuser padrão, execute:")
+    print("  python -m app.db.init_roles")
 
 
 def drop_all_tables():
