@@ -1,5 +1,10 @@
 """
 Celery tasks for document processing
+
+Enhanced with:
+- Advanced keyword extraction
+- Structured metadata indexing
+- Optimized chunking for LLM retrieval
 """
 from celery import Task
 from sqlalchemy.orm import Session
@@ -12,7 +17,9 @@ from app.db.models import Document, Candidate, Chunk, AuditLog
 from app.services.storage_service import storage_service
 from app.services.text_extraction_service import TextExtractionService
 from app.services.resume_parser_service import ResumeParserService
+from app.services.keyword_extraction_service import KeywordExtractionService
 from app.core.websocket_manager import websocket_manager
+from app.core.config import settings
 
 
 class DatabaseTask(Task):
@@ -85,9 +92,16 @@ def process_document_task(
             candidate.phone = resume_data["personal_info"].get("phone")
             db.commit()
 
-        _send_progress(document_id, "processing", 70, "Criando chunks de texto")
+        _send_progress(document_id, "processing", 70, "Extraindo palavras-chave e criando índices")
 
-        # Create chunks by section
+        # Extract keywords for the entire document
+        document_keywords = {}
+        if getattr(settings, 'enable_keyword_extraction', True):
+            document_keywords = KeywordExtractionService.extract_keywords(text, resume_data)
+
+        _send_progress(document_id, "processing", 75, "Criando chunks de texto otimizados")
+
+        # Create chunks by section with enhanced metadata
         sections = [
             ("full_text", text),
             ("personal_info", str(resume_data.get("personal_info", {}))),
@@ -98,15 +112,44 @@ def process_document_task(
             ("certifications", ", ".join(resume_data.get("certifications", []))),
         ]
 
+        # Add keyword index as a special chunk for LLM retrieval
+        if document_keywords.get("search_index"):
+            sections.append(("keyword_index", document_keywords["search_index"]))
+
         chunks_created = 0
+        total_sections = len([s for s in sections if s[1].strip()])
+
         for section_name, section_content in sections:
             if section_content.strip():
+                # Create enhanced metadata for this chunk
+                chunk_metadata = KeywordExtractionService.create_chunk_metadata(
+                    section=section_name,
+                    content=section_content[:10000],
+                    keywords=document_keywords,
+                    chunk_index=chunks_created,
+                    total_chunks=total_sections
+                )
+
+                # Merge with resume_data for full_text chunk
+                if section_name == "full_text":
+                    chunk_metadata["resume_data"] = resume_data
+                    chunk_metadata["document_keywords"] = {
+                        "keywords": document_keywords.get("keywords", [])[:50],
+                        "technical_skills": document_keywords.get("technical_skills", []),
+                        "soft_skills": document_keywords.get("soft_skills", []),
+                        "tools_and_frameworks": document_keywords.get("tools_and_frameworks", []),
+                        "certifications": document_keywords.get("certifications", []),
+                        "domains": document_keywords.get("domains", []),
+                        "companies": document_keywords.get("companies", []),
+                        "relevance_scores": document_keywords.get("relevance_scores", {})
+                    }
+
                 chunk = Chunk(
                     document_id=document.id,
                     candidate_id=document.candidate_id,
                     section=section_name,
                     content=section_content[:10000],  # Limit size
-                    meta_json=resume_data if section_name == "full_text" else {}
+                    meta_json=chunk_metadata
                 )
                 db.add(chunk)
                 chunks_created += 1
