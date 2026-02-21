@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from typing import List, Optional, Tuple
-import openai
+from openai import AsyncOpenAI
 from sqlalchemy import text
 
 from app.db.models import Chunk, Embedding, Candidate
@@ -15,17 +15,17 @@ class EmbeddingService:
     """
 
     def __init__(self, api_key: Optional[str] = None):
-        """
-        Inicializa o serviço
+        self.api_key = api_key or settings.openai_api_key
+        self.model = settings.embedding_model
+        self._client: Optional[AsyncOpenAI] = None
 
-        Args:
-            api_key: Chave da API do OpenAI (usa env se None)
-        """
-        self.api_key = api_key or getattr(settings, 'openai_api_key', None)
-        self.model = getattr(settings, 'embedding_model', 'text-embedding-3-small')
-
-        if self.api_key:
-            openai.api_key = self.api_key
+    @property
+    def client(self) -> AsyncOpenAI:
+        if self._client is None:
+            if not self.api_key:
+                raise ValueError("OpenAI API key não configurada")
+            self._client = AsyncOpenAI(api_key=self.api_key)
+        return self._client
 
     async def generate_embedding(self, text: str) -> List[float]:
         """
@@ -40,19 +40,18 @@ class EmbeddingService:
         if not self.api_key:
             raise ValueError("OpenAI API key não configurada")
 
-        # Limitar tamanho do texto
+        # Limitar tamanho do texto (~4 chars por token)
         max_tokens = 8000
-        if len(text) > max_tokens * 4:  # ~4 chars por token
+        if len(text) > max_tokens * 4:
             text = text[:max_tokens * 4]
 
         try:
-            response = await openai.Embedding.acreate(
+            response = await self.client.embeddings.create(
                 model=self.model,
                 input=text
             )
 
-            embedding = response['data'][0]['embedding']
-            return embedding
+            return response.data[0].embedding
 
         except Exception as e:
             raise ValueError(f"Erro ao gerar embedding: {str(e)}")

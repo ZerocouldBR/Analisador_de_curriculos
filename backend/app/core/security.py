@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -9,11 +9,6 @@ from app.core.config import settings
 
 # Configuração de hash de senha
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Configurações JWT
-SECRET_KEY = getattr(settings, 'secret_key', "your-secret-key-change-this-in-production")
-ALGORITHM = getattr(settings, 'algorithm', "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = getattr(settings, 'access_token_expire_minutes', 30)
 
 
 class TokenData(BaseModel):
@@ -33,6 +28,11 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
+def _utcnow() -> datetime:
+    """Returns current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
+
+
 def create_access_token(
     data: dict[str, Any],
     expires_delta: Optional[timedelta] = None
@@ -48,15 +48,16 @@ def create_access_token(
         Token JWT codificado
     """
     to_encode = data.copy()
+    now = _utcnow()
 
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = now + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = now + timedelta(minutes=settings.access_token_expire_minutes)
 
-    to_encode.update({"exp": expire, "iat": datetime.utcnow()})
+    to_encode.update({"exp": expire, "iat": now})
 
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
     return encoded_jwt
 
 
@@ -71,7 +72,7 @@ def decode_access_token(token: str) -> Optional[TokenData]:
         TokenData se válido, None caso contrário
     """
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
 
         user_id: int = payload.get("user_id")
         email: str = payload.get("email")
@@ -88,7 +89,7 @@ def decode_access_token(token: str) -> Optional[TokenData]:
 
 def create_refresh_token(data: dict[str, Any]) -> str:
     """
-    Cria um token de refresh (válido por 7 dias)
+    Cria um token de refresh
 
     Args:
         data: Dados a serem codificados no token
@@ -97,8 +98,9 @@ def create_refresh_token(data: dict[str, Any]) -> str:
         Token JWT de refresh
     """
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=7)
-    to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "refresh"})
+    now = _utcnow()
+    expire = now + timedelta(days=settings.refresh_token_expire_days)
+    to_encode.update({"exp": expire, "iat": now, "type": "refresh"})
 
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
     return encoded_jwt

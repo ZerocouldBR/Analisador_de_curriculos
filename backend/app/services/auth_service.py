@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.db.models import User, Role, AuditLog
 from app.schemas.auth import UserCreate, UserLogin
@@ -94,7 +94,7 @@ class AuthService:
             raise ValueError("Usuário inativo ou suspenso")
 
         # Atualizar último login
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(timezone.utc)
         db.commit()
 
         # Audit log
