@@ -1,11 +1,12 @@
 """
-Serviço de consulta ao LLM com retry inteligente
+Servico de consulta ao LLM com retry inteligente
 
 Implementa:
-- Consulta iterativa à API do LLM
-- Retry automático com filtro de contexto quando atinge limite de caracteres
-- Até 5 tentativas para obter resposta completa
-- Ranqueamento e seleção inteligente de chunks relevantes
+- Consulta iterativa a API do LLM
+- Retry automatico com filtro de contexto quando atinge limite de caracteres
+- Ate 5 tentativas para obter resposta completa
+- Ranqueamento e selecao inteligente de chunks relevantes
+- Sistema de prompts especializado para producao e logistica
 """
 import asyncio
 import re
@@ -46,7 +47,7 @@ class QueryResult:
 
 @dataclass
 class ChunkWithScore:
-    """Chunk com score de relevância"""
+    """Chunk com score de relevancia"""
     chunk: Chunk
     semantic_score: float
     keyword_score: float
@@ -56,40 +57,141 @@ class ChunkWithScore:
 
 class LLMQueryService:
     """
-    Serviço para consultas ao LLM com retry inteligente
+    Servico para consultas ao LLM com retry inteligente
 
-    Características:
-    - Busca semântica de chunks relevantes
-    - Ranqueamento por relevância
-    - Retry automático com filtro progressivo
-    - Máximo de 5 tentativas por consulta
+    Caracteristicas:
+    - Busca semantica de chunks relevantes
+    - Ranqueamento por relevancia
+    - Retry automatico com filtro progressivo
+    - Maximo de 5 tentativas por consulta
+    - Prompts especializados para producao e logistica
     """
 
-    # Configurações padrão
     DEFAULT_MAX_RETRIES = 5
     DEFAULT_MAX_TOKENS = 4096
     DEFAULT_TEMPERATURE = 0.7
     DEFAULT_MODEL = "gpt-4-turbo-preview"
 
-    # Limites de caracteres por tentativa (progressivamente menores)
     CHARACTER_LIMITS = [
-        32000,  # 1ª tentativa: contexto completo
-        24000,  # 2ª tentativa: contexto reduzido
-        16000,  # 3ª tentativa: contexto moderado
-        10000,  # 4ª tentativa: contexto mínimo
-        6000,   # 5ª tentativa: apenas essencial
+        32000,
+        24000,
+        16000,
+        10000,
+        6000,
     ]
 
-    # Número de chunks por tentativa (progressivamente menos)
     CHUNKS_PER_RETRY = [15, 12, 8, 5, 3]
 
-    def __init__(self, api_key: Optional[str] = None):
-        """
-        Inicializa o serviço
+    # Sistema de prompts especializados
+    SYSTEM_PROMPTS = {
+        "general": """Voce e um assistente especializado em analise de curriculos para RH.
 
-        Args:
-            api_key: Chave da API OpenAI (usa config se não fornecida)
-        """
+Suas responsabilidades:
+1. Analisar curriculos e responder perguntas sobre candidatos
+2. Identificar habilidades, experiencias e qualificacoes relevantes
+3. Comparar candidatos quando solicitado
+4. Fornecer respostas objetivas e baseadas nos dados disponiveis
+
+Diretrizes:
+- Baseie suas respostas APENAS no contexto fornecido
+- Se a informacao nao estiver disponivel, informe claramente
+- Use os indices de palavras-chave para localizar informacoes rapidamente
+- Estruture respostas longas com topicos ou listas
+- Cite a fonte (nome do candidato, secao) quando relevante""",
+
+        "production": """Voce e um assistente especializado em recrutamento para PRODUCAO INDUSTRIAL.
+
+Voce ajuda empresas a encontrar candidatos para vagas de producao, manufatura e chao de fabrica.
+
+AREAS DE EXPERTISE:
+- Operadores de producao (linhas de montagem, maquinas, CNC)
+- Lideres e supervisores de producao
+- PCP (Planejamento e Controle de Producao)
+- Manutencao industrial (mecanica, eletrica, preventiva, corretiva)
+- Seguranca do trabalho (NRs, CIPA, EPI)
+- Qualidade industrial (ISO, CEP, FMEA, 5S, Lean)
+- Sistemas ERP (SAP, TOTVS/Protheus)
+
+CRITERIOS IMPORTANTES PARA AVALIAR CANDIDATOS DE PRODUCAO:
+1. Experiencia pratica em chao de fabrica
+2. NRs obrigatorias para a funcao (NR-12, NR-10, NR-11, NR-33, NR-35)
+3. Certificacoes de seguranca (CIPA, Brigadista, Primeiros Socorros)
+4. Habilitacoes (CNH, MOPP, Empilhadeira)
+5. Conhecimento em Lean Manufacturing (5S, Kaizen, TPM)
+6. Experiencia com equipamentos e maquinas especificas
+7. Disponibilidade de turnos (1o, 2o, 3o turno, escalas)
+8. Sistemas ERP utilizados (SAP PP/MM, TOTVS)
+
+Diretrizes:
+- Baseie suas respostas APENAS no contexto fornecido
+- Destaque NRs e certificacoes de seguranca relevantes
+- Mencione experiencia com maquinas e equipamentos
+- Indique disponibilidade de turno quando relevante
+- Classifique candidatos por aderencia ao perfil industrial
+- Use linguagem tecnica de producao quando apropriado""",
+
+        "logistics": """Voce e um assistente especializado em recrutamento para LOGISTICA e SUPPLY CHAIN.
+
+Voce ajuda empresas a encontrar candidatos para vagas de logistica, armazem e cadeia de suprimentos.
+
+AREAS DE EXPERTISE:
+- Operacoes de armazem (recebimento, expedicao, picking, packing)
+- Controle de estoque e inventario
+- Operacao de empilhadeira e equipamentos de movimentacao
+- Supply chain e gestao de suprimentos
+- Transporte e distribuicao (roteirizacao, frotas)
+- WMS e sistemas logisticos
+- Comercio exterior (importacao, exportacao)
+
+CRITERIOS IMPORTANTES PARA AVALIAR CANDIDATOS DE LOGISTICA:
+1. Experiencia em operacoes logisticas (armazem, CD, almoxarifado)
+2. Habilitacao para empilhadeira e NR-11
+3. CNH (categoria relevante para a funcao)
+4. Conhecimento em WMS e sistemas de gestao de estoque
+5. Experiencia com ERP (SAP WM/MM, TOTVS)
+6. Metodologias (FIFO, FEFO, Just-in-Time, Kanban)
+7. Gestao de KPIs logisticos (OTIF, acuracidade, lead time)
+8. Disponibilidade para turnos e escalas
+
+Diretrizes:
+- Baseie suas respostas APENAS no contexto fornecido
+- Destaque habilitacoes e NRs de logistica
+- Mencione experiencia com sistemas WMS/ERP
+- Indique CNH e certificacoes de empilhadeira
+- Avalie conhecimento de metodologias logisticas
+- Use linguagem tecnica de logistica quando apropriado""",
+
+        "quality": """Voce e um assistente especializado em recrutamento para QUALIDADE INDUSTRIAL.
+
+Voce ajuda empresas a encontrar candidatos para vagas de qualidade, metrologia e melhoria continua.
+
+AREAS DE EXPERTISE:
+- Controle de qualidade e inspecao
+- Metrologia e instrumentos de medicao
+- Normas ISO (9001, 14001, 45001, IATF 16949)
+- Ferramentas da qualidade (FMEA, APQP, PPAP, 8D, MASP)
+- CEP e controle estatistico de processo
+- Lean Six Sigma (Green Belt, Black Belt)
+- Auditoria interna e externa
+
+CRITERIOS IMPORTANTES:
+1. Experiencia com sistemas de gestao da qualidade
+2. Conhecimento de normas ISO e IATF
+3. Dominio de ferramentas da qualidade
+4. Experiencia com metrologia e instrumentos
+5. Certificacoes (auditor, Green Belt, Black Belt)
+6. CEP e analise estatistica
+7. Experiencia no setor industrial relevante
+
+Diretrizes:
+- Baseie suas respostas APENAS no contexto fornecido
+- Destaque certificacoes ISO e ferramentas da qualidade
+- Mencione experiencia com metrologia
+- Avalie certificacoes Lean/Six Sigma
+- Use linguagem tecnica de qualidade quando apropriado"""
+    }
+
+    def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or getattr(settings, 'openai_api_key', None)
         self.embedding_model = getattr(settings, 'embedding_model', 'text-embedding-3-small')
         self.chat_model = getattr(settings, 'chat_model', self.DEFAULT_MODEL)
@@ -97,23 +199,66 @@ class LLMQueryService:
         if self.api_key:
             openai.api_key = self.api_key
 
+    def _detect_query_domain(self, question: str) -> str:
+        """Detecta o dominio da pergunta para selecionar prompt adequado"""
+        question_lower = question.lower()
+
+        production_terms = [
+            "producao", "produção", "operador", "fabrica", "fábrica",
+            "montagem", "maquina", "máquina", "cnc", "torno", "solda",
+            "manutencao", "manutenção", "industrial", "chao de fabrica",
+            "lider de producao", "supervisor", "pcp", "planejamento",
+            "turno", "lean", "kaizen", "5s", "tpm"
+        ]
+
+        logistics_terms = [
+            "logistica", "logística", "armazem", "armazém", "almoxarifado",
+            "estoque", "empilhadeira", "expedicao", "expedição", "supply chain",
+            "transporte", "distribuicao", "distribuição", "frete", "wms",
+            "picking", "packing", "cross docking", "conferente", "separador",
+            "inventario", "inventário"
+        ]
+
+        quality_terms = [
+            "qualidade", "inspetor", "inspecao", "inspeção", "metrologia",
+            "iso", "auditoria", "cep", "fmea", "six sigma", "seis sigma",
+            "green belt", "black belt", "nao conformidade", "calibracao",
+            "calibração"
+        ]
+
+        prod_score = sum(1 for t in production_terms if t in question_lower)
+        log_score = sum(1 for t in logistics_terms if t in question_lower)
+        qual_score = sum(1 for t in quality_terms if t in question_lower)
+
+        max_score = max(prod_score, log_score, qual_score)
+
+        if max_score == 0:
+            return "general"
+        if prod_score == max_score:
+            return "production"
+        if log_score == max_score:
+            return "logistics"
+        return "quality"
+
     async def query(
         self,
         db: Session,
         question: str,
         filters: Optional[Dict[str, Any]] = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
-        include_sources: bool = True
+        include_sources: bool = True,
+        domain: Optional[str] = None
     ) -> QueryResult:
         """
         Executa consulta ao LLM com retry inteligente
 
         Args:
-            db: Sessão do banco de dados
-            question: Pergunta do usuário
+            db: Sessao do banco de dados
+            question: Pergunta do usuario
             filters: Filtros opcionais (candidate_id, skills, etc.)
-            max_retries: Número máximo de tentativas (padrão: 5)
+            max_retries: Numero maximo de tentativas (padrao: 5)
             include_sources: Incluir fontes na resposta
+            domain: Dominio forçado (production, logistics, quality, general)
 
         Returns:
             QueryResult com resposta e metadados
@@ -121,13 +266,16 @@ class LLMQueryService:
         if not self.api_key:
             return QueryResult(
                 status=QueryStatus.ERROR,
-                answer="API key do OpenAI não configurada",
+                answer="API key do OpenAI nao configurada",
                 chunks_used=0,
                 total_chunks_available=0,
                 tokens_used=0,
                 retries=0,
                 confidence_score=0.0
             )
+
+        # Detectar dominio da pergunta
+        query_domain = domain or self._detect_query_domain(question)
 
         # Buscar chunks relevantes
         all_chunks = await self._search_relevant_chunks(db, question, filters)
@@ -136,7 +284,7 @@ class LLMQueryService:
         if not all_chunks:
             return QueryResult(
                 status=QueryStatus.SUCCESS,
-                answer="Não encontrei currículos relevantes para sua pergunta.",
+                answer="Nao encontrei curriculos relevantes para sua pergunta.",
                 chunks_used=0,
                 total_chunks_available=0,
                 tokens_used=0,
@@ -144,14 +292,13 @@ class LLMQueryService:
                 confidence_score=0.0
             )
 
-        # Tentar consultar com retry progressivo
         retries = 0
         last_error = None
         accumulated_answer = ""
+        selected_chunks = []
 
         while retries < min(max_retries, len(self.CHARACTER_LIMITS)):
             try:
-                # Selecionar chunks para esta tentativa
                 max_chunks = self.CHUNKS_PER_RETRY[retries]
                 char_limit = self.CHARACTER_LIMITS[retries]
 
@@ -159,24 +306,19 @@ class LLMQueryService:
                     all_chunks, max_chunks, char_limit
                 )
 
-                # Construir contexto
                 context = self._build_context(selected_chunks, char_limit)
 
-                # Construir prompt
                 prompt = self._build_prompt(
-                    question, context, retries, accumulated_answer
+                    question, context, retries, accumulated_answer, query_domain
                 )
 
-                # Chamar LLM
                 response = await self._call_llm(prompt, retries)
 
-                # Verificar se resposta está completa
                 is_complete, answer = self._check_response_completeness(
                     response, accumulated_answer
                 )
 
                 if is_complete:
-                    # Resposta completa obtida
                     sources = []
                     if include_sources:
                         sources = self._extract_sources(selected_chunks)
@@ -193,37 +335,25 @@ class LLMQueryService:
                         metadata={
                             "char_limit_used": char_limit,
                             "chunks_limit_used": max_chunks,
-                            "model": self.chat_model
+                            "model": self.chat_model,
+                            "domain": query_domain
                         }
                     )
 
-                # Resposta parcial - acumular e continuar
                 accumulated_answer = answer
                 retries += 1
 
-            except openai.error.InvalidRequestError as e:
-                # Token limit exceeded - tentar com menos contexto
+            except Exception as e:
                 error_msg = str(e)
                 if "maximum context length" in error_msg or "token" in error_msg.lower():
                     retries += 1
                     last_error = e
                     continue
                 else:
-                    return QueryResult(
-                        status=QueryStatus.ERROR,
-                        answer=f"Erro na API: {error_msg}",
-                        chunks_used=0,
-                        total_chunks_available=total_available,
-                        tokens_used=0,
-                        retries=retries + 1,
-                        confidence_score=0.0
-                    )
+                    last_error = e
+                    retries += 1
 
-            except Exception as e:
-                last_error = e
-                retries += 1
-
-        # Máximo de retries atingido
+        # Maximo de retries atingido
         if accumulated_answer:
             return QueryResult(
                 status=QueryStatus.PARTIAL,
@@ -232,13 +362,16 @@ class LLMQueryService:
                 total_chunks_available=total_available,
                 tokens_used=0,
                 retries=retries,
-                confidence_score=self._calculate_confidence(selected_chunks) * 0.7,
-                metadata={"warning": "Resposta pode estar incompleta após máximo de tentativas"}
+                confidence_score=self._calculate_confidence(selected_chunks) * 0.7 if selected_chunks else 0,
+                metadata={
+                    "warning": "Resposta pode estar incompleta apos maximo de tentativas",
+                    "domain": domain or "general"
+                }
             )
 
         return QueryResult(
             status=QueryStatus.MAX_RETRIES_REACHED,
-            answer=f"Não foi possível obter resposta após {retries} tentativas. Erro: {last_error}",
+            answer=f"Nao foi possivel obter resposta apos {retries} tentativas. Erro: {last_error}",
             chunks_used=0,
             total_chunks_available=total_available,
             tokens_used=0,
@@ -252,22 +385,12 @@ class LLMQueryService:
         query: str,
         filters: Optional[Dict[str, Any]] = None
     ) -> List[ChunkWithScore]:
-        """
-        Busca chunks relevantes usando busca híbrida
-
-        Combina:
-        - Similaridade semântica (embeddings)
-        - Match de palavras-chave
-        - Filtros opcionais
-        """
-        # Gerar embedding da query
+        """Busca chunks relevantes usando busca hibrida"""
         query_embedding = await self._generate_embedding(query)
 
-        # Extrair keywords da query
         query_keywords = KeywordExtractionService.extract_keywords(query)
         keyword_terms = query_keywords.get("keywords", [])
 
-        # Construir query SQL híbrida
         sql = text("""
             WITH semantic_scores AS (
                 SELECT
@@ -295,7 +418,6 @@ class LLMQueryService:
 
         params = {"query_vector": str(query_embedding)}
 
-        # Aplicar filtros se existirem
         if filters:
             if filters.get("candidate_id"):
                 sql = text(sql.text.replace(
@@ -313,13 +435,19 @@ class LLMQueryService:
             if not chunk:
                 continue
 
-            # Calcular score de keywords
             keyword_score = self._calculate_keyword_score(chunk.content, keyword_terms)
 
-            # Score combinado
+            # Bonus para chunks de keyword_index (contem resumo estruturado)
+            section_bonus = 0.0
+            if chunk.section == "keyword_index":
+                section_bonus = 0.05
+            elif chunk.section == "full_text":
+                section_bonus = 0.03
+
             combined_score = (
                 row.semantic_score * 0.6 +
-                keyword_score * 0.4
+                keyword_score * 0.4 +
+                section_bonus
             )
 
             chunks_with_scores.append(ChunkWithScore(
@@ -330,7 +458,6 @@ class LLMQueryService:
                 metadata=row.meta_json or {}
             ))
 
-        # Ordenar por score combinado
         chunks_with_scores.sort(key=lambda x: x.combined_score, reverse=True)
 
         return chunks_with_scores
@@ -363,14 +490,7 @@ class LLMQueryService:
         max_chunks: int,
         char_limit: int
     ) -> List[ChunkWithScore]:
-        """
-        Seleciona chunks para uma tentativa específica
-
-        Prioriza:
-        1. Chunks com maior score combinado
-        2. Variedade de seções (não repetir mesma seção demais)
-        3. Respeitar limite de caracteres
-        """
+        """Seleciona chunks para uma tentativa especifica"""
         selected = []
         total_chars = 0
         section_counts = {}
@@ -381,15 +501,11 @@ class LLMQueryService:
 
             chunk_chars = len(chunk.chunk.content)
 
-            # Verificar limite de caracteres
             if total_chars + chunk_chars > char_limit:
-                # Se já temos alguns chunks, parar
                 if selected:
                     break
-                # Senão, truncar este chunk
                 chunk_chars = char_limit - total_chars
 
-            # Limitar repetição de seções
             section = chunk.chunk.section
             if section_counts.get(section, 0) >= 3:
                 continue
@@ -405,33 +521,37 @@ class LLMQueryService:
         chunks: List[ChunkWithScore],
         char_limit: int
     ) -> str:
-        """Constrói contexto a partir dos chunks selecionados"""
+        """Constroi contexto a partir dos chunks selecionados"""
         context_parts = []
         total_chars = 0
 
         for i, chunk_with_score in enumerate(chunks):
             chunk = chunk_with_score.chunk
 
-            # Obter informações do candidato
             candidate_info = ""
             if chunk.candidate:
                 candidate_info = f"Candidato: {chunk.candidate.full_name or 'N/A'}"
                 if chunk.candidate.email:
                     candidate_info += f" | Email: {chunk.candidate.email}"
+                if chunk.candidate.city:
+                    candidate_info += f" | Cidade: {chunk.candidate.city}"
 
-            # Construir bloco do chunk
-            chunk_header = f"[CHUNK {i+1} - Seção: {chunk.section.upper()}]"
+            chunk_header = f"[CHUNK {i+1} - Secao: {chunk.section.upper()}]"
             if candidate_info:
                 chunk_header += f"\n{candidate_info}"
 
-            # Adicionar índice de keywords se disponível no metadata
             meta = chunk_with_score.metadata or {}
+
+            # Incluir info de perfil se disponivel
+            profile_type = meta.get("chunk_profile_type", "")
+            if profile_type and profile_type != "general":
+                chunk_header += f"\n[Perfil: {profile_type}]"
+
             if meta.get("search_index"):
                 chunk_header += f"\n{meta['search_index'][:500]}"
 
             content = chunk.content
 
-            # Truncar se necessário
             available_chars = char_limit - total_chars - len(chunk_header) - 50
             if len(content) > available_chars:
                 content = content[:available_chars] + "..."
@@ -450,37 +570,24 @@ class LLMQueryService:
         question: str,
         context: str,
         retry_number: int,
-        accumulated_answer: str
+        accumulated_answer: str,
+        domain: str = "general"
     ) -> List[Dict[str, str]]:
-        """Constrói o prompt para o LLM"""
-        system_prompt = """Você é um assistente especializado em análise de currículos para RH.
+        """Constroi o prompt para o LLM com dominio especializado"""
+        system_prompt = self.SYSTEM_PROMPTS.get(domain, self.SYSTEM_PROMPTS["general"])
 
-Suas responsabilidades:
-1. Analisar currículos e responder perguntas sobre candidatos
-2. Identificar habilidades, experiências e qualificações relevantes
-3. Comparar candidatos quando solicitado
-4. Fornecer respostas objetivas e baseadas nos dados disponíveis
-
-Diretrizes:
-- Baseie suas respostas APENAS no contexto fornecido
-- Se a informação não estiver disponível, informe claramente
-- Use os índices de palavras-chave para localizar informações rapidamente
-- Estruture respostas longas com tópicos ou listas
-- Cite a fonte (nome do candidato, seção) quando relevante"""
-
-        user_prompt = f"""CONTEXTO DOS CURRÍCULOS:
+        user_prompt = f"""CONTEXTO DOS CURRICULOS:
 {context}
 
 PERGUNTA: {question}"""
 
-        # Se é um retry com resposta acumulada
         if retry_number > 0 and accumulated_answer:
             user_prompt += f"""
 
-NOTA: Esta é uma continuação. Resposta anterior (pode estar incompleta):
+NOTA: Esta e uma continuacao. Resposta anterior (pode estar incompleta):
 {accumulated_answer}
 
-Por favor, complete ou refine a resposta se necessário."""
+Por favor, complete ou refine a resposta se necessario."""
 
         return [
             {"role": "system", "content": system_prompt},
@@ -492,11 +599,8 @@ Por favor, complete ou refine a resposta se necessário."""
         messages: List[Dict[str, str]],
         retry_number: int
     ) -> Dict[str, Any]:
-        """Chama o LLM com os parâmetros apropriados"""
-        # Ajustar temperatura baseado no retry
+        """Chama o LLM com os parametros apropriados"""
         temperature = max(0.3, self.DEFAULT_TEMPERATURE - (retry_number * 0.1))
-
-        # Ajustar max_tokens baseado no retry (menos tokens = respostas mais concisas)
         max_tokens = max(1000, self.DEFAULT_MAX_TOKENS - (retry_number * 500))
 
         response = await openai.ChatCompletion.acreate(
@@ -517,29 +621,21 @@ Por favor, complete ou refine a resposta se necessário."""
         response: Dict[str, Any],
         accumulated: str
     ) -> Tuple[bool, str]:
-        """
-        Verifica se a resposta está completa
-
-        Returns:
-            Tuple (is_complete, full_answer)
-        """
+        """Verifica se a resposta esta completa"""
         content = response.get("content", "")
         finish_reason = response.get("finish_reason", "")
 
-        # Combinar com resposta acumulada se existir
         if accumulated:
             content = accumulated + "\n" + content
 
-        # Verificar se foi cortado por limite de tokens
         if finish_reason == "length":
             return False, content
 
-        # Verificar padrões que indicam resposta incompleta
         incomplete_patterns = [
-            r'\.\.\.$',  # Termina com ...
-            r'continua[rá]?$',  # Termina com "continua"
-            r'e também$',  # Frase incompleta
-            r'além disso$',  # Frase incompleta
+            r'\.\.\.$',
+            r'continua[rá]?$',
+            r'e também$',
+            r'além disso$',
         ]
 
         for pattern in incomplete_patterns:
@@ -549,17 +645,17 @@ Por favor, complete ou refine a resposta se necessário."""
         return True, content
 
     def _calculate_confidence(self, chunks: List[ChunkWithScore]) -> float:
-        """Calcula score de confiança baseado nos chunks usados"""
+        """Calcula score de confianca baseado nos chunks usados"""
         if not chunks:
             return 0.0
 
         avg_score = sum(c.combined_score for c in chunks) / len(chunks)
-        coverage = min(len(chunks) / 5, 1.0)  # Ideal: 5+ chunks
+        coverage = min(len(chunks) / 5, 1.0)
 
         return (avg_score * 0.7 + coverage * 0.3)
 
     def _extract_sources(self, chunks: List[ChunkWithScore]) -> List[Dict[str, Any]]:
-        """Extrai informações de fonte dos chunks"""
+        """Extrai informacoes de fonte dos chunks"""
         sources = []
 
         for chunk_with_score in chunks:
@@ -585,29 +681,22 @@ Por favor, complete ou refine a resposta se necessário."""
         filters: Optional[Dict[str, Any]] = None,
         refinement_questions: Optional[List[str]] = None
     ) -> Dict[str, Any]:
-        """
-        Consulta com refinamento iterativo
-
-        Permite fazer perguntas de follow-up automaticamente
-        para obter respostas mais completas
-        """
+        """Consulta com refinamento iterativo"""
         results = []
 
-        # Primeira consulta
         main_result = await self.query(db, question, filters)
         results.append({
             "question": question,
             "result": main_result
         })
 
-        # Se há perguntas de refinamento
         if refinement_questions and main_result.status == QueryStatus.SUCCESS:
-            for ref_question in refinement_questions[:3]:  # Max 3 refinamentos
+            for ref_question in refinement_questions[:3]:
                 ref_result = await self.query(
                     db,
                     f"{ref_question} (Contexto: {question})",
                     filters,
-                    max_retries=3  # Menos retries para refinamentos
+                    max_retries=3
                 )
                 results.append({
                     "question": ref_question,
@@ -630,6 +719,45 @@ Por favor, complete ou refine a resposta se necessário."""
             "sources": main_result.sources
         }
 
+    async def analyze_candidate_for_job(
+        self,
+        db: Session,
+        candidate_id: int,
+        job_description: str,
+        domain: Optional[str] = None
+    ) -> QueryResult:
+        """
+        Analisa um candidato especifico para uma vaga
 
-# Instância global
+        Args:
+            db: Sessao do banco
+            candidate_id: ID do candidato
+            job_description: Descricao da vaga
+            domain: Dominio (production, logistics, quality, general)
+
+        Returns:
+            QueryResult com analise detalhada
+        """
+        question = f"""Analise o curriculo deste candidato para a seguinte vaga:
+
+DESCRICAO DA VAGA:
+{job_description}
+
+Por favor, avalie:
+1. Aderencia geral do candidato a vaga (0-100%)
+2. Pontos fortes do candidato para esta vaga
+3. Gaps ou pontos de atencao
+4. Certificacoes e habilitacoes relevantes
+5. Experiencia especifica que se encaixa
+6. Recomendacao final (Recomendado / Parcialmente Recomendado / Nao Recomendado)"""
+
+        return await self.query(
+            db=db,
+            question=question,
+            filters={"candidate_id": candidate_id},
+            domain=domain or self._detect_query_domain(job_description)
+        )
+
+
+# Instancia global
 llm_query_service = LLMQueryService()

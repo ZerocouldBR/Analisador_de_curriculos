@@ -8,6 +8,7 @@ from app.schemas.candidate import CandidateResponse
 from app.services.embedding_service import embedding_service
 from app.services.llm_query_service import llm_query_service, QueryStatus
 from app.services.keyword_extraction_service import KeywordExtractionService
+from app.services.job_matching_service import JobMatchingService, JobCategory
 from app.core.dependencies import get_current_user, require_permission
 from app.db.models import User, Chunk
 
@@ -17,8 +18,8 @@ router = APIRouter(prefix="/search", tags=["search"])
 
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=3, description="Texto da busca")
-    limit: int = Field(default=10, ge=1, le=100, description="Número máximo de resultados")
-    threshold: float = Field(default=0.7, ge=0.0, le=1.0, description="Similaridade mínima")
+    limit: int = Field(default=10, ge=1, le=100, description="Numero maximo de resultados")
+    threshold: float = Field(default=0.7, ge=0.0, le=1.0, description="Similaridade minima")
 
 
 class SearchResult(BaseModel):
@@ -28,7 +29,7 @@ class SearchResult(BaseModel):
     city: Optional[str]
     state: Optional[str]
     score: float
-    highlight: str  # Trecho relevante do currículo
+    highlight: str
 
 
 class HybridSearchRequest(BaseModel):
@@ -44,16 +45,12 @@ async def semantic_search(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Busca semântica usando embeddings vetoriais
+    Busca semantica usando embeddings vetoriais
 
-    Encontra currículos semanticamente similares à query, mesmo que não contenham
+    Encontra curriculos semanticamente similares a query, mesmo que nao contenham
     as palavras exatas.
 
-    Exemplo:
-    - Query: "desenvolvedor python experiente"
-    - Pode encontrar: "programador sênior em Django com 5 anos de experiência"
-
-    **Requer:** Autenticação
+    **Requer:** Autenticacao
     """
     try:
         results = await embedding_service.semantic_search(
@@ -97,15 +94,15 @@ async def hybrid_search(
     current_user: User = Depends(require_permission("search.advanced"))
 ):
     """
-    Busca híbrida combinando múltiplas estratégias
+    Busca hibrida combinando multiplas estrategias
 
     Combina:
-    - **40%** Similaridade vetorial (semântica)
+    - **40%** Similaridade vetorial (semantica)
     - **30%** Busca full-text (palavras-chave)
-    - **20%** Filtros (cidade, skills, experiência)
-    - **10%** Experiência no domínio
+    - **20%** Filtros (cidade, skills, experiencia)
+    - **10%** Experiencia no dominio
 
-    **Requer permissão:** search.advanced
+    **Requer permissao:** search.advanced
     """
     try:
         results = await embedding_service.hybrid_search(
@@ -118,8 +115,6 @@ async def hybrid_search(
         search_results = []
 
         for candidate, score in results:
-            # Encontrar chunk mais relevante para highlight
-            from app.db.models import Chunk
             top_chunk = db.query(Chunk).filter(
                 Chunk.candidate_id == candidate.id
             ).first()
@@ -160,11 +155,9 @@ def search_by_skill(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Busca candidatos por skill específica
+    Busca candidatos por skill especifica
 
-    Busca full-text simples nos chunks de skills.
-
-    **Requer:** Autenticação
+    **Requer:** Autenticacao
     """
     from app.db.models import Chunk, Candidate
     from sqlalchemy import func
@@ -195,20 +188,22 @@ def search_by_skill(
 
 
 # ============================================
-# NOVOS ENDPOINTS: LLM Query com Retry
+# LLM Query com Retry
 # ============================================
 
 class LLMQueryRequest(BaseModel):
-    """Requisição para consulta ao LLM"""
-    question: str = Field(..., min_length=5, description="Pergunta sobre os currículos")
-    candidate_id: Optional[int] = Field(None, description="ID do candidato específico (opcional)")
+    question: str = Field(..., min_length=5, description="Pergunta sobre os curriculos")
+    candidate_id: Optional[int] = Field(None, description="ID do candidato especifico (opcional)")
     filters: Optional[Dict[str, Any]] = Field(None, description="Filtros adicionais")
-    max_retries: int = Field(default=5, ge=1, le=5, description="Máximo de tentativas (1-5)")
+    max_retries: int = Field(default=5, ge=1, le=5, description="Maximo de tentativas (1-5)")
     include_sources: bool = Field(default=True, description="Incluir fontes na resposta")
+    domain: Optional[str] = Field(
+        None,
+        description="Dominio especializado: production, logistics, quality, general (auto-detectado se nao informado)"
+    )
 
 
 class LLMQueryResponse(BaseModel):
-    """Resposta da consulta ao LLM"""
     status: str
     answer: str
     chunks_used: int
@@ -221,12 +216,11 @@ class LLMQueryResponse(BaseModel):
 
 
 class LLMRefinedQueryRequest(BaseModel):
-    """Requisição para consulta com refinamento"""
     question: str = Field(..., min_length=5)
     refinement_questions: Optional[List[str]] = Field(
         None,
         max_length=3,
-        description="Perguntas de follow-up (máx 3)"
+        description="Perguntas de follow-up (max 3)"
     )
     candidate_id: Optional[int] = None
     filters: Optional[Dict[str, Any]] = None
@@ -239,21 +233,18 @@ async def llm_query(
     current_user: User = Depends(require_permission("search.advanced"))
 ):
     """
-    Consulta inteligente ao LLM sobre currículos
+    Consulta inteligente ao LLM sobre curriculos
 
-    Características:
-    - **Busca semântica** para encontrar currículos relevantes
-    - **Retry automático** quando atinge limite de caracteres da API
-    - **Até 5 tentativas** com filtro progressivo de contexto
-    - **Palavras-chave indexadas** para melhor localização
+    O sistema detecta automaticamente o dominio da pergunta (producao, logistica,
+    qualidade ou geral) e usa prompts especializados.
 
-    O sistema automaticamente:
-    1. Busca os chunks mais relevantes
-    2. Envia para o LLM com contexto otimizado
-    3. Se atingir limite de tokens, filtra e tenta novamente
-    4. Retorna resposta mais completa possível
+    **Dominios disponiveis:**
+    - `production` - Producao industrial, manufatura, PCP, manutencao
+    - `logistics` - Logistica, armazem, supply chain, transporte
+    - `quality` - Qualidade, metrologia, ISO, Lean Six Sigma
+    - `general` - Geral (auto-detectado)
 
-    **Requer permissão:** search.advanced
+    **Requer permissao:** search.advanced
     """
     try:
         filters = request.filters or {}
@@ -265,7 +256,8 @@ async def llm_query(
             question=request.question,
             filters=filters if filters else None,
             max_retries=request.max_retries,
-            include_sources=request.include_sources
+            include_sources=request.include_sources,
+            domain=request.domain
         )
 
         return LLMQueryResponse(
@@ -296,21 +288,7 @@ async def llm_query_refined(
     """
     Consulta ao LLM com refinamento iterativo
 
-    Permite fazer perguntas de follow-up automaticamente
-    para obter respostas mais completas e detalhadas.
-
-    Exemplo:
-    ```json
-    {
-        "question": "Quais candidatos têm experiência com Python?",
-        "refinement_questions": [
-            "Qual o nível de experiência de cada um?",
-            "Algum tem certificações relacionadas?"
-        ]
-    }
-    ```
-
-    **Requer permissão:** search.advanced
+    **Requer permissao:** search.advanced
     """
     try:
         filters = request.filters or {}
@@ -334,11 +312,234 @@ async def llm_query_refined(
 
 
 # ============================================
-# ENDPOINTS: Extração de Keywords
+# LLM: Analise Candidato x Vaga
+# ============================================
+
+class CandidateJobAnalysisRequest(BaseModel):
+    candidate_id: int = Field(..., description="ID do candidato")
+    job_description: str = Field(..., min_length=10, description="Descricao da vaga")
+    domain: Optional[str] = Field(
+        None, description="Dominio: production, logistics, quality, general"
+    )
+
+
+@router.post("/llm/analyze-fit")
+async def analyze_candidate_job_fit(
+    request: CandidateJobAnalysisRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("search.advanced"))
+):
+    """
+    Analisa a aderencia de um candidato a uma vaga usando LLM
+
+    Retorna analise detalhada com:
+    - Aderencia geral (0-100%)
+    - Pontos fortes
+    - Gaps
+    - Certificacoes relevantes
+    - Recomendacao final
+
+    **Requer permissao:** search.advanced
+    """
+    try:
+        result = await llm_query_service.analyze_candidate_for_job(
+            db=db,
+            candidate_id=request.candidate_id,
+            job_description=request.job_description,
+            domain=request.domain
+        )
+
+        return {
+            "status": result.status.value,
+            "analysis": result.answer,
+            "confidence": result.confidence_score,
+            "chunks_used": result.chunks_used,
+            "domain": result.metadata.get("domain", "general"),
+            "sources": result.sources
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro na analise: {str(e)}"
+        )
+
+
+# ============================================
+# Job Matching - Producao e Logistica
+# ============================================
+
+class JobMatchRequest(BaseModel):
+    profile_key: Optional[str] = Field(
+        None,
+        description="Chave do perfil pre-definido (ex: operador_producao, auxiliar_logistica)"
+    )
+    custom_profile: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Perfil customizado com title, category, description, requirements"
+    )
+    limit: int = Field(default=20, ge=1, le=100)
+    min_score: float = Field(default=30.0, ge=0, le=100, description="Score minimo (0-100)")
+
+
+class JobMatchResult(BaseModel):
+    candidate_id: int
+    candidate_name: str
+    total_score: float
+    requirement_scores: Dict[str, float]
+    matched_keywords: List[str]
+    missing_requirements: List[str]
+    strengths: List[str]
+    gaps: List[str]
+    profile_type: str
+    metadata: Optional[Dict[str, Any]] = None
+
+
+@router.get("/job-profiles")
+async def list_job_profiles(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Lista perfis de vagas pre-definidos disponiveis
+
+    Perfis disponiveis para producao, logistica, qualidade e manutencao.
+
+    **Requer:** Autenticacao
+    """
+    profiles = JobMatchingService.get_preset_profiles()
+
+    return {
+        "profiles": {
+            key: {
+                "title": profile.title,
+                "category": profile.category.value,
+                "description": profile.description,
+                "requirements_count": len(profile.requirements),
+                "min_experience_years": profile.min_experience_years,
+                "requires_cnh": profile.requires_cnh,
+            }
+            for key, profile in profiles.items()
+        },
+        "categories": [c.value for c in JobCategory]
+    }
+
+
+@router.post("/job-match", response_model=List[JobMatchResult])
+async def match_candidates_to_job(
+    request: JobMatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("search.advanced"))
+):
+    """
+    Busca candidatos que se enquadram em um perfil de vaga
+
+    Pode usar perfis pre-definidos ou customizados.
+
+    **Perfis pre-definidos:**
+    - `operador_producao` - Operador de Producao
+    - `lider_producao` - Lider de Producao
+    - `operador_empilhadeira` - Operador de Empilhadeira
+    - `auxiliar_logistica` - Auxiliar de Logistica
+    - `analista_logistica` - Analista de Logistica
+    - `inspetor_qualidade` - Inspetor de Qualidade
+    - `mecanico_manutencao` - Mecanico de Manutencao
+    - `analista_pcp` - Analista de PCP
+
+    **Requer permissao:** search.advanced
+    """
+    try:
+        # Obter perfil
+        if request.profile_key:
+            profile = JobMatchingService.get_profile(request.profile_key)
+            if not profile:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Perfil '{request.profile_key}' nao encontrado. "
+                           f"Use GET /search/job-profiles para ver perfis disponiveis."
+                )
+        elif request.custom_profile:
+            profile = JobMatchingService.create_custom_profile(**request.custom_profile)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Informe profile_key ou custom_profile"
+            )
+
+        # Executar matching
+        matches = JobMatchingService.match_candidates(
+            db=db,
+            job_profile=profile,
+            limit=request.limit,
+            min_score=request.min_score
+        )
+
+        return [
+            JobMatchResult(
+                candidate_id=m.candidate_id,
+                candidate_name=m.candidate_name,
+                total_score=m.total_score,
+                requirement_scores=m.requirement_scores,
+                matched_keywords=m.matched_keywords,
+                missing_requirements=m.missing_requirements,
+                strengths=m.strengths,
+                gaps=m.gaps,
+                profile_type=m.profile_type,
+                metadata=m.metadata
+            )
+            for m in matches
+        ]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro no matching: {str(e)}"
+        )
+
+
+@router.get("/job-match/candidate/{candidate_id}/suggestions")
+async def suggest_jobs_for_candidate(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Sugere vagas para um candidato baseado em seu perfil
+
+    Avalia o curriculo contra todos os perfis pre-definidos e retorna
+    as melhores correspondencias.
+
+    **Requer:** Autenticacao
+    """
+    try:
+        suggestions = JobMatchingService.suggest_jobs_for_candidate(db, candidate_id)
+
+        if not suggestions:
+            return {
+                "candidate_id": candidate_id,
+                "suggestions": [],
+                "message": "Nenhuma sugestao encontrada. Verifique se o candidato possui curriculo processado."
+            }
+
+        return {
+            "candidate_id": candidate_id,
+            "suggestions": suggestions,
+            "total": len(suggestions)
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao sugerir vagas: {str(e)}"
+        )
+
+
+# ============================================
+# Extracao de Keywords
 # ============================================
 
 class KeywordExtractionRequest(BaseModel):
-    """Requisição para extração de keywords"""
     text: str = Field(..., min_length=10, description="Texto para extrair keywords")
 
 
@@ -350,17 +551,14 @@ async def extract_keywords(
     """
     Extrai palavras-chave estruturadas de um texto
 
-    Retorna:
-    - **keywords**: Lista de todas as palavras-chave
-    - **technical_skills**: Skills técnicas (linguagens, frameworks)
-    - **soft_skills**: Habilidades comportamentais
-    - **tools_and_frameworks**: Ferramentas e frameworks
-    - **domains**: Domínios de conhecimento
-    - **tfidf_terms**: Termos com maior relevância TF-IDF
-    - **ngrams**: N-gramas mais frequentes
-    - **search_index**: Índice otimizado para busca LLM
+    Retorna keywords categorizadas incluindo:
+    - Skills de TI, producao, logistica e qualidade
+    - Certificacoes (NRs, ISO, Lean)
+    - Sistemas ERP
+    - Habilitacoes
+    - Perfil do candidato (production, logistics, it, quality, general)
 
-    **Requer:** Autenticação
+    **Requer:** Autenticacao
     """
     try:
         keywords = KeywordExtractionService.extract_keywords(request.text)
@@ -369,7 +567,7 @@ async def extract_keywords(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro na extração de keywords: {str(e)}"
+            detail=f"Erro na extracao de keywords: {str(e)}"
         )
 
 
@@ -382,12 +580,9 @@ async def get_candidate_keywords(
     """
     Retorna as palavras-chave indexadas de um candidato
 
-    Obtém keywords do chunk de índice ou extrai do texto completo.
-
-    **Requer:** Autenticação
+    **Requer:** Autenticacao
     """
     try:
-        # Buscar chunk de keyword_index
         keyword_chunk = db.query(Chunk).filter(
             Chunk.candidate_id == candidate_id,
             Chunk.section == "keyword_index"
@@ -400,7 +595,6 @@ async def get_candidate_keywords(
                 "search_index": keyword_chunk.content
             }
 
-        # Se não tem chunk de keywords, buscar do full_text
         full_text_chunk = db.query(Chunk).filter(
             Chunk.candidate_id == candidate_id,
             Chunk.section == "full_text"
@@ -409,16 +603,15 @@ async def get_candidate_keywords(
         if not full_text_chunk:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Candidato {candidate_id} não encontrado ou sem currículo"
+                detail=f"Candidato {candidate_id} nao encontrado ou sem curriculo"
             )
 
-        # Extrair keywords do texto
         keywords = KeywordExtractionService.extract_keywords(full_text_chunk.content)
 
         return {
             "candidate_id": candidate_id,
             "keywords": keywords,
-            "note": "Keywords extraídas em tempo real (não indexadas)"
+            "note": "Keywords extraidas em tempo real (nao indexadas)"
         }
 
     except HTTPException:
@@ -439,13 +632,9 @@ async def reindex_candidate(
     """
     Reindexa as palavras-chave de um candidato
 
-    Atualiza os metadados de todos os chunks com
-    keywords e índices atualizados.
-
-    **Requer permissão:** candidates.write
+    **Requer permissao:** candidates.write
     """
     try:
-        # Buscar chunks do candidato
         chunks = db.query(Chunk).filter(
             Chunk.candidate_id == candidate_id
         ).all()
@@ -456,7 +645,6 @@ async def reindex_candidate(
                 detail=f"Nenhum chunk encontrado para candidato {candidate_id}"
             )
 
-        # Obter texto completo
         full_text_chunk = next(
             (c for c in chunks if c.section == "full_text"),
             None
@@ -465,15 +653,13 @@ async def reindex_candidate(
         if not full_text_chunk:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Candidato não possui chunk de texto completo"
+                detail="Candidato nao possui chunk de texto completo"
             )
 
-        # Extrair keywords do documento completo
         document_keywords = KeywordExtractionService.extract_keywords(
             full_text_chunk.content
         )
 
-        # Atualizar ou criar chunk de keyword_index
         keyword_chunk = next(
             (c for c in chunks if c.section == "keyword_index"),
             None
@@ -485,6 +671,16 @@ async def reindex_candidate(
                 "keywords": document_keywords["keywords"][:50],
                 "technical_skills": document_keywords["technical_skills"],
                 "soft_skills": document_keywords["soft_skills"],
+                "production_skills": document_keywords.get("production_skills", []),
+                "logistics_skills": document_keywords.get("logistics_skills", []),
+                "quality_skills": document_keywords.get("quality_skills", []),
+                "safety_certifications": document_keywords.get("safety_certifications", []),
+                "maintenance_skills": document_keywords.get("maintenance_skills", []),
+                "licenses": document_keywords.get("licenses", []),
+                "erp_systems": document_keywords.get("erp_systems", []),
+                "improvement_methods": document_keywords.get("improvement_methods", []),
+                "industry_sectors": document_keywords.get("industry_sectors", []),
+                "candidate_profile_type": document_keywords.get("candidate_profile_type", "general"),
                 "relevance_scores": document_keywords["relevance_scores"]
             }
         else:
@@ -503,12 +699,16 @@ async def reindex_candidate(
                         "keywords": document_keywords["keywords"][:50],
                         "technical_skills": document_keywords["technical_skills"],
                         "soft_skills": document_keywords["soft_skills"],
+                        "production_skills": document_keywords.get("production_skills", []),
+                        "logistics_skills": document_keywords.get("logistics_skills", []),
+                        "quality_skills": document_keywords.get("quality_skills", []),
+                        "safety_certifications": document_keywords.get("safety_certifications", []),
+                        "candidate_profile_type": document_keywords.get("candidate_profile_type", "general"),
                         "relevance_scores": document_keywords["relevance_scores"]
                     }
                 )
                 db.add(new_chunk)
 
-        # Atualizar metadados dos outros chunks
         total_chunks = len([c for c in chunks if c.section != "keyword_index"])
         for i, chunk in enumerate(chunks):
             if chunk.section == "keyword_index":
@@ -522,7 +722,6 @@ async def reindex_candidate(
                 total_chunks=total_chunks
             )
 
-            # Merge com metadados existentes
             if chunk.meta_json:
                 chunk.meta_json.update(chunk_meta)
             else:
@@ -535,8 +734,14 @@ async def reindex_candidate(
             "candidate_id": candidate_id,
             "chunks_updated": len(chunks),
             "keywords_extracted": len(document_keywords["keywords"]),
+            "profile_type": document_keywords.get("candidate_profile_type", "general"),
             "technical_skills": document_keywords["technical_skills"],
-            "soft_skills": document_keywords["soft_skills"]
+            "soft_skills": document_keywords["soft_skills"],
+            "production_skills": document_keywords.get("production_skills", []),
+            "logistics_skills": document_keywords.get("logistics_skills", []),
+            "quality_skills": document_keywords.get("quality_skills", []),
+            "safety_certifications": document_keywords.get("safety_certifications", []),
+            "relevance_scores": document_keywords.get("relevance_scores", {})
         }
 
     except HTTPException:
