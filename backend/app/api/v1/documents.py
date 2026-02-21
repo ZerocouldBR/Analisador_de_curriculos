@@ -6,6 +6,7 @@ from app.db.database import get_db
 from app.schemas.candidate import DocumentResponse
 from app.services.document_service import DocumentService
 from app.core.dependencies import get_current_user, require_permission
+from app.core.config import settings
 from app.db.models import User
 
 
@@ -31,6 +32,17 @@ async def upload_resume(
 
     **Requer permissão:** documents.create
     """
+    # Validate file size
+    max_size = settings.max_upload_size_mb * 1024 * 1024
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Arquivo excede o limite de {settings.max_upload_size_mb}MB"
+        )
+    # Reset file for downstream processing
+    await file.seek(0)
+
     try:
         document = await DocumentService.upload_resume(
             db,

@@ -100,6 +100,13 @@ class StorageService:
 
         return relative_path, sha256_hash
 
+    def _validate_path(self, resolved: Path) -> None:
+        """Ensures the resolved path is inside base_path (prevents path traversal)."""
+        try:
+            resolved.relative_to(self.base_path.resolve())
+        except ValueError:
+            raise ValueError("Caminho inválido: acesso fora do diretório de storage não permitido")
+
     def get_absolute_path(self, relative_path: str) -> Path:
         """
         Converte caminho relativo para absoluto
@@ -109,8 +116,13 @@ class StorageService:
 
         Returns:
             Caminho absoluto
+
+        Raises:
+            ValueError: Se caminho aponta para fora do base_path
         """
-        return self.base_path / relative_path
+        absolute = (self.base_path / relative_path).resolve()
+        self._validate_path(absolute)
+        return absolute
 
     def file_exists(self, relative_path: str) -> bool:
         """Verifica se arquivo existe"""

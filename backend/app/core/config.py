@@ -14,6 +14,24 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(default="redis://localhost:6379/0")
 
+    # Security Configuration
+    secret_key: str = Field(
+        ...,
+        description="Secret key for JWT signing. MUST be set via SECRET_KEY env var."
+    )
+    algorithm: str = Field(default="HS256", description="JWT signing algorithm")
+    access_token_expire_minutes: int = Field(default=30, description="Access token TTL in minutes")
+    refresh_token_expire_days: int = Field(default=7, description="Refresh token TTL in days")
+
+    # CORS Configuration
+    cors_origins: list[str] = Field(
+        default=["http://localhost:3000"],
+        description="Allowed CORS origins"
+    )
+
+    # Upload Configuration
+    max_upload_size_mb: int = Field(default=20, description="Max file upload size in MB")
+
     # OpenAI Configuration
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     embedding_model: str = Field(default="text-embedding-3-small")
