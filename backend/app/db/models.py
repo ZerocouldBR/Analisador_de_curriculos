@@ -1,9 +1,5 @@
 from datetime import datetime, timezone
 
-
-def _utcnow():
-    """Returns timezone-aware UTC datetime."""
-    return datetime.now(timezone.utc)
 from sqlalchemy import (
     Column,
     Integer,
@@ -22,6 +18,11 @@ from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 
 from app.db.database import Base
+
+
+def _utcnow():
+    """Returns timezone-aware UTC datetime."""
+    return datetime.now(timezone.utc)
 
 
 # Tabela de associação User-Role (many-to-many)
