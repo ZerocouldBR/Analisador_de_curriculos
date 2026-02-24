@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 import httpx
 from bs4 import BeautifulSoup
@@ -61,7 +61,7 @@ class LinkedInService:
                     "skills": [],
                     "certifications": [],
                     "languages": [],
-                    "extracted_at": datetime.utcnow().isoformat()
+                    "extracted_at": datetime.now(timezone.utc).isoformat()
                 }
 
                 # NOTA: O LinkedIn usa conteúdo dinâmico (JavaScript/React)

@@ -3,7 +3,7 @@ from fastapi import UploadFile
 from typing import Optional, BinaryIO
 import io
 
-from app.db.models import Document, Candidate, Chunk, AuditLog
+from app.db.models import Document, Candidate, Chunk, Embedding, AuditLog
 from app.services.storage_service import storage_service
 from app.services.text_extraction_service import TextExtractionService
 from app.services.resume_parser_service import ResumeParserService
@@ -43,27 +43,13 @@ class DocumentService:
         # Calcular hash
         sha256_hash = storage_service.calculate_sha256(file_bytes)
 
-        # Verificar se documento já existe (deduplicação)
-        existing_doc = db.query(Document).filter(
-            Document.sha256_hash == sha256_hash
-        ).first()
-
-        if existing_doc:
-            # Documento duplicado
-            if candidate_id and existing_doc.candidate_id != candidate_id:
-                # Criar referência para outro candidato
-                new_doc = Document(
-                    candidate_id=candidate_id,
-                    original_filename=file.filename,
-                    mime_type=storage_service.get_mime_type(file.filename),
-                    source_path=existing_doc.source_path,
-                    sha256_hash=sha256_hash
-                )
-                db.add(new_doc)
-                db.commit()
-                db.refresh(new_doc)
-                return new_doc
-            else:
+        # Verificar se documento já existe para o mesmo candidato (deduplicação)
+        if candidate_id:
+            existing_doc = db.query(Document).filter(
+                Document.sha256_hash == sha256_hash,
+                Document.candidate_id == candidate_id
+            ).first()
+            if existing_doc:
                 return existing_doc
 
         # Salvar no storage
@@ -159,7 +145,24 @@ class DocumentService:
             candidate.full_name = resume_data["personal_info"]["name"]
             candidate.email = resume_data["personal_info"].get("email")
             candidate.phone = resume_data["personal_info"].get("phone")
+            if resume_data["personal_info"].get("cpf"):
+                candidate.doc_id = resume_data["personal_info"]["cpf"]
             db.commit()
+
+        # Clear old chunks and their embeddings for this document (safe reprocessing)
+        old_chunk_ids = [
+            c.id for c in db.query(Chunk.id).filter(
+                Chunk.document_id == document.id
+            ).all()
+        ]
+        if old_chunk_ids:
+            db.query(Embedding).filter(
+                Embedding.chunk_id.in_(old_chunk_ids)
+            ).delete(synchronize_session=False)
+        db.query(Chunk).filter(
+            Chunk.document_id == document.id
+        ).delete(synchronize_session=False)
+        db.flush()
 
         # Criar chunks por seção
         sections = [
@@ -172,16 +175,18 @@ class DocumentService:
             ("certifications", ", ".join(resume_data.get("certifications", []))),
         ]
 
+        chunks_created = 0
         for section_name, section_content in sections:
             if section_content.strip():
                 chunk = Chunk(
                     document_id=document.id,
                     candidate_id=document.candidate_id,
                     section=section_name,
-                    content=section_content[:10000],  # Limitar tamanho
+                    content=section_content[:10000],
                     meta_json=resume_data if section_name == "full_text" else {}
                 )
                 db.add(chunk)
+                chunks_created += 1
 
         db.commit()
 
@@ -191,7 +196,7 @@ class DocumentService:
             action="process_document",
             entity="document",
             entity_id=document.id,
-            metadata_json={"sections_created": len(sections)}
+            metadata_json={"sections_created": chunks_created}
         )
         db.add(audit)
         db.commit()
