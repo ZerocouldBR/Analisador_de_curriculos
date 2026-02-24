@@ -1,69 +1,62 @@
-# 🎯 Analisador de Currículos (On-Premises)
+# Analisador de Curriculos (On-Premises)
 
-Sistema completo de RH on-premises para ingestão, análise, indexação vetorial e busca inteligente de currículos.
+Sistema completo de RH on-premises para ingestao, analise, indexacao vetorial e busca inteligente de curriculos.
 
-## ✨ Funcionalidades Implementadas
+## Funcionalidades Implementadas
 
 ### Backend (FastAPI)
-- ✅ **Autenticação JWT** com RBAC completo
-- ✅ **Upload de currículos** (PDF, DOCX, TXT, imagens com OCR)
-- ✅ **Processamento assíncrono** com Celery
-- ✅ **WebSocket** para atualizações em tempo real
-- ✅ **Busca semântica** com embeddings OpenAI
-- ✅ **Busca híbrida** (semântica + texto completo + filtros)
-- ✅ **LinkedIn integration** para enriquecimento de perfis
-- ✅ **LGPD compliance** com auditoria completa
-- ✅ **Configurações dinâmicas** e prompts LLM customizáveis
-- ✅ **API documentada** com OpenAPI/Swagger
+- Autenticacao JWT com RBAC completo (admin, recruiter, viewer)
+- Upload de curriculos (PDF, DOCX, TXT, imagens com OCR avancado)
+- Processamento assincrono com Celery
+- WebSocket para atualizacoes em tempo real
+- Busca semantica com embeddings OpenAI
+- Busca hibrida (semantica + texto completo + filtros)
+- LinkedIn integration para enriquecimento de perfis
+- LGPD compliance com auditoria completa
+- Configuracoes dinamicas e prompts LLM customizaveis
+- API documentada com OpenAPI/Swagger
+- Extracao automatica de experiencias profissionais para tabela dedicada
+- Snapshot de perfis de candidatos versionado
 
 ### Frontend (React + TypeScript)
-- ✅ **Interface completa** em Material-UI
-- ✅ **Dashboard** com estatísticas e métricas
-- ✅ **Gerenciamento de candidatos** (CRUD completo)
-- ✅ **Upload com drag & drop** e progresso em tempo real
-- ✅ **Busca inteligente** com highlight de resultados
-- ✅ **Administração** de funções e permissões
-- ✅ **Configurações** do sistema
-- ✅ **WebSocket** para notificações instantâneas
+- Interface completa em Material-UI
+- Dashboard com estatisticas e metricas
+- Gerenciamento de candidatos (CRUD completo)
+- Upload com drag & drop e progresso em tempo real
+- Busca inteligente com highlight de resultados
+- Administracao de funcoes e permissoes
+- Configuracoes do sistema
+- WebSocket para notificacoes instantaneas
 
 ### Infraestrutura
-- ✅ **Docker Compose** completo com 8 serviços
-- ✅ **Celery** para processamento em background
-- ✅ **Flower** para monitoramento de tarefas
-- ✅ **Prometheus** para coleta de métricas
-- ✅ **Grafana** com dashboards customizados
-- ✅ **PostgreSQL** com pgvector
-- ✅ **Redis** para cache e filas
+- Docker Compose completo com 8 servicos
+- Celery para processamento em background
+- Flower para monitoramento de tarefas
+- Prometheus para coleta de metricas
+- Grafana com dashboards customizados
+- PostgreSQL 16 com pgvector
+- Redis para cache e filas
 
-## Entregas por etapa
-
-1. ✅ **Etapa 1**: Arquitetura, modelo de dados e fluxos do pipeline
-2. ✅ **Etapa 2**: Scaffold do repositório + docker-compose
-3. ✅ **Etapa 3**: Ingestão + OCR + jobs + UI de progresso
-4. ✅ **Etapa 4**: Indexação vetorial + busca híbrida + filtros
-5. ✅ **Etapa 5**: Chat RAG + evidências + prompts configuráveis
-6. ✅ **Etapa 6**: RBAC + auditoria + LGPD + console admin
-7. ✅ **Etapa 7**: Frontend React + WebSocket + Monitoramento
-
-## 📁 Estrutura do Projeto
+## Estrutura do Projeto
 
 ```
 analisador-curriculos/
 ├── backend/              # API FastAPI
 │   ├── app/
-│   │   ├── api/         # Endpoints REST
-│   │   ├── core/        # Configuração e segurança
-│   │   ├── db/          # Modelos e migrations
-│   │   ├── schemas/     # Validação Pydantic
-│   │   ├── services/    # Lógica de negócio
-│   │   └── tasks/       # Tarefas Celery
+│   │   ├── api/         # Endpoints REST (v1/)
+│   │   │   └── v1/     # auth, candidates, documents, linkedin, search, settings, websocket
+│   │   ├── core/        # Configuracao, seguranca, celery, websocket
+│   │   ├── db/          # Models, database, init_db, init_roles
+│   │   ├── schemas/     # Validacao Pydantic
+│   │   ├── services/    # Logica de negocio
+│   │   └── tasks/       # Tarefas Celery (document_tasks)
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/            # Interface React
 │   ├── src/
-│   │   ├── components/  # Componentes reutilizáveis
+│   │   ├── components/  # Componentes reutilizaveis
 │   │   ├── contexts/    # Contextos React
-│   │   ├── pages/       # Páginas da aplicação
+│   │   ├── pages/       # Paginas da aplicacao
 │   │   ├── services/    # API e WebSocket clients
 │   │   └── types/       # TypeScript types
 │   ├── package.json
@@ -73,25 +66,26 @@ analisador-curriculos/
 │   └── grafana/
 │       ├── dashboards/
 │       └── datasources/
-├── docs/               # Documentação
+├── docs/               # Documentacao
 │   ├── arquitetura.md
 │   ├── modelo_dados.md
+│   ├── fluxos.md
 │   └── novas_implementacoes.md
-└── docker-compose.yml  # Orquestração completa
+└── docker-compose.yml  # Orquestracao completa
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
-### Iniciar todos os serviços (Recomendado)
+### Iniciar todos os servicos (Recomendado)
 
 ```bash
-# 1. Clonar repositório
+# 1. Clonar repositorio
 git clone https://github.com/ZerocouldBR/Analisador_de_curriculos.git
 cd Analisador_de_curriculos
 
 # 2. Configurar ambiente
 cp backend/.env.example backend/.env
-# Edite backend/.env com suas configurações
+# Edite backend/.env com suas configuracoes
 
 # 3. Iniciar stack completa
 docker-compose up -d
@@ -103,16 +97,16 @@ docker-compose ps
 docker-compose logs -f
 ```
 
-### Acessar serviços
+### Acessar servicos
 
-| Serviço | URL | Descrição |
+| Servico | URL | Descricao |
 |---------|-----|-----------|
-| **Frontend** | http://localhost:3000 | Interface React |
-| **API** | http://localhost:8000 | Backend FastAPI |
-| **API Docs** | http://localhost:8000/docs | Swagger UI |
-| **Flower** | http://localhost:5555 | Monitor Celery |
-| **Prometheus** | http://localhost:9090 | Métricas |
-| **Grafana** | http://localhost:3001 | Dashboards (admin/admin) |
+| Frontend | http://localhost:3000 | Interface React |
+| API | http://localhost:8000 | Backend FastAPI |
+| API Docs | http://localhost:8000/docs | Swagger UI |
+| Flower | http://localhost:5555 | Monitor Celery |
+| Prometheus | http://localhost:9090 | Metricas |
+| Grafana | http://localhost:3001 | Dashboards (admin/admin) |
 
 ### Desenvolvimento Local
 
@@ -138,78 +132,70 @@ cd backend
 celery -A app.core.celery_app worker --loglevel=info
 ```
 
-## 📖 Documentação
+## Modelo de Dados
 
-- [Arquitetura do Sistema](docs/arquitetura.md)
-- [Modelo de Dados](docs/modelo_dados.md)
-- [Novas Implementações](docs/novas_implementacoes.md)
-- [Frontend README](frontend/README.md)
-- [Backend README](backend/README.md)
+O sistema utiliza PostgreSQL 16 com a extensao pgvector para busca vetorial. Principais tabelas:
 
-## 🎯 Principais Funcionalidades
+- **users / roles / user_roles** - Autenticacao e RBAC
+- **candidates** - Dados pessoais dos candidatos (PII protegida)
+- **candidate_profiles** - Snapshots versionados do curriculo parseado
+- **documents** - Arquivos de curriculo (PDF, DOCX, etc.)
+- **chunks** - Secoes extraidas com metadados enriquecidos
+- **embeddings** - Vetores para busca semantica (pgvector)
+- **experiences** - Experiencias profissionais estruturadas
+- **external_enrichments** - Dados de fontes externas (LinkedIn)
+- **server_settings** - Configuracoes dinamicas do sistema
+- **audit_logs** - Registro completo de operacoes (LGPD)
 
-### 1. Upload de Currículos com Progresso em Tempo Real
-- Drag & drop de arquivos
-- Suporte a múltiplos formatos (PDF, DOCX, TXT, imagens)
-- OCR automático para imagens
-- Progresso em tempo real via WebSocket
-- Processamento assíncrono com Celery
+Para detalhes completos, veja [docs/modelo_dados.md](docs/modelo_dados.md).
 
-### 2. Busca Inteligente
-- **Busca semântica** usando embeddings OpenAI
-- **Busca híbrida** combinando:
-  - 40% similaridade semântica
-  - 30% busca de texto completo
-  - 20% filtros estruturados
-  - 10% domínio de conhecimento
-- Highlight de trechos relevantes
-- Score de relevância
+## Pipeline de Processamento
 
-### 3. Gerenciamento de Candidatos
-- CRUD completo
-- Perfis detalhados
-- Histórico de documentos
-- Filtros por localização
+1. **Upload**: Arquivo enviado via API com deduplicacao por SHA-256
+2. **Extracao de Texto**: PDF (pdfplumber), DOCX (python-docx), OCR (Tesseract) com preprocessamento avancado
+3. **Parsing**: Extracao estruturada de dados pessoais, experiencias, formacao, habilidades, certificacoes
+4. **Atualizacao**: Candidato atualizado com dados extraidos (nome, email, CPF, etc.)
+5. **Experiencias**: Tabela `experiences` populada com historico profissional
+6. **Perfil**: Snapshot salvo em `candidate_profiles`
+7. **Chunks**: Secoes criadas com metadados (keywords, perfil industrial)
+8. **Embeddings**: Vetores gerados sob demanda para busca semantica
 
-### 4. Monitoramento
-- Dashboard com métricas em tempo real
-- Grafana com visualizações customizadas
-- Prometheus para coleta de métricas
-- Flower para monitorar tarefas Celery
+## Busca Inteligente
 
-### 5. Segurança e Compliance
-- Autenticação JWT
-- RBAC com permissões granulares
-- Auditoria completa de operações
-- LGPD compliance
+O sistema suporta busca hibrida combinando:
+- **40%** Similaridade semantica (embeddings + pgvector)
+- **30%** Busca de texto completo (tsvector Portuguese)
+- **20%** Filtros estruturados (cidade, estado, habilidades)
+- **10%** Dominio de conhecimento (producao, logistica, TI)
 
-## 🛠️ Tecnologias
+## Seguranca e Compliance
 
-**Backend:**
-- FastAPI 0.115
-- PostgreSQL 16 + pgvector
-- Redis 7
-- Celery 5.3
-- OpenAI API (embeddings)
-- Tesseract OCR
+### RBAC (Role-Based Access Control)
 
-**Frontend:**
-- React 18
-- TypeScript 5
-- Material-UI 5
-- Axios
-- WebSocket
-- React Router 6
+| Role | Descricao |
+|------|-----------|
+| admin | Acesso completo ao sistema |
+| recruiter | CRUD de candidatos/docs, LinkedIn, busca avancada |
+| viewer | Apenas leitura |
 
-**Infraestrutura:**
-- Docker & Docker Compose
-- Prometheus
-- Grafana
-- Flower
+### Permissoes Granulares
 
-## 🔧 Configuração
+Todos os endpoints de escrita requerem autenticacao JWT e permissoes especificas:
+- `candidates.*` - Operacoes com candidatos
+- `documents.*` - Operacoes com documentos
+- `settings.*` - Configuracoes do sistema
+- `linkedin.enrich` - Enriquecimento via LinkedIn
+- `search.advanced` - Busca avancada
+- `users.manage` - Gerenciamento de usuarios
 
-### Variáveis de Ambiente
+### LGPD
+- Auditoria completa de todas as operacoes
+- Remocao em cascata de dados pessoais
+- Separacao de PII
+
+## Configuracao
+
+### Variaveis de Ambiente
 
 **Backend (`.env`):**
 ```env
@@ -217,7 +203,7 @@ APP_VERSION=0.3.0
 DATABASE_URL=postgresql+psycopg://analisador:analisador@db:5432/analisador_curriculos
 REDIS_URL=redis://redis:6379/0
 SECRET_KEY=your-secret-key-here
-OPENAI_API_KEY=sk-... (opcional)
+OPENAI_API_KEY=sk-... (opcional, para embeddings)
 ```
 
 **Frontend (`.env`):**
@@ -226,7 +212,7 @@ REACT_APP_API_URL=http://localhost:8000
 REACT_APP_WS_URL=ws://localhost:8000
 ```
 
-## 🧪 Testes
+## Testes
 
 ```bash
 # Backend
@@ -238,34 +224,34 @@ cd frontend
 npm test
 ```
 
-## 📊 Monitoramento
+## Monitoramento
 
 ### Prometheus
-Acesse http://localhost:9090 para queries de métricas.
+Acesse http://localhost:9090 para queries de metricas.
 
 ### Grafana
 1. Acesse http://localhost:3001
 2. Login: admin/admin
-3. Dashboard "Analisador de Currículos - System Dashboard"
+3. Dashboard "Analisador de Curriculos - System Dashboard"
 
-Métricas disponíveis:
-- Taxa de requisições da API
+Metricas disponiveis:
+- Taxa de requisicoes da API
 - Tempo de resposta (p95, p99)
 - Tarefas Celery ativas
 - Taxa de sucesso de tarefas
-- Conexões do banco de dados
-- Uso de memória do Redis
+- Conexoes do banco de dados
+- Uso de memoria do Redis
 - Upload rate
 - WebSocket connections
 
-## 🤝 Contribuindo
+## Tecnologias
 
-1. Fork o projeto
-2. Crie uma branch (`git checkout -b feature/nova-funcionalidade`)
-3. Commit suas mudanças (`git commit -m 'Add nova funcionalidade'`)
-4. Push para a branch (`git push origin feature/nova-funcionalidade`)
-5. Abra um Pull Request
+**Backend:** FastAPI 0.115, PostgreSQL 16 + pgvector, Redis 7, Celery 5.3, OpenAI API, Tesseract OCR
 
-## 📝 Licença
+**Frontend:** React 18, TypeScript 5, Material-UI 5, Axios, WebSocket, React Router 6
+
+**Infraestrutura:** Docker & Docker Compose, Prometheus, Grafana, Flower
+
+## Licenca
 
 MIT

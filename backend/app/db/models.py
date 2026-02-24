@@ -42,7 +42,7 @@ class Role(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, nullable=False, index=True)
     description = Column(Text)
-    permissions = Column(JSONB, default={})  # Armazena permissões granulares
+    permissions = Column(JSONB, default=dict)  # Armazena permissões granulares
     created_at = Column(DateTime, default=_utcnow)
 
     # Relacionamentos
@@ -112,7 +112,7 @@ class Document(Base):
     original_filename = Column(String, nullable=False)
     mime_type = Column(String)
     source_path = Column(String)  # Caminho no NAS/MinIO
-    sha256_hash = Column(String, unique=True, index=True)  # Para deduplicação
+    sha256_hash = Column(String, index=True)  # Indexado para deduplicação (não unique: mesmo arquivo pode ser associado a candidatos diferentes)
     uploaded_at = Column(DateTime, default=_utcnow)
 
     # Relacionamentos

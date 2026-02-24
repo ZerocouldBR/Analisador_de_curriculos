@@ -71,7 +71,7 @@ def create_candidate(
 
     **Requer permissão:** candidates.create
     """
-    return CandidateService.create_candidate(db, candidate)
+    return CandidateService.create_candidate(db, candidate, user_id=current_user.id)
 
 
 @router.put("/{candidate_id}", response_model=CandidateResponse)
@@ -86,7 +86,7 @@ def update_candidate(
 
     **Requer permissão:** candidates.update
     """
-    updated = CandidateService.update_candidate(db, candidate_id, candidate_update)
+    updated = CandidateService.update_candidate(db, candidate_id, candidate_update, user_id=current_user.id)
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -115,7 +115,7 @@ def delete_candidate(
 
     **Requer permissão:** candidates.delete
     """
-    deleted = CandidateService.delete_candidate(db, candidate_id)
+    deleted = CandidateService.delete_candidate(db, candidate_id, user_id=current_user.id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -165,7 +165,7 @@ def delete_document(
 
     **Requer permissão:** documents.delete
     """
-    deleted = CandidateService.delete_document(db, document_id)
+    deleted = CandidateService.delete_document(db, document_id, user_id=current_user.id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

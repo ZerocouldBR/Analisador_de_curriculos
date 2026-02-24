@@ -11,6 +11,8 @@ from app.schemas.settings import (
     PromptConfigUpdate
 )
 from app.services.settings_service import SettingsService
+from app.core.dependencies import require_permission
+from app.db.models import User
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -19,16 +21,29 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 def list_settings(
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("settings.read"))
 ):
-    """Lista todas as configurações do servidor"""
+    """
+    Lista todas as configurações do servidor
+
+    **Requer permissão:** settings.read
+    """
     settings = SettingsService.get_all_settings(db, skip=skip, limit=limit)
     return settings
 
 
 @router.get("/{key}", response_model=SettingResponse)
-def get_setting(key: str, db: Session = Depends(get_db)):
-    """Obtém uma configuração específica por chave"""
+def get_setting(
+    key: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("settings.read"))
+):
+    """
+    Obtém uma configuração específica por chave
+
+    **Requer permissão:** settings.read
+    """
     setting = SettingsService.get_setting(db, key)
     if not setting:
         raise HTTPException(
@@ -42,9 +57,13 @@ def get_setting(key: str, db: Session = Depends(get_db)):
 def create_setting(
     setting: SettingCreate,
     db: Session = Depends(get_db),
-    # TODO: Adicionar autenticação e obter user_id do token
+    current_user: User = Depends(require_permission("settings.create"))
 ):
-    """Cria uma nova configuração"""
+    """
+    Cria uma nova configuração
+
+    **Requer permissão:** settings.create
+    """
     # Verificar se já existe
     existing = SettingsService.get_setting(db, setting.key)
     if existing:
@@ -53,7 +72,7 @@ def create_setting(
             detail=f"Configuração '{setting.key}' já existe"
         )
 
-    return SettingsService.create_setting(db, setting)
+    return SettingsService.create_setting(db, setting, user_id=current_user.id)
 
 
 @router.put("/{key}", response_model=SettingResponse)
@@ -61,10 +80,14 @@ def update_setting(
     key: str,
     setting_update: SettingUpdate,
     db: Session = Depends(get_db),
-    # TODO: Adicionar autenticação e obter user_id do token
+    current_user: User = Depends(require_permission("settings.update"))
 ):
-    """Atualiza uma configuração existente"""
-    updated = SettingsService.update_setting(db, key, setting_update)
+    """
+    Atualiza uma configuração existente
+
+    **Requer permissão:** settings.update
+    """
+    updated = SettingsService.update_setting(db, key, setting_update, user_id=current_user.id)
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -77,10 +100,14 @@ def update_setting(
 def delete_setting(
     key: str,
     db: Session = Depends(get_db),
-    # TODO: Adicionar autenticação e obter user_id do token
+    current_user: User = Depends(require_permission("settings.delete"))
 ):
-    """Remove uma configuração"""
-    deleted = SettingsService.delete_setting(db, key)
+    """
+    Remove uma configuração
+
+    **Requer permissão:** settings.delete
+    """
+    deleted = SettingsService.delete_setting(db, key, user_id=current_user.id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -91,8 +118,15 @@ def delete_setting(
 # Endpoints específicos para prompts do chat LLM
 
 @router.get("/prompts/chat", response_model=PromptConfigBase)
-def get_chat_prompts(db: Session = Depends(get_db)):
-    """Obtém a configuração de prompts do chat LLM"""
+def get_chat_prompts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("settings.read"))
+):
+    """
+    Obtém a configuração de prompts do chat LLM
+
+    **Requer permissão:** settings.read
+    """
     setting = SettingsService.get_or_create_prompt_config(db)
     return PromptConfigBase(**setting.value_json)
 
@@ -101,9 +135,13 @@ def get_chat_prompts(db: Session = Depends(get_db)):
 def update_chat_prompts(
     prompt_config: PromptConfigUpdate,
     db: Session = Depends(get_db),
-    # TODO: Adicionar autenticação e obter user_id do token
+    current_user: User = Depends(require_permission("settings.update"))
 ):
-    """Atualiza a configuração de prompts do chat LLM"""
+    """
+    Atualiza a configuração de prompts do chat LLM
+
+    **Requer permissão:** settings.update
+    """
     # Obter configuração atual
     setting = SettingsService.get_or_create_prompt_config(db)
 
@@ -114,7 +152,7 @@ def update_chat_prompts(
 
     # Salvar atualização
     setting_update = SettingUpdate(value_json=current_config)
-    updated = SettingsService.update_setting(db, "chat_llm_prompts", setting_update)
+    updated = SettingsService.update_setting(db, "chat_llm_prompts", setting_update, user_id=current_user.id)
 
     return PromptConfigBase(**updated.value_json)
 
@@ -122,13 +160,17 @@ def update_chat_prompts(
 @router.post("/prompts/chat/reset", response_model=PromptConfigBase)
 def reset_chat_prompts(
     db: Session = Depends(get_db),
-    # TODO: Adicionar autenticação e obter user_id do token
+    current_user: User = Depends(require_permission("settings.update"))
 ):
-    """Restaura os prompts do chat LLM para os valores padrão"""
+    """
+    Restaura os prompts do chat LLM para os valores padrão
+
+    **Requer permissão:** settings.update
+    """
     key = "chat_llm_prompts"
 
     # Deletar configuração atual se existir
-    SettingsService.delete_setting(db, key)
+    SettingsService.delete_setting(db, key, user_id=current_user.id)
 
     # Recriar com valores padrão
     setting = SettingsService.get_or_create_prompt_config(db)

@@ -7,7 +7,9 @@ Enhanced with:
 - Structured metadata indexing with industry profiles
 - Optimized chunking for LLM retrieval
 - Safety certifications, licenses, equipment extraction
+- Experience table population from parsed data
 """
+import re
 import logging
 from celery import Task
 from sqlalchemy.orm import Session
@@ -16,7 +18,7 @@ import asyncio
 
 from app.core.celery_app import celery_app
 from app.db.database import SessionLocal
-from app.db.models import Document, Candidate, Chunk, AuditLog
+from app.db.models import Document, Candidate, Chunk, Embedding, Experience, CandidateProfile, AuditLog
 from app.services.storage_service import storage_service
 from app.services.text_extraction_service import TextExtractionService
 from app.services.resume_parser_service import ResumeParserService
@@ -57,8 +59,11 @@ def process_document_task(
     2. Parse resume structure
     3. Extract production/logistics specific data
     4. Extract and categorize keywords
-    5. Create optimized chunks with metadata
-    6. Index for LLM retrieval
+    5. Clear old chunks/embeddings (for reprocessing)
+    6. Create optimized chunks with metadata
+    7. Populate Experience table
+    8. Create CandidateProfile snapshot
+    9. Index for LLM retrieval
 
     Args:
         document_id: ID of the document to process
@@ -140,11 +145,25 @@ def process_document_task(
             if personal.get("phone"):
                 candidate.phone = personal["phone"]
 
+            # Update CPF/document ID
+            if personal.get("cpf"):
+                candidate.doc_id = personal["cpf"]
+
+            # Update birth date
+            if personal.get("birth_date"):
+                try:
+                    from dateutil.parser import parse as parse_date
+                    candidate.birth_date = parse_date(
+                        personal["birth_date"], dayfirst=True
+                    ).date()
+                except (ValueError, TypeError):
+                    logger.warning(
+                        f"Could not parse birth_date: {personal['birth_date']}"
+                    )
+
             # Update location from resume
             if personal.get("location"):
                 location = personal["location"]
-                # Try to extract city and state
-                import re
                 loc_match = re.match(
                     r'([A-ZÁÉÍÓÚÂÊÔÃÕÇa-záéíóúâêôãõç\s]+),?\s*[-–]?\s*([A-Z]{2})',
                     location
@@ -155,7 +174,59 @@ def process_document_task(
 
             db.commit()
 
-        _send_progress(document_id, "processing", 60, "Dados do candidato atualizados")
+        _send_progress(document_id, "processing", 58, "Dados do candidato atualizados")
+
+        # ============================================
+        # STEP 4b: Populate Experience Table
+        # ============================================
+        if candidate and resume_data.get("experiences"):
+            # Remove old experiences from this document's parsing
+            db.query(Experience).filter(
+                Experience.candidate_id == candidate.id
+            ).delete(synchronize_session=False)
+
+            for exp_data in resume_data["experiences"]:
+                start_date = None
+                end_date = None
+
+                # Parse dates
+                if exp_data.get("start_date"):
+                    try:
+                        from dateutil.parser import parse as parse_date
+                        start_date = parse_date(
+                            exp_data["start_date"], dayfirst=True
+                        ).date()
+                    except (ValueError, TypeError):
+                        pass
+
+                if exp_data.get("end_date"):
+                    end_val = exp_data["end_date"].lower()
+                    if end_val not in ("atual", "presente", "current"):
+                        try:
+                            from dateutil.parser import parse as parse_date
+                            end_date = parse_date(
+                                exp_data["end_date"], dayfirst=True
+                            ).date()
+                        except (ValueError, TypeError):
+                            pass
+
+                description = exp_data.get("description", "")
+                if isinstance(description, list):
+                    description = "\n".join(description)
+
+                experience = Experience(
+                    candidate_id=candidate.id,
+                    company_name=exp_data.get("company"),
+                    title=exp_data.get("title"),
+                    start_date=start_date,
+                    end_date=end_date,
+                    description=description,
+                )
+                db.add(experience)
+
+            db.commit()
+
+        _send_progress(document_id, "processing", 60, "Experiencias salvas no banco de dados")
 
         # ============================================
         # STEP 5: Extract Keywords (Enhanced)
@@ -173,9 +244,26 @@ def process_document_task(
         )
 
         # ============================================
-        # STEP 6: Create Chunks with Enhanced Metadata
+        # STEP 6: Clear Old Chunks and Create New Ones
         # ============================================
         _send_progress(document_id, "processing", 75, "Criando chunks de texto otimizados")
+
+        # Delete old embeddings for this document's chunks first (cascade)
+        old_chunk_ids = [
+            c.id for c in db.query(Chunk.id).filter(
+                Chunk.document_id == document.id
+            ).all()
+        ]
+        if old_chunk_ids:
+            db.query(Embedding).filter(
+                Embedding.chunk_id.in_(old_chunk_ids)
+            ).delete(synchronize_session=False)
+
+        # Delete old chunks for this document
+        db.query(Chunk).filter(
+            Chunk.document_id == document.id
+        ).delete(synchronize_session=False)
+        db.flush()
 
         sections = [
             ("full_text", text),
@@ -190,8 +278,8 @@ def process_document_task(
         # Add production/logistics specific sections
         if resume_data.get("licenses"):
             licenses_text = "\n".join([
-                f"{l.get('type', '')}: {l.get('description', '')}"
-                for l in resume_data["licenses"]
+                f"{lic.get('type', '')}: {lic.get('description', '')}"
+                for lic in resume_data["licenses"]
             ])
             if licenses_text.strip():
                 sections.append(("licenses", licenses_text))
@@ -289,10 +377,31 @@ def process_document_task(
                 chunks_created += 1
 
         db.commit()
-        _send_progress(document_id, "processing", 90, f"{chunks_created} chunks criados")
+        _send_progress(document_id, "processing", 88, f"{chunks_created} chunks criados")
 
         # ============================================
-        # STEP 7: Audit Log
+        # STEP 7: Save CandidateProfile Snapshot
+        # ============================================
+        if candidate:
+            # Determine next version number
+            last_profile = db.query(CandidateProfile).filter(
+                CandidateProfile.candidate_id == candidate.id
+            ).order_by(CandidateProfile.version.desc()).first()
+
+            next_version = (last_profile.version + 1) if last_profile else 1
+
+            profile = CandidateProfile(
+                candidate_id=candidate.id,
+                version=next_version,
+                profile_json=resume_data
+            )
+            db.add(profile)
+            db.commit()
+
+        _send_progress(document_id, "processing", 92, "Perfil do candidato salvo")
+
+        # ============================================
+        # STEP 8: Audit Log
         # ============================================
         audit_metadata = {
             "sections_created": chunks_created,
@@ -307,6 +416,7 @@ def process_document_task(
             "safety_certs": len(resume_data.get("safety_certs", [])),
             "licenses": len(resume_data.get("licenses", [])),
             "equipment": len(resume_data.get("equipment", [])),
+            "experiences_saved": len(resume_data.get("experiences", [])),
         }
 
         audit = AuditLog(
@@ -327,6 +437,7 @@ def process_document_task(
             "chunks_created": chunks_created,
             "profile_type": profile_type,
             "ocr_confidence": ocr_result.confidence,
+            "experiences_saved": len(resume_data.get("experiences", [])),
             "status": "completed"
         }
 

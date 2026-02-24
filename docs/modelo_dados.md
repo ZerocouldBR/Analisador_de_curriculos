@@ -1,82 +1,108 @@
-# Etapa 1 — Modelo de Dados (ERD textual)
+# Modelo de Dados
 
-## Entidades principais
+## Entidades Implementadas
 
-1) **users**
-- id (PK), email, password_hash, name, status, created_at, last_login
+### 1) **users**
+- id (PK), email (unique), password_hash, name, status, is_superuser, created_at, last_login
 
-2) **roles**
-- id (PK), name, description
+### 2) **roles**
+- id (PK), name (unique), description, permissions (JSONB), created_at
+- Permissions granulares por role (RBAC):
+  - `candidates.create`, `candidates.read`, `candidates.update`, `candidates.delete`
+  - `documents.create`, `documents.read`, `documents.update`, `documents.delete`
+  - `settings.read`, `settings.create`, `settings.update`, `settings.delete`
+  - `linkedin.enrich`, `search.advanced`, `users.manage`
 
-3) **user_roles**
-- user_id (FK users), role_id (FK roles)
+### 3) **user_roles** (many-to-many)
+- user_id (FK users, CASCADE), role_id (FK roles, CASCADE), assigned_at
 
-4) **candidates** (PII separada e protegida)
-- id (PK), full_name, email, phone, doc_id, birth_date (opcional), address, city, state, country, created_at
-- **Observação**: colunas com PII protegidas por RBAC e máscara.
+### 4) **candidates** (PII separada e protegida)
+- id (PK), full_name, email, phone, doc_id (CPF), birth_date, address, city, state, country, created_at, updated_at
+- Relacionamentos cascade: profiles, documents, chunks, experiences, consents, external_enrichments
 
-5) **candidate_profiles**
-- id (PK), candidate_id (FK), version, profile_json (JSONB), created_at
+### 5) **candidate_profiles**
+- id (PK), candidate_id (FK CASCADE), version, profile_json (JSONB), created_at
+- Armazena snapshot completo do curriculo parseado a cada processamento
 
-6) **documents**
-- id (PK), candidate_id (FK), original_filename, mime_type, source_path (NAS/MinIO), sha256_hash, uploaded_at
+### 6) **documents**
+- id (PK), candidate_id (FK CASCADE), original_filename, mime_type, source_path, sha256_hash (indexado), uploaded_at
+- sha256_hash indexado para deduplicacao (nao unique: mesmo arquivo pode ser associado a candidatos diferentes)
 
-7) **chunks**
-- id (PK), document_id (FK), candidate_id (FK), section, content, meta_json (JSONB)
+### 7) **chunks**
+- id (PK), document_id (FK CASCADE), candidate_id (FK CASCADE), section, content, meta_json (JSONB), created_at
+- Indice composto: section + candidate_id
+- Secoes: full_text, personal_info, experiences, education, skills, languages, certifications, licenses, safety_certifications, equipment, erp_systems, availability, keyword_index
 
-8) **embeddings**
-- id (PK), chunk_id (FK), model, vector (pgvector), created_at
+### 8) **embeddings**
+- id (PK), chunk_id (FK CASCADE), model, vector (pgvector 1536 dims), created_at
+- Indice HNSW para busca vetorial por similaridade de cosseno
 
-9) **dictionary_skills**
-- id (PK), canonical_name, category, aliases (array/json)
+### 9) **experiences**
+- id (PK), candidate_id (FK CASCADE), company_name, title, start_date, end_date, industry, description, created_at
+- Populado automaticamente a partir do parsing do curriculo
 
-10) **companies**
-- id (PK), name, industry, city, state
+### 10) **consents**
+- id (PK), candidate_id (FK CASCADE), consent_type, legal_basis, granted_at, expires_at
+- Conformidade LGPD
 
-11) **competitor_flags**
-- id (PK), company_id (FK), flag_type, notes
+### 11) **external_enrichments**
+- id (PK), candidate_id (FK CASCADE), source, source_url, data_json (JSONB), fetched_at, retention_policy, notes
+- Indice composto: source + candidate_id
+- Fontes suportadas: linkedin, github
 
-12) **experiences** (opcional para filtros)
-- id (PK), candidate_id (FK), company_name, title, start_date, end_date, industry, description
+### 12) **server_settings**
+- id (PK), key (unique), value_json (JSONB), description, version, updated_by (FK users), updated_at
+- Armazena configuracoes do sistema e prompts do chat LLM
 
-13) **consents / legal_basis**
-- id (PK), candidate_id (FK), consent_type, legal_basis, granted_at, expires_at
+### 13) **audit_logs**
+- id (PK), user_id (FK users), action, entity, entity_id, metadata_json (JSONB), created_at (indexado)
+- Registro completo de todas as operacoes para compliance LGPD
 
-14) **audit_log**
-- id (PK), user_id (FK), action, entity, entity_id, metadata_json, created_at
+## Relacionamentos
 
-15) **ingestion_jobs**
-- id (PK), created_by (FK users), status, progress, started_at, finished_at
+```
+users <-> roles          via user_roles (many-to-many)
+candidates 1:N           candidate_profiles (cascade)
+candidates 1:N           documents (cascade)
+candidates 1:N           chunks (cascade)
+candidates 1:N           experiences (cascade)
+candidates 1:N           consents (cascade)
+candidates 1:N           external_enrichments (cascade)
+documents  1:N           chunks (cascade)
+chunks     1:N           embeddings (cascade)
+users      1:N           audit_logs
+```
 
-16) **ingestion_job_items**
-- id (PK), job_id (FK), document_id (FK), status, progress, error_message
+## Indices
 
-17) **external_enrichment** (opcional)
-- id (PK), candidate_id (FK), source, source_url, fetched_at, retention_policy, notes
+- `embeddings.vector` - HNSW (vector_cosine_ops) para busca semantica
+- `chunks.content` - GIN (tsvector portuguese) para full-text search
+- `chunks.meta_json` - GIN (jsonb_path_ops) para busca por metadados
+- `chunks.section + candidate_id` - Composto para filtros rapidos
+- `external_enrichments.source + candidate_id` - Composto para lookup
+- `documents.sha256_hash` - B-tree para deduplicacao
+- `candidates.city`, `candidates.state` - B-tree para filtros geograficos
+- `audit_logs.created_at` - B-tree para queries temporais
 
-18) **server_settings**
-- id (PK), key, value_json, version, updated_by (FK users), updated_at
+## Roles Padrao
 
-19) **client_agents**
-- id (PK), machine_name, agent_version, last_seen_at, permissions_json
+| Role | Descricao | Permissoes Principais |
+|------|-----------|----------------------|
+| admin | Acesso completo | Todas as permissoes |
+| recruiter | Gerencia candidatos | CRUD candidatos/docs (sem delete), LinkedIn, busca avancada |
+| viewer | Apenas leitura | Leitura de candidatos, docs e settings |
 
-## Relacionamentos (resumo)
+## Fluxo de Dados no Processamento
 
-- users <-> roles via user_roles
-- candidates 1:N candidate_profiles
-- candidates 1:N documents
-- documents 1:N chunks
-- chunks 1:N embeddings
-- candidates 1:N experiences
-- candidates 1:N consents
-- users 1:N ingestion_jobs
-- ingestion_jobs 1:N ingestion_job_items
-- candidates 1:N external_enrichment
-
-## Índices sugeridos
-
-- documents.sha256_hash (único) para deduplicação
-- chunks.section + candidate_id para filtros rápidos
-- embeddings.vector (pgvector ivfflat/hnsw)
-- tsvector em chunks.content para full-text
-- candidates.city/state para filtros geográficos
+1. Upload do arquivo -> `documents` (com sha256 para dedup)
+2. Celery task processa o documento:
+   - Extrai texto (PDF/DOCX/OCR) -> normaliza
+   - Parseia estrutura do curriculo (ResumeParserService)
+   - Atualiza `candidates` com dados pessoais extraidos (nome, email, telefone, CPF, data nascimento, cidade, estado)
+   - Popula tabela `experiences` com experiencias profissionais
+   - Salva snapshot em `candidate_profiles`
+   - Limpa chunks/embeddings antigos do documento
+   - Cria novos `chunks` por secao com metadados enriquecidos
+   - Extrai keywords categorizadas (producao, logistica, qualidade, TI)
+   - Cria `audit_logs` do processamento
+3. Embeddings gerados sob demanda para busca semantica -> `embeddings`

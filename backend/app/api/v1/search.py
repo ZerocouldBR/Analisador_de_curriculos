@@ -627,12 +627,12 @@ async def get_candidate_keywords(
 async def reindex_candidate(
     candidate_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("candidates.write"))
+    current_user: User = Depends(require_permission("candidates.update"))
 ):
     """
     Reindexa as palavras-chave de um candidato
 
-    **Requer permissao:** candidates.write
+    **Requer permissao:** candidates.update
     """
     try:
         chunks = db.query(Chunk).filter(
