@@ -49,6 +49,12 @@ numpy>=1.24.0
 openai==1.3.7
 python-dateutil==2.8.2
 
+# Encryption (PII protection)
+cryptography>=41.0.0
+
+# Image format support
+pillow-heif>=0.13.0
+
 # Testing
 pytest==7.4.3
 pytest-asyncio==0.21.1

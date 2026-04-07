@@ -26,6 +26,7 @@ import {
   Settings,
   AdminPanelSettings,
   Logout,
+  SmartToy,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -33,6 +34,7 @@ const drawerWidth = 240;
 
 const menuItems = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/dashboard' },
+  { text: 'Chat IA', icon: <SmartToy />, path: '/chat' },
   { text: 'Candidatos', icon: <People />, path: '/candidates' },
   { text: 'Busca', icon: <Search />, path: '/search' },
   { text: 'Upload', icon: <Upload />, path: '/upload' },

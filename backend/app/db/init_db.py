@@ -22,7 +22,11 @@ from app.db.models import (
     Consent,
     ExternalEnrichment,
     ServerSettings,
-    AuditLog
+    AuditLog,
+    ChatConversation,
+    ChatMessage,
+    LinkedInSearch,
+    EncryptedPII,
 )
 
 

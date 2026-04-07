@@ -50,5 +50,15 @@ class Settings(BaseSettings):
     enable_keyword_extraction: bool = Field(default=True, description="Enable keyword extraction")
     enable_hnsw_index: bool = Field(default=True, description="Enable HNSW vector index")
 
+    # PII Encryption
+    enable_pii_encryption: bool = Field(default=True, description="Enable PII field-level encryption")
+
+    # Rate Limiting
+    rate_limit_per_minute: int = Field(default=60, description="API rate limit per minute per user")
+
+    # Chat Configuration
+    chat_max_messages_per_conversation: int = Field(default=200, description="Max messages per conversation")
+    chat_max_context_tokens: int = Field(default=8000, description="Max tokens for chat context")
+
 
 settings = Settings()

@@ -64,6 +64,7 @@ class User(Base):
     # Relacionamentos
     roles = relationship("Role", secondary=user_roles, back_populates="users")
     audit_logs = relationship("AuditLog", back_populates="user")
+    conversations = relationship("ChatConversation", back_populates="user", cascade="all, delete-orphan")
 
 
 class Candidate(Base):
@@ -89,6 +90,7 @@ class Candidate(Base):
     experiences = relationship("Experience", back_populates="candidate", cascade="all, delete-orphan")
     consents = relationship("Consent", back_populates="candidate", cascade="all, delete-orphan")
     external_enrichments = relationship("ExternalEnrichment", back_populates="candidate", cascade="all, delete-orphan")
+    encrypted_pii = relationship("EncryptedPII", back_populates="candidate", uselist=False, cascade="all, delete-orphan")
 
 
 class CandidateProfile(Base):
@@ -217,6 +219,86 @@ class ServerSettings(Base):
     version = Column(Integer, default=1)
     updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class ChatConversation(Base):
+    """Conversas do chat de analise de curriculos"""
+    __tablename__ = "chat_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String, default="Nova Conversa")
+    job_description = Column(Text, nullable=True)
+    job_title = Column(String, nullable=True)
+    domain = Column(String, default="general")  # production, logistics, quality, general
+    status = Column(String, default="active")  # active, archived
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relacionamentos
+    user = relationship("User", back_populates="conversations")
+    messages = relationship("ChatMessage", back_populates="conversation", cascade="all, delete-orphan",
+                          order_by="ChatMessage.created_at")
+
+    __table_args__ = (
+        Index("idx_chat_conversation_user", "user_id", "status"),
+    )
+
+
+class ChatMessage(Base):
+    """Mensagens individuais do chat"""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String, nullable=False)  # user, assistant, system
+    content = Column(Text, nullable=False)
+    metadata_json = Column(JSONB, nullable=True)  # sources, candidates_mentioned, confidence, etc.
+    tokens_used = Column(Integer, default=0)
+    created_at = Column(DateTime, default=_utcnow)
+
+    # Relacionamentos
+    conversation = relationship("ChatConversation", back_populates="messages")
+
+    __table_args__ = (
+        Index("idx_chat_message_conversation", "conversation_id", "created_at"),
+    )
+
+
+class LinkedInSearch(Base):
+    """Historico de buscas no LinkedIn"""
+    __tablename__ = "linkedin_searches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    search_criteria = Column(JSONB, nullable=False)  # keywords, location, title, skills, etc.
+    results_count = Column(Integer, default=0)
+    results_json = Column(JSONB, nullable=True)
+    status = Column(String, default="pending")  # pending, completed, failed
+    created_at = Column(DateTime, default=_utcnow)
+
+    __table_args__ = (
+        Index("idx_linkedin_search_user", "user_id", "created_at"),
+    )
+
+
+class EncryptedPII(Base):
+    """Dados pessoais sensíveis criptografados (LGPD)"""
+    __tablename__ = "encrypted_pii"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, unique=True)
+    cpf_encrypted = Column(Text, nullable=True)
+    rg_encrypted = Column(Text, nullable=True)
+    birth_date_encrypted = Column(Text, nullable=True)
+    address_encrypted = Column(Text, nullable=True)
+    phone_encrypted = Column(Text, nullable=True)
+    extra_pii_json = Column(Text, nullable=True)  # JSONB criptografado como texto
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relacionamentos
+    candidate = relationship("Candidate", back_populates="encrypted_pii")
 
 
 class AuditLog(Base):
