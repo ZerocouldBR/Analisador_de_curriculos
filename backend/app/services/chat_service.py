@@ -93,15 +93,14 @@ REGRAS:
 
 
 class ChatService:
-    """Servico de chat conversacional para analise de curriculos"""
-
-    MAX_CONTEXT_MESSAGES = 10  # Mensagens anteriores para contexto
-    MAX_CHUNKS_PER_QUERY = 15  # Chunks de curriculo por consulta
-    MAX_CONTEXT_CHARS = 24000  # Limite de caracteres no contexto
+    """
+    Servico de chat conversacional para analise de curriculos.
+    Todas as configuracoes vem de settings.
+    """
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.openai_api_key
-        self.chat_model = getattr(settings, 'chat_model', 'gpt-4-turbo-preview')
+        self.chat_model = settings.chat_model
         self._client: Optional[AsyncOpenAI] = None
 
     @property
@@ -109,7 +108,12 @@ class ChatService:
         if self._client is None:
             if not self.api_key:
                 raise ValueError("OpenAI API key nao configurada")
-            self._client = AsyncOpenAI(api_key=self.api_key)
+            kwargs = {"api_key": self.api_key}
+            if settings.openai_base_url:
+                kwargs["base_url"] = settings.openai_base_url
+            if settings.openai_organization:
+                kwargs["organization"] = settings.openai_organization
+            self._client = AsyncOpenAI(**kwargs)
         return self._client
 
     # ================================================================
@@ -274,8 +278,8 @@ class ChatService:
             response = await self.client.chat.completions.create(
                 model=self.chat_model,
                 messages=messages,
-                temperature=0.5,
-                max_tokens=4096,
+                temperature=settings.chat_temperature,
+                max_tokens=settings.chat_max_tokens,
             )
 
             assistant_content = response.choices[0].message.content
@@ -413,8 +417,8 @@ class ChatService:
         candidate_filter = ""
         params = {
             "query_vector": str(query_embedding),
-            "threshold": 0.25,
-            "limit": self.MAX_CHUNKS_PER_QUERY,
+            "threshold": settings.vector_search_pre_filter_threshold,
+            "limit": settings.chat_max_chunks_per_query,
         }
 
         if candidate_ids:
@@ -458,7 +462,7 @@ class ChatService:
         seen_candidates = set()
 
         for chunk, score in chunks:
-            if total_chars >= self.MAX_CONTEXT_CHARS:
+            if total_chars >= settings.chat_max_context_chars:
                 break
 
             candidate_header = ""
@@ -495,7 +499,7 @@ class ChatService:
             ChatMessage.conversation_id == conversation_id,
             ChatMessage.role.in_(["user", "assistant"]),
         ).order_by(desc(ChatMessage.created_at)).limit(
-            self.MAX_CONTEXT_MESSAGES
+            settings.chat_max_context_messages
         ).all()
 
         # Reverter para ordem cronologica

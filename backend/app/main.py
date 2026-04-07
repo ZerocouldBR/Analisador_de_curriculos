@@ -18,8 +18,17 @@ async def lifespan(app: FastAPI):
         from app.db.init_db import init_db
         init_db()
     except Exception as e:
-        print(f"⚠ Erro ao inicializar banco de dados: {e}")
+        print(f"Warning: Erro ao inicializar banco de dados: {e}")
         print("  Execute manualmente: python -m app.db.init_db")
+
+    # Startup: Inicializar vector store
+    try:
+        from app.vectorstore.factory import initialize_vector_store
+        await initialize_vector_store()
+        print(f"  Vector store initialized: {settings.vector_db_provider.value}")
+    except Exception as e:
+        print(f"Warning: Erro ao inicializar vector store: {e}")
+        print("  O vector store sera inicializado sob demanda na primeira requisicao")
 
     yield
     # Shutdown: Limpeza se necessário

@@ -1,64 +1,322 @@
+"""
+Configuracao centralizada do sistema
+
+TODAS as configuracoes do sistema estao aqui. Nenhum valor deve ser
+hardcoded nos servicos, modelos ou tasks.
+
+Configuravel via:
+- Variaveis de ambiente
+- Arquivo .env
+- Settings API (server_settings no banco)
+
+Categorias:
+- Aplicacao geral
+- Banco de dados relacional
+- Banco de dados vetorial (pgvector, Supabase, Qdrant)
+- APIs externas (OpenAI, LinkedIn)
+- LLM e Chat
+- Busca vetorial e hibrida
+- Chunking e indexacao
+- Seguranca e criptografia
+- Celery e filas
+"""
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
+from typing import Optional, List
+from enum import Enum
+
+
+class VectorDBProvider(str, Enum):
+    """Provedores de banco de dados vetorial suportados"""
+    PGVECTOR = "pgvector"
+    SUPABASE = "supabase"
+    QDRANT = "qdrant"
+
+
+class EmbeddingProvider(str, Enum):
+    """Provedores de embeddings suportados"""
+    OPENAI = "openai"
+    # Extensivel para: huggingface, cohere, local, etc.
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
-
-    app_version: str = Field(default="0.1.0")
-    log_level: str = Field(default="INFO")
-
-    database_url: str = Field(
-        default="postgresql+psycopg://analisador:analisador@localhost:5432/analisador_curriculos"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="",
+        case_sensitive=False,
     )
-    redis_url: str = Field(default="redis://localhost:6379/0")
 
-    # Security Configuration
+    # ================================================================
+    # Aplicacao Geral
+    # ================================================================
+    app_name: str = Field(default="Analisador de Curriculos")
+    app_version: str = Field(default="0.3.0")
+    log_level: str = Field(default="INFO")
+    debug: bool = Field(default=False, description="Modo debug")
+
+    # ================================================================
+    # Banco de Dados Relacional (PostgreSQL)
+    # ================================================================
+    database_url: str = Field(
+        default="postgresql+psycopg://analisador:analisador@localhost:5432/analisador_curriculos",
+        description="URL de conexao com o banco relacional principal"
+    )
+    database_pool_size: int = Field(default=10, description="Tamanho do pool de conexoes")
+    database_max_overflow: int = Field(default=20, description="Conexoes extras alem do pool")
+    database_pool_timeout: int = Field(default=30, description="Timeout para obter conexao do pool (s)")
+
+    # ================================================================
+    # Banco de Dados Vetorial
+    # ================================================================
+    vector_db_provider: VectorDBProvider = Field(
+        default=VectorDBProvider.PGVECTOR,
+        description="Provedor do banco vetorial: pgvector, supabase, qdrant"
+    )
+
+    # -- pgvector (usa o mesmo PostgreSQL do database_url por padrao) --
+    pgvector_database_url: Optional[str] = Field(
+        default=None,
+        description="URL do PostgreSQL com pgvector. Se None, usa database_url"
+    )
+    pgvector_hnsw_m: int = Field(default=16, description="HNSW: conexoes por no")
+    pgvector_hnsw_ef_construction: int = Field(default=64, description="HNSW: qualidade da construcao")
+    pgvector_hnsw_ef_search: int = Field(default=100, description="HNSW: qualidade da busca")
+    pgvector_distance_metric: str = Field(
+        default="cosine",
+        description="Metrica de distancia: cosine, l2, inner_product"
+    )
+
+    # -- Supabase --
+    supabase_url: Optional[str] = Field(default=None, description="URL do projeto Supabase")
+    supabase_key: Optional[str] = Field(default=None, description="Supabase anon/service key")
+    supabase_table_name: str = Field(default="embeddings", description="Nome da tabela de embeddings no Supabase")
+    supabase_function_name: str = Field(
+        default="match_embeddings",
+        description="Nome da funcao RPC para busca vetorial no Supabase"
+    )
+
+    # -- Qdrant --
+    qdrant_url: Optional[str] = Field(default=None, description="URL do servidor Qdrant")
+    qdrant_api_key: Optional[str] = Field(default=None, description="API key do Qdrant (se cloud)")
+    qdrant_collection_name: str = Field(default="curriculos", description="Nome da colecao no Qdrant")
+    qdrant_grpc_port: int = Field(default=6334, description="Porta gRPC do Qdrant")
+    qdrant_prefer_grpc: bool = Field(default=True, description="Preferir gRPC ao invés de REST")
+
+    # ================================================================
+    # Configuracoes de Embeddings
+    # ================================================================
+    embedding_provider: EmbeddingProvider = Field(
+        default=EmbeddingProvider.OPENAI,
+        description="Provedor de embeddings"
+    )
+    embedding_model: str = Field(
+        default="text-embedding-3-small",
+        description="Modelo de embeddings"
+    )
+    embedding_dimensions: int = Field(
+        default=1536,
+        description="Dimensoes do vetor de embedding (depende do modelo)"
+    )
+    embedding_batch_size: int = Field(
+        default=20,
+        description="Tamanho do lote para geracao de embeddings"
+    )
+    embedding_max_chars: int = Field(
+        default=32000,
+        description="Maximo de caracteres por texto para embedding"
+    )
+
+    # ================================================================
+    # APIs Externas
+    # ================================================================
+    # -- OpenAI --
+    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
+    openai_base_url: Optional[str] = Field(
+        default=None,
+        description="URL base da API OpenAI (para proxies ou alternativas compativeis)"
+    )
+    openai_organization: Optional[str] = Field(default=None, description="Organization ID da OpenAI")
+
+    # -- LinkedIn --
+    linkedin_api_enabled: bool = Field(default=False, description="Habilitar integracao LinkedIn API")
+    linkedin_client_id: Optional[str] = Field(default=None, description="LinkedIn OAuth Client ID")
+    linkedin_client_secret: Optional[str] = Field(default=None, description="LinkedIn OAuth Client Secret")
+    linkedin_redirect_uri: Optional[str] = Field(default=None, description="LinkedIn OAuth Redirect URI")
+
+    # ================================================================
+    # LLM e Chat
+    # ================================================================
+    chat_model: str = Field(default="gpt-4-turbo-preview", description="Modelo do chat LLM")
+    llm_max_retries: int = Field(default=5, description="Maximo de tentativas para consultas LLM")
+    llm_max_tokens: int = Field(default=4096, description="Maximo de tokens na resposta LLM")
+    llm_temperature: float = Field(default=0.7, description="Temperatura do LLM (0.0-2.0)")
+    llm_min_temperature: float = Field(default=0.3, description="Temperatura minima em retries")
+    llm_temperature_decay: float = Field(default=0.1, description="Reducao de temperatura por retry")
+    llm_token_decay: int = Field(default=500, description="Reducao de tokens por retry")
+    llm_min_tokens: int = Field(default=1000, description="Minimo de tokens por resposta")
+
+    # Limites de caracteres por tentativa (lista JSON via env)
+    llm_character_limits: List[int] = Field(
+        default=[32000, 24000, 16000, 10000, 6000],
+        description="Limites de caracteres por tentativa de retry"
+    )
+    llm_chunks_per_retry: List[int] = Field(
+        default=[15, 12, 8, 5, 3],
+        description="Numero de chunks por tentativa de retry"
+    )
+
+    # Chat conversacional
+    chat_max_messages_per_conversation: int = Field(default=200, description="Max mensagens por conversa")
+    chat_max_context_messages: int = Field(default=10, description="Mensagens anteriores no contexto")
+    chat_max_context_chars: int = Field(default=24000, description="Max caracteres no contexto do chat")
+    chat_max_chunks_per_query: int = Field(default=15, description="Max chunks por consulta do chat")
+    chat_temperature: float = Field(default=0.5, description="Temperatura do chat")
+    chat_max_tokens: int = Field(default=4096, description="Max tokens na resposta do chat")
+
+    # ================================================================
+    # Busca Vetorial e Hibrida
+    # ================================================================
+    vector_search_threshold: float = Field(default=0.3, description="Similaridade minima para busca vetorial")
+    vector_search_limit: int = Field(default=50, description="Max chunks na busca vetorial")
+    vector_search_pre_filter_threshold: float = Field(
+        default=0.2,
+        description="Threshold minimo antes de filtrar (pre-filtro)"
+    )
+
+    # Pesos da busca hibrida
+    hybrid_vector_weight: float = Field(default=0.4, description="Peso da busca vetorial (0-1)")
+    hybrid_text_weight: float = Field(default=0.3, description="Peso da busca full-text (0-1)")
+    hybrid_filter_weight: float = Field(default=0.2, description="Peso dos filtros (0-1)")
+    hybrid_domain_weight: float = Field(default=0.1, description="Peso do dominio (0-1)")
+
+    # Pesos do LLM query scoring
+    llm_semantic_weight: float = Field(default=0.6, description="Peso do score semantico no ranking")
+    llm_keyword_weight: float = Field(default=0.4, description="Peso de keywords no ranking")
+
+    # Confidence scoring
+    confidence_score_weight: float = Field(default=0.7, description="Peso do score medio na confianca")
+    confidence_coverage_weight: float = Field(default=0.3, description="Peso da cobertura na confianca")
+
+    # ================================================================
+    # Chunking e Indexacao
+    # ================================================================
+    chunk_size: int = Field(default=1500, description="Tamanho maximo de cada chunk (chars)")
+    chunk_overlap: int = Field(default=200, description="Sobreposicao entre chunks (chars)")
+    chunk_min_size: int = Field(default=100, description="Tamanho minimo para gerar embedding")
+    chunk_max_content_size: int = Field(default=10000, description="Tamanho max do conteudo por chunk no DB")
+
+    enable_keyword_extraction: bool = Field(default=True, description="Habilitar extracao de keywords")
+    enable_hnsw_index: bool = Field(default=True, description="Habilitar indice HNSW")
+
+    # Full-text search
+    fts_language: str = Field(default="portuguese", description="Idioma do full-text search")
+
+    # ================================================================
+    # Seguranca e Autenticacao
+    # ================================================================
     secret_key: str = Field(
         ...,
-        description="Secret key for JWT signing. MUST be set via SECRET_KEY env var."
+        description="Chave secreta para JWT. OBRIGATORIO via env var SECRET_KEY."
     )
-    algorithm: str = Field(default="HS256", description="JWT signing algorithm")
-    access_token_expire_minutes: int = Field(default=30, description="Access token TTL in minutes")
-    refresh_token_expire_days: int = Field(default=7, description="Refresh token TTL in days")
+    algorithm: str = Field(default="HS256", description="Algoritmo de assinatura JWT")
+    access_token_expire_minutes: int = Field(default=30, description="TTL do access token (minutos)")
+    refresh_token_expire_days: int = Field(default=7, description="TTL do refresh token (dias)")
 
-    # CORS Configuration
+    # PII / Criptografia
+    enable_pii_encryption: bool = Field(default=True, description="Habilitar criptografia de PII")
+
+    # Rate limiting
+    rate_limit_per_minute: int = Field(default=60, description="Limite de requisicoes por minuto por usuario")
+
+    # ================================================================
+    # CORS
+    # ================================================================
     cors_origins: list[str] = Field(
         default=["http://localhost:3000"],
-        description="Allowed CORS origins"
+        description="Origens CORS permitidas"
     )
 
-    # Upload Configuration
-    max_upload_size_mb: int = Field(default=20, description="Max file upload size in MB")
+    # ================================================================
+    # Upload / Storage
+    # ================================================================
+    max_upload_size_mb: int = Field(default=20, description="Tamanho maximo de upload (MB)")
+    storage_backend: str = Field(
+        default="local",
+        description="Backend de armazenamento: local, s3, minio"
+    )
+    storage_path: str = Field(default="./uploads", description="Caminho para storage local")
+    s3_bucket: Optional[str] = Field(default=None, description="Bucket S3/MinIO")
+    s3_endpoint: Optional[str] = Field(default=None, description="Endpoint S3/MinIO")
+    s3_access_key: Optional[str] = Field(default=None, description="S3 Access Key")
+    s3_secret_key: Optional[str] = Field(default=None, description="S3 Secret Key")
 
-    # OpenAI Configuration
-    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
-    embedding_model: str = Field(default="text-embedding-3-small")
-    chat_model: str = Field(default="gpt-4-turbo-preview")
+    # ================================================================
+    # Redis / Celery
+    # ================================================================
+    redis_url: str = Field(default="redis://localhost:6379/0", description="URL do Redis")
+    celery_result_expires: int = Field(default=3600, description="TTL dos resultados Celery (s)")
+    celery_task_time_limit: int = Field(default=300, description="Limite de tempo por task (s)")
+    celery_task_soft_time_limit: int = Field(default=240, description="Soft limit por task (s)")
+    celery_worker_concurrency: int = Field(default=4, description="Workers concorrentes do Celery")
 
-    # LLM Query Configuration
-    llm_max_retries: int = Field(default=5, description="Max retries for LLM queries")
-    llm_max_tokens: int = Field(default=4096, description="Max tokens for LLM response")
-    llm_temperature: float = Field(default=0.7, description="LLM temperature")
+    # ================================================================
+    # OCR
+    # ================================================================
+    ocr_languages: str = Field(default="por+eng", description="Idiomas do Tesseract OCR")
+    ocr_min_confidence: float = Field(default=30.0, description="Confianca minima aceitavel do OCR (%)")
+    ocr_resolutions: List[int] = Field(
+        default=[300, 400, 200],
+        description="Resolucoes DPI para tentativa adaptativa de OCR"
+    )
+    ocr_min_text_chars: int = Field(default=30, description="Min chars para considerar pagina com texto")
+    ocr_psm_modes: List[int] = Field(
+        default=[6, 3, 4, 1],
+        description="PSM modes para tentativa progressiva (6=bloco, 3=auto, 4=coluna, 1=OSD)"
+    )
+    ocr_max_images_per_docx: int = Field(
+        default=10,
+        description="Max imagens embutidas para OCR em DOCX"
+    )
 
-    # Vector Search Configuration
-    vector_search_threshold: float = Field(default=0.3, description="Min similarity threshold")
-    vector_search_limit: int = Field(default=50, description="Max chunks to retrieve")
+    # ================================================================
+    # Helpers
+    # ================================================================
 
-    # Indexing Configuration
-    enable_keyword_extraction: bool = Field(default=True, description="Enable keyword extraction")
-    enable_hnsw_index: bool = Field(default=True, description="Enable HNSW vector index")
+    @property
+    def effective_pgvector_url(self) -> str:
+        """Retorna a URL efetiva do pgvector (prioriza pgvector_database_url)"""
+        return self.pgvector_database_url or self.database_url
 
-    # PII Encryption
-    enable_pii_encryption: bool = Field(default=True, description="Enable PII field-level encryption")
+    @property
+    def pgvector_distance_ops(self) -> str:
+        """Retorna o operador de distancia do pgvector baseado na metrica"""
+        ops = {
+            "cosine": "vector_cosine_ops",
+            "l2": "vector_l2_ops",
+            "inner_product": "vector_ip_ops",
+        }
+        return ops.get(self.pgvector_distance_metric, "vector_cosine_ops")
 
-    # Rate Limiting
-    rate_limit_per_minute: int = Field(default=60, description="API rate limit per minute per user")
+    @property
+    def pgvector_distance_operator(self) -> str:
+        """Retorna o operador SQL de distancia do pgvector"""
+        operators = {
+            "cosine": "<=>",
+            "l2": "<->",
+            "inner_product": "<#>",
+        }
+        return operators.get(self.pgvector_distance_metric, "<=>")
 
-    # Chat Configuration
-    chat_max_messages_per_conversation: int = Field(default=200, description="Max messages per conversation")
-    chat_max_context_tokens: int = Field(default=8000, description="Max tokens for chat context")
+    def get_similarity_expression(self, vector_column: str, query_param: str) -> str:
+        """Retorna a expressao SQL de similaridade baseada na metrica"""
+        op = self.pgvector_distance_operator
+        if self.pgvector_distance_metric == "cosine":
+            return f"1 - ({vector_column} {op} {query_param}::vector)"
+        elif self.pgvector_distance_metric == "inner_product":
+            return f"({vector_column} {op} {query_param}::vector) * -1"
+        else:  # l2
+            return f"1.0 / (1.0 + ({vector_column} {op} {query_param}::vector))"
 
 
 settings = Settings()

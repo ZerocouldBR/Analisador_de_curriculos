@@ -10,6 +10,7 @@ from app.services.llm_query_service import llm_query_service, QueryStatus
 from app.services.keyword_extraction_service import KeywordExtractionService
 from app.services.job_matching_service import JobMatchingService, JobCategory
 from app.core.dependencies import get_current_user, require_permission
+from app.core.config import settings
 from app.db.models import User, Chunk
 
 
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/search", tags=["search"])
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=3, description="Texto da busca")
     limit: int = Field(default=10, ge=1, le=100, description="Numero maximo de resultados")
-    threshold: float = Field(default=0.7, ge=0.0, le=1.0, description="Similaridade minima")
+    threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Similaridade minima (padrao: configuracao do sistema)")
 
 
 class SearchResult(BaseModel):
@@ -53,11 +54,12 @@ async def semantic_search(
     **Requer:** Autenticacao
     """
     try:
+        threshold = search_request.threshold if search_request.threshold is not None else settings.vector_search_threshold
         results = await embedding_service.semantic_search(
             db,
             search_request.query,
             search_request.limit,
-            search_request.threshold
+            threshold
         )
 
         search_results = []

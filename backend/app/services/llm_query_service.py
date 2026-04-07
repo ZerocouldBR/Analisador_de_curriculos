@@ -59,28 +59,11 @@ class LLMQueryService:
     """
     Servico para consultas ao LLM com retry inteligente
 
-    Caracteristicas:
-    - Busca semantica de chunks relevantes
-    - Ranqueamento por relevancia
-    - Retry automatico com filtro progressivo
-    - Maximo de 5 tentativas por consulta
-    - Prompts especializados para producao e logistica
+    Todas as configuracoes vem de settings:
+    - Modelo, temperatura, tokens
+    - Limites de caracteres e chunks por retry
+    - Pesos de scoring
     """
-
-    DEFAULT_MAX_RETRIES = 5
-    DEFAULT_MAX_TOKENS = 4096
-    DEFAULT_TEMPERATURE = 0.7
-    DEFAULT_MODEL = "gpt-4-turbo-preview"
-
-    CHARACTER_LIMITS = [
-        32000,
-        24000,
-        16000,
-        10000,
-        6000,
-    ]
-
-    CHUNKS_PER_RETRY = [15, 12, 8, 5, 3]
 
     # Sistema de prompts especializados
     SYSTEM_PROMPTS = {
@@ -192,9 +175,9 @@ Diretrizes:
     }
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or getattr(settings, 'openai_api_key', None)
-        self.embedding_model = getattr(settings, 'embedding_model', 'text-embedding-3-small')
-        self.chat_model = getattr(settings, 'chat_model', self.DEFAULT_MODEL)
+        self.api_key = api_key or settings.openai_api_key
+        self.embedding_model = settings.embedding_model
+        self.chat_model = settings.chat_model
 
         if self.api_key:
             openai.api_key = self.api_key
@@ -296,11 +279,13 @@ Diretrizes:
         last_error = None
         accumulated_answer = ""
         selected_chunks = []
+        character_limits = settings.llm_character_limits
+        chunks_per_retry = settings.llm_chunks_per_retry
 
-        while retries < min(max_retries, len(self.CHARACTER_LIMITS)):
+        while retries < min(max_retries, len(character_limits)):
             try:
-                max_chunks = self.CHUNKS_PER_RETRY[retries]
-                char_limit = self.CHARACTER_LIMITS[retries]
+                max_chunks = chunks_per_retry[retries] if retries < len(chunks_per_retry) else 3
+                char_limit = character_limits[retries] if retries < len(character_limits) else 6000
 
                 selected_chunks = self._select_chunks_for_attempt(
                     all_chunks, max_chunks, char_limit
@@ -402,7 +387,7 @@ Diretrizes:
                     1 - (e.vector <=> :query_vector::vector) as semantic_score
                 FROM chunks c
                 JOIN embeddings e ON e.chunk_id = c.id
-                WHERE 1 - (e.vector <=> :query_vector::vector) >= 0.3
+                WHERE 1 - (e.vector <=> :query_vector::vector) >= :threshold
             )
             SELECT
                 chunk_id,
@@ -416,7 +401,10 @@ Diretrizes:
             LIMIT 50
         """)
 
-        params = {"query_vector": str(query_embedding)}
+        params = {
+            "query_vector": str(query_embedding),
+            "threshold": settings.vector_search_threshold,
+        }
 
         if filters:
             if filters.get("candidate_id"):
@@ -445,8 +433,8 @@ Diretrizes:
                 section_bonus = 0.03
 
             combined_score = (
-                row.semantic_score * 0.6 +
-                keyword_score * 0.4 +
+                row.semantic_score * settings.llm_semantic_weight +
+                keyword_score * settings.llm_keyword_weight +
                 section_bonus
             )
 
@@ -600,8 +588,14 @@ Por favor, complete ou refine a resposta se necessario."""
         retry_number: int
     ) -> Dict[str, Any]:
         """Chama o LLM com os parametros apropriados"""
-        temperature = max(0.3, self.DEFAULT_TEMPERATURE - (retry_number * 0.1))
-        max_tokens = max(1000, self.DEFAULT_MAX_TOKENS - (retry_number * 500))
+        temperature = max(
+            settings.llm_min_temperature,
+            settings.llm_temperature - (retry_number * settings.llm_temperature_decay)
+        )
+        max_tokens = max(
+            settings.llm_min_tokens,
+            settings.llm_max_tokens - (retry_number * settings.llm_token_decay)
+        )
 
         response = await openai.ChatCompletion.acreate(
             model=self.chat_model,
@@ -652,7 +646,10 @@ Por favor, complete ou refine a resposta se necessario."""
         avg_score = sum(c.combined_score for c in chunks) / len(chunks)
         coverage = min(len(chunks) / 5, 1.0)
 
-        return (avg_score * 0.7 + coverage * 0.3)
+        return (
+            avg_score * settings.confidence_score_weight
+            + coverage * settings.confidence_coverage_weight
+        )
 
     def _extract_sources(self, chunks: List[ChunkWithScore]) -> List[Dict[str, Any]]:
         """Extrai informacoes de fonte dos chunks"""

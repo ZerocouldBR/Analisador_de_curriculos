@@ -1,43 +1,36 @@
 """
-Servico aprimorado de embeddings e busca vetorial
+Servico de embeddings e busca vetorial
 
-Melhorias:
-- Chunking semantico com overlap para melhor contexto
-- Preprocesamento de texto para embeddings de maior qualidade
-- Cache de embeddings para evitar reprocessamento
-- Busca hibrida otimizada com pesos configuraveis
-- Suporte a reranking de resultados
+Todas as configuracoes vem de app.core.config.settings.
+Nenhum valor hardcoded.
+
+Usa a camada de abstracao VectorStore para suportar
+multiplos provedores (pgvector, Supabase, Qdrant).
 """
-from sqlalchemy.orm import Session
-from typing import List, Optional, Tuple, Dict, Any
-from openai import AsyncOpenAI
-from sqlalchemy import text
 import re
 import hashlib
 import logging
+from typing import List, Optional, Tuple, Dict, Any
+
+from openai import AsyncOpenAI
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.db.models import Chunk, Embedding, Candidate
 from app.core.config import settings
+from app.vectorstore import get_vector_store
 
 logger = logging.getLogger(__name__)
 
 
 class SemanticChunker:
     """
-    Chunker semantico que divide texto preservando contexto
+    Chunker semantico que divide texto preservando contexto.
 
-    Estrategia:
-    - Divide por secoes semanticas (experiencia, formacao, skills)
-    - Aplica overlap entre chunks para manter contexto
-    - Enriquece chunks com metadados de contexto
-    - Limita tamanho para otimizar embeddings
+    Parametros configurados via settings:
+    - chunk_size, chunk_overlap, chunk_min_size
     """
 
-    DEFAULT_CHUNK_SIZE = 1500  # caracteres por chunk
-    DEFAULT_OVERLAP = 200  # overlap entre chunks
-    MIN_CHUNK_SIZE = 100  # tamanho minimo para gerar embedding
-
-    # Marcadores de secao em curriculos
     SECTION_MARKERS = [
         r'(?i)^(?:experiencia|experience|experiência)\s*(?:profissional)?',
         r'(?i)^(?:formacao|formação|educacao|educação|education)',
@@ -56,22 +49,15 @@ class SemanticChunker:
         cls,
         text: str,
         section_name: str = "full_text",
-        chunk_size: int = DEFAULT_CHUNK_SIZE,
-        overlap: int = DEFAULT_OVERLAP,
+        chunk_size: Optional[int] = None,
+        overlap: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Divide texto em chunks semanticos com overlap
+        """Divide texto em chunks semanticos com overlap"""
+        _chunk_size = chunk_size or settings.chunk_size
+        _overlap = overlap or settings.chunk_overlap
+        _min_size = settings.chunk_min_size
 
-        Args:
-            text: Texto completo para dividir
-            section_name: Nome da secao original
-            chunk_size: Tamanho maximo de cada chunk
-            overlap: Sobreposicao entre chunks adjacentes
-
-        Returns:
-            Lista de dicts com {content, metadata}
-        """
-        if len(text) <= chunk_size:
+        if len(text) <= _chunk_size:
             return [{
                 "content": text.strip(),
                 "metadata": {
@@ -82,12 +68,11 @@ class SemanticChunker:
                 }
             }]
 
-        # Tentar dividir por secoes semanticas primeiro
         sections = cls._split_by_sections(text)
 
         chunks = []
         for section_text, detected_section in sections:
-            if len(section_text) <= chunk_size:
+            if len(section_text) <= _chunk_size:
                 chunks.append({
                     "content": section_text.strip(),
                     "metadata": {
@@ -96,18 +81,15 @@ class SemanticChunker:
                     }
                 })
             else:
-                # Dividir secao grande em chunks com overlap
                 sub_chunks = cls._split_with_overlap(
-                    section_text, chunk_size, overlap
+                    section_text, _chunk_size, _overlap
                 )
                 for sc in sub_chunks:
                     sc["metadata"]["section"] = detected_section or section_name
                     chunks.append(sc)
 
-        # Filtrar chunks muito pequenos
-        chunks = [c for c in chunks if len(c["content"].strip()) >= cls.MIN_CHUNK_SIZE]
+        chunks = [c for c in chunks if len(c["content"].strip()) >= _min_size]
 
-        # Adicionar indice
         for i, chunk in enumerate(chunks):
             chunk["metadata"]["chunk_index"] = i
             chunk["metadata"]["total_chunks"] = len(chunks)
@@ -158,9 +140,7 @@ class SemanticChunker:
         while start < text_len:
             end = start + chunk_size
 
-            # Tentar cortar em fim de frase
             if end < text_len:
-                # Procurar ponto final, quebra de linha ou ponto e virgula
                 for sep in ['. ', '.\n', '\n\n', '\n', '; ', ', ']:
                     last_sep = text.rfind(sep, start + chunk_size // 2, end)
                     if last_sep > start:
@@ -188,13 +168,10 @@ class SemanticChunker:
 
 class EmbeddingService:
     """
-    Servico aprimorado para geracao de embeddings e busca semantica
+    Servico para geracao de embeddings e busca vetorial.
 
-    Melhorias:
-    - Preprocessamento de texto antes de gerar embeddings
-    - Chunking semantico com overlap
-    - Busca hibrida com pesos configuraveis
-    - Deduplicacao via hash de conteudo
+    Usa VectorStore para armazenamento e busca,
+    tornando o servico agnostico ao provedor.
     """
 
     def __init__(self, api_key: Optional[str] = None):
@@ -207,27 +184,21 @@ class EmbeddingService:
         if self._client is None:
             if not self.api_key:
                 raise ValueError("OpenAI API key nao configurada")
-            self._client = AsyncOpenAI(api_key=self.api_key)
+            kwargs = {"api_key": self.api_key}
+            if settings.openai_base_url:
+                kwargs["base_url"] = settings.openai_base_url
+            if settings.openai_organization:
+                kwargs["organization"] = settings.openai_organization
+            self._client = AsyncOpenAI(**kwargs)
         return self._client
 
     @staticmethod
     def preprocess_for_embedding(text: str) -> str:
-        """
-        Preprocessa texto para melhorar qualidade do embedding
-
-        - Remove formatacao excessiva
-        - Normaliza espacos e pontuacao
-        - Remove linhas repetidas
-        - Limita tamanho
-        """
-        # Remover caracteres de controle
+        """Preprocessa texto para melhorar qualidade do embedding"""
         text = re.sub(r'[\x00-\x08\x0b-\x0c\x0e-\x1f]', '', text)
-
-        # Normalizar separadores
         text = re.sub(r'[-=_]{3,}', '\n', text)
         text = re.sub(r'[|]{2,}', ' | ', text)
 
-        # Remover linhas duplicadas consecutivas
         lines = text.split('\n')
         deduped_lines = []
         prev_line = None
@@ -238,12 +209,8 @@ class EmbeddingService:
                 prev_line = stripped
         text = '\n'.join(deduped_lines)
 
-        # Remover multiplas quebras de linha
         text = re.sub(r'\n{3,}', '\n\n', text)
-
-        # Remover espacos multiplos
         text = re.sub(r' {2,}', ' ', text)
-
         return text.strip()
 
     @staticmethod
@@ -252,23 +219,13 @@ class EmbeddingService:
         return hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
 
     async def generate_embedding(self, text: str) -> List[float]:
-        """
-        Gera embedding para um texto com preprocessamento
-
-        Args:
-            text: Texto para gerar embedding
-
-        Returns:
-            Lista de floats representando o vetor
-        """
+        """Gera embedding para um texto com preprocessamento"""
         if not self.api_key:
             raise ValueError("OpenAI API key nao configurada")
 
-        # Preprocessar texto
         text = self.preprocess_for_embedding(text)
 
-        # Limitar tamanho (~4 chars por token, modelo suporta 8191 tokens)
-        max_chars = 8000 * 4
+        max_chars = settings.embedding_max_chars
         if len(text) > max_chars:
             text = text[:max_chars]
 
@@ -278,30 +235,24 @@ class EmbeddingService:
                 input=text
             )
             return response.data[0].embedding
-
         except Exception as e:
             raise ValueError(f"Erro ao gerar embedding: {str(e)}")
 
     async def generate_embeddings_batch(
         self,
         texts: List[str],
-        batch_size: int = 20
+        batch_size: Optional[int] = None,
     ) -> List[List[float]]:
-        """
-        Gera embeddings em lote para melhor performance
-
-        Args:
-            texts: Lista de textos
-            batch_size: Tamanho do lote
-
-        Returns:
-            Lista de vetores
-        """
+        """Gera embeddings em lote"""
+        _batch_size = batch_size or settings.embedding_batch_size
         all_embeddings = []
 
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            processed = [self.preprocess_for_embedding(t)[:32000] for t in batch]
+        for i in range(0, len(texts), _batch_size):
+            batch = texts[i:i + _batch_size]
+            processed = [
+                self.preprocess_for_embedding(t)[:settings.embedding_max_chars]
+                for t in batch
+            ]
 
             try:
                 response = await self.client.embeddings.create(
@@ -312,54 +263,129 @@ class EmbeddingService:
                 all_embeddings.extend(batch_embeddings)
             except Exception as e:
                 logger.error(f"Erro no batch de embeddings: {e}")
-                # Fallback: gerar individualmente
-                for text in processed:
+                for t in processed:
                     try:
                         resp = await self.client.embeddings.create(
-                            model=self.model, input=text
+                            model=self.model, input=t
                         )
                         all_embeddings.append(resp.data[0].embedding)
                     except Exception:
-                        all_embeddings.append([0.0] * 1536)
+                        all_embeddings.append([0.0] * settings.embedding_dimensions)
 
         return all_embeddings
 
-    async def generate_embeddings_for_chunk(
+    # ================================================================
+    # VectorStore-backed operations
+    # ================================================================
+
+    async def store_embedding(
         self,
-        db: Session,
-        chunk_id: int
+        chunk_id: int,
+        vector: List[float],
+        metadata: Optional[Dict[str, Any]] = None,
+        content: Optional[str] = None,
+    ) -> None:
+        """Armazena embedding no VectorStore configurado"""
+        store = get_vector_store()
+        meta = metadata or {}
+        meta["model"] = self.model
+        await store.upsert(
+            id=str(chunk_id),
+            vector=vector,
+            metadata=meta,
+            content=content,
+        )
+
+    async def store_embeddings_batch(
+        self,
+        chunk_ids: List[int],
+        vectors: List[List[float]],
+        metadatas: Optional[List[Dict[str, Any]]] = None,
+        contents: Optional[List[str]] = None,
+    ) -> None:
+        """Armazena embeddings em lote"""
+        store = get_vector_store()
+        ids = [str(cid) for cid in chunk_ids]
+        metas = metadatas or [{"model": self.model} for _ in chunk_ids]
+        await store.upsert_batch(ids, vectors, metas, contents)
+
+    async def search_vectors(
+        self,
+        query: str,
+        limit: Optional[int] = None,
+        threshold: Optional[float] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Busca vetorial usando o VectorStore configurado
+
+        Returns:
+            Lista de dicts com id, score, metadata, content
+        """
+        query_vector = await self.generate_embedding(query)
+        store = get_vector_store()
+
+        results = await store.search(
+            query_vector=query_vector,
+            limit=limit or settings.vector_search_limit,
+            threshold=threshold or settings.vector_search_threshold,
+            filters=filters,
+        )
+
+        return [
+            {
+                "id": r.id,
+                "score": r.score,
+                "metadata": r.metadata,
+                "content": r.content,
+            }
+            for r in results
+        ]
+
+    # ================================================================
+    # Legacy compatibility (used by existing code)
+    # ================================================================
+
+    async def generate_embeddings_for_chunk(
+        self, db: Session, chunk_id: int
     ) -> Embedding:
-        """Gera embedding para um chunk especifico"""
+        """Gera embedding para um chunk especifico (compatibilidade)"""
         chunk = db.query(Chunk).filter(Chunk.id == chunk_id).first()
         if not chunk:
             raise ValueError(f"Chunk {chunk_id} nao encontrado")
 
         vector = await self.generate_embedding(chunk.content)
 
+        # Salvar no banco relacional
         embedding = Embedding(
             chunk_id=chunk.id,
             model=self.model,
             vector=vector
         )
-
         db.add(embedding)
         db.commit()
         db.refresh(embedding)
 
+        # Salvar no VectorStore
+        await self.store_embedding(
+            chunk_id=chunk.id,
+            vector=vector,
+            metadata={
+                "candidate_id": chunk.candidate_id,
+                "document_id": chunk.document_id,
+                "section": chunk.section,
+            },
+            content=chunk.content,
+        )
+
         return embedding
 
     async def generate_embeddings_for_document(
-        self,
-        db: Session,
-        document_id: int
+        self, db: Session, document_id: int
     ) -> List[Embedding]:
-        """
-        Gera embeddings para todos os chunks de um documento.
-        Usa batch processing para eficiencia.
-        """
+        """Gera embeddings para todos os chunks de um documento"""
         chunks = db.query(Chunk).filter(Chunk.document_id == document_id).all()
 
-        # Filtrar chunks que ja tem embedding
         chunks_needing_embedding = []
         existing_embeddings = []
 
@@ -375,11 +401,14 @@ class EmbeddingService:
         if not chunks_needing_embedding:
             return existing_embeddings
 
-        # Gerar embeddings em batch
         texts = [c.content for c in chunks_needing_embedding]
         vectors = await self.generate_embeddings_batch(texts)
 
         new_embeddings = []
+        chunk_ids = []
+        metadatas = []
+        contents = []
+
         for chunk, vector in zip(chunks_needing_embedding, vectors):
             embedding = Embedding(
                 chunk_id=chunk.id,
@@ -389,9 +418,24 @@ class EmbeddingService:
             db.add(embedding)
             new_embeddings.append(embedding)
 
+            chunk_ids.append(chunk.id)
+            metadatas.append({
+                "candidate_id": chunk.candidate_id,
+                "document_id": chunk.document_id,
+                "section": chunk.section,
+                "model": self.model,
+            })
+            contents.append(chunk.content)
+
         db.commit()
         for emb in new_embeddings:
             db.refresh(emb)
+
+        # Salvar no VectorStore
+        if chunk_ids:
+            await self.store_embeddings_batch(
+                chunk_ids, vectors, metadatas, contents
+            )
 
         return existing_embeddings + new_embeddings
 
@@ -400,44 +444,25 @@ class EmbeddingService:
         db: Session,
         query: str,
         limit: int = 10,
-        threshold: float = 0.3
+        threshold: Optional[float] = None,
     ) -> List[Tuple[Chunk, float]]:
-        """
-        Busca semantica por similaridade vetorial
+        """Busca semantica (compatibilidade com API existente)"""
+        _threshold = threshold if threshold is not None else settings.vector_search_threshold
 
-        Usa threshold baixo por padrao (0.3) para nao perder resultados relevantes.
-        """
-        query_embedding = await self.generate_embedding(query)
-
-        sql = text("""
-            SELECT
-                c.id,
-                c.document_id,
-                c.candidate_id,
-                c.section,
-                c.content,
-                1 - (e.vector <=> :query_vector::vector) as similarity
-            FROM chunks c
-            JOIN embeddings e ON e.chunk_id = c.id
-            WHERE 1 - (e.vector <=> :query_vector::vector) >= :threshold
-            ORDER BY e.vector <=> :query_vector::vector
-            LIMIT :limit
-        """)
-
-        result = db.execute(
-            sql,
-            {
-                "query_vector": str(query_embedding),
-                "threshold": threshold,
-                "limit": limit
-            }
+        vector_results = await self.search_vectors(
+            query=query, limit=limit, threshold=_threshold
         )
 
         results = []
-        for row in result:
-            chunk = db.query(Chunk).filter(Chunk.id == row.id).first()
+        for vr in vector_results:
+            try:
+                chunk_id = int(vr["id"])
+            except (ValueError, TypeError):
+                continue
+
+            chunk = db.query(Chunk).filter(Chunk.id == chunk_id).first()
             if chunk:
-                results.append((chunk, row.similarity))
+                results.append((chunk, vr["score"]))
 
         return results
 
@@ -447,30 +472,16 @@ class EmbeddingService:
         query: str,
         filters: Optional[dict] = None,
         limit: int = 10,
-        vector_weight: float = 0.4,
-        text_weight: float = 0.3,
-        filter_weight: float = 0.2,
-        domain_weight: float = 0.1,
     ) -> List[Tuple[Candidate, float]]:
         """
-        Busca hibrida combinando multiplas estrategias com pesos configuraveis
-
-        Args:
-            db: Sessao do banco
-            query: Texto da busca
-            filters: Filtros adicionais (city, state, skills, etc.)
-            limit: Numero maximo de resultados
-            vector_weight: Peso da busca vetorial (padrao 0.4)
-            text_weight: Peso da busca full-text (padrao 0.3)
-            filter_weight: Peso dos filtros (padrao 0.2)
-            domain_weight: Peso do dominio (padrao 0.1)
-
-        Returns:
-            Lista de tuplas (Candidate, score)
+        Busca hibrida combinando multiplas estrategias.
+        Pesos configurados via settings.
         """
         query_embedding = await self.generate_embedding(query)
+        dist_op = settings.pgvector_distance_operator
+        similarity_expr = settings.get_similarity_expression("e.vector", ":query_vector")
+        pre_threshold = settings.vector_search_pre_filter_threshold
 
-        # Construir clausulas de filtro dinamicamente
         filter_clauses = ""
         filter_params = {}
 
@@ -482,14 +493,16 @@ class EmbeddingService:
                 filter_clauses += " AND LOWER(cand.state) = LOWER(:filter_state)"
                 filter_params["filter_state"] = filters["state"]
 
+        fts_lang = settings.fts_language
+
         sql = text(f"""
             WITH vector_scores AS (
                 SELECT
                     c.candidate_id,
-                    AVG(1 - (e.vector <=> :query_vector::vector)) * :vector_w as vector_score
+                    AVG({similarity_expr}) * :vector_w as vector_score
                 FROM chunks c
                 JOIN embeddings e ON e.chunk_id = c.id
-                WHERE 1 - (e.vector <=> :query_vector::vector) >= 0.2
+                WHERE {similarity_expr} >= :pre_threshold
                 GROUP BY c.candidate_id
             ),
             text_scores AS (
@@ -497,12 +510,13 @@ class EmbeddingService:
                     c.candidate_id,
                     MAX(
                         ts_rank_cd(
-                            to_tsvector('portuguese', c.content),
-                            plainto_tsquery('portuguese', :query_text)
+                            to_tsvector('{fts_lang}', c.content),
+                            plainto_tsquery('{fts_lang}', :query_text)
                         )
                     ) * :text_w as text_score
                 FROM chunks c
-                WHERE to_tsvector('portuguese', c.content) @@ plainto_tsquery('portuguese', :query_text)
+                WHERE to_tsvector('{fts_lang}', c.content)
+                    @@ plainto_tsquery('{fts_lang}', :query_text)
                 GROUP BY c.candidate_id
             ),
             domain_scores AS (
@@ -529,7 +543,8 @@ class EmbeddingService:
             LEFT JOIN vector_scores vs ON vs.candidate_id = cand.id
             LEFT JOIN text_scores ts ON ts.candidate_id = cand.id
             LEFT JOIN domain_scores ds ON ds.candidate_id = cand.id
-            WHERE (COALESCE(vs.vector_score, 0) + COALESCE(ts.text_score, 0) + COALESCE(ds.domain_score, 0)) > 0
+            WHERE (COALESCE(vs.vector_score, 0) + COALESCE(ts.text_score, 0)
+                   + COALESCE(ds.domain_score, 0)) > 0
             {filter_clauses}
             ORDER BY total_score DESC
             LIMIT :limit
@@ -538,9 +553,10 @@ class EmbeddingService:
         params = {
             "query_vector": str(query_embedding),
             "query_text": query,
-            "vector_w": vector_weight,
-            "text_w": text_weight,
-            "domain_w": domain_weight,
+            "vector_w": settings.hybrid_vector_weight,
+            "text_w": settings.hybrid_text_weight,
+            "domain_w": settings.hybrid_domain_weight,
+            "pre_threshold": pre_threshold,
             "limit": limit,
             **filter_params,
         }

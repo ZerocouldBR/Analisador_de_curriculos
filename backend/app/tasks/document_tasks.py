@@ -268,7 +268,9 @@ def process_document_task(
 
         # Usar chunking semantico para o texto completo
         semantic_chunks = SemanticChunker.create_semantic_chunks(
-            text, section_name="full_text", chunk_size=1500, overlap=200
+            text, section_name="full_text",
+            chunk_size=settings.chunk_size,
+            overlap=settings.chunk_overlap,
         )
 
         sections = [
@@ -345,7 +347,7 @@ def process_document_task(
                 # Create enhanced metadata for this chunk
                 chunk_metadata = KeywordExtractionService.create_chunk_metadata(
                     section=section_name,
-                    content=section_content[:10000],
+                    content=section_content[:settings.chunk_max_content_size],
                     keywords=document_keywords,
                     chunk_index=chunks_created,
                     total_chunks=total_sections
@@ -380,7 +382,7 @@ def process_document_task(
                     document_id=document.id,
                     candidate_id=document.candidate_id,
                     section=section_name,
-                    content=section_content[:10000],
+                    content=section_content[:settings.chunk_max_content_size],
                     meta_json=chunk_metadata
                 )
                 db.add(chunk)

@@ -87,14 +87,36 @@ class TextExtractionService:
     - HTML (via BeautifulSoup)
     """
 
-    # Resolucoes para tentativa adaptativa de OCR
-    OCR_RESOLUTIONS = [300, 400, 200]
+    # Valores carregados de settings (sem hardcoding)
+    @staticmethod
+    def _ocr_resolutions():
+        from app.core.config import settings
+        return settings.ocr_resolutions
 
-    # Limiar minimo de caracteres para considerar pagina com texto
-    MIN_TEXT_CHARS = 30
+    @staticmethod
+    def _min_text_chars():
+        from app.core.config import settings
+        return settings.ocr_min_text_chars
 
-    # Confianca minima aceitavel para OCR
-    MIN_OCR_CONFIDENCE = 30.0
+    @staticmethod
+    def _min_ocr_confidence():
+        from app.core.config import settings
+        return settings.ocr_min_confidence
+
+    @staticmethod
+    def _ocr_languages():
+        from app.core.config import settings
+        return settings.ocr_languages
+
+    @staticmethod
+    def _ocr_psm_modes():
+        from app.core.config import settings
+        return settings.ocr_psm_modes
+
+    @staticmethod
+    def _ocr_max_images():
+        from app.core.config import settings
+        return settings.ocr_max_images_per_docx
 
     # MIME types de imagem suportados (incluindo formatos modernos)
     SUPPORTED_IMAGE_MIMES = {
@@ -248,7 +270,7 @@ class TextExtractionService:
                         pass
 
                     # Decidir se precisa OCR
-                    has_sufficient_text = len(direct_text) >= TextExtractionService.MIN_TEXT_CHARS
+                    has_sufficient_text = len(direct_text) >= TextExtractionService._min_text_chars()
                     page_confidence = 1.0
 
                     if has_sufficient_text:
@@ -266,7 +288,7 @@ class TextExtractionService:
                             page_confidence = ocr_confidence / 100.0
                             pages_with_ocr += 1
 
-                            if ocr_confidence < TextExtractionService.MIN_OCR_CONFIDENCE:
+                            if ocr_confidence < TextExtractionService._min_ocr_confidence():
                                 warnings.append(
                                     f"Pagina {page_num + 1}: OCR com baixa confianca "
                                     f"({ocr_confidence:.1f}%)"
@@ -333,7 +355,7 @@ class TextExtractionService:
         best_text = ""
         best_confidence = 0.0
 
-        for resolution in TextExtractionService.OCR_RESOLUTIONS:
+        for resolution in TextExtractionService._ocr_resolutions():
             try:
                 # Converter pagina para imagem
                 page_image = page.to_image(resolution=resolution).original
@@ -344,7 +366,7 @@ class TextExtractionService:
                 # OCR com dados de confianca
                 ocr_data = pytesseract.image_to_data(
                     processed_image,
-                    lang='por+eng',
+                    lang=TextExtractionService._ocr_languages(),
                     output_type=pytesseract.Output.DICT,
                     config='--oem 3 --psm 6'
                 )
@@ -681,11 +703,11 @@ class TextExtractionService:
             best_confidence = 0.0
             best_psm = 6
 
-            for psm in TextExtractionService.PSM_MODES:
+            for psm in TextExtractionService._ocr_psm_modes():
                 try:
                     ocr_data = pytesseract.image_to_data(
                         processed,
-                        lang='por+eng',
+                        lang=TextExtractionService._ocr_languages(),
                         output_type=pytesseract.Output.DICT,
                         config=f'--oem 3 --psm {psm}'
                     )
@@ -720,7 +742,7 @@ class TextExtractionService:
             language = TextExtractionService.detect_language(best_text)
 
             warnings = []
-            if best_confidence < TextExtractionService.MIN_OCR_CONFIDENCE:
+            if best_confidence < TextExtractionService._min_ocr_confidence():
                 warnings.append(f"Baixa confianca do OCR: {best_confidence:.1f}%")
             if not best_text.strip():
                 warnings.append("Nenhum texto detectado na imagem")
@@ -800,7 +822,7 @@ class TextExtractionService:
                     )
                 ]
 
-                for img_file in image_files[:10]:  # Limitar a 10 imagens
+                for img_file in image_files[:TextExtractionService._ocr_max_images()]:
                     try:
                         img_data = zip_ref.read(img_file)
                         image = Image.open(io.BytesIO(img_data))
@@ -811,7 +833,7 @@ class TextExtractionService:
 
                         processed = TextExtractionService._preprocess_image(image)
                         ocr_text = pytesseract.image_to_string(
-                            processed, lang='por+eng',
+                            processed, lang=TextExtractionService._ocr_languages(),
                             config='--oem 3 --psm 6'
                         ).strip()
 

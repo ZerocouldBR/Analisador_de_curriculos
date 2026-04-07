@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import health, settings, candidates, linkedin, auth, documents, search, websocket, chat
+from app.api.v1 import health, settings, candidates, linkedin, auth, documents, search, websocket, chat, vectordb
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -11,4 +11,5 @@ api_router.include_router(documents.router, prefix="/v1")
 api_router.include_router(search.router, prefix="/v1")
 api_router.include_router(linkedin.router, prefix="/v1")
 api_router.include_router(chat.router, prefix="/v1")
+api_router.include_router(vectordb.router, prefix="/v1")
 api_router.include_router(websocket.router, prefix="/v1", tags=["websocket"])

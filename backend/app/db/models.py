@@ -148,8 +148,8 @@ class Embedding(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     chunk_id = Column(Integer, ForeignKey("chunks.id", ondelete="CASCADE"), nullable=False)
-    model = Column(String, default="text-embedding-3-small")
-    vector = Column(Vector(1536))  # Dimensão padrão do OpenAI embedding
+    model = Column(String)
+    vector = Column(Vector(1536))  # Dimensao configurada via EMBEDDING_DIMENSIONS
     created_at = Column(DateTime, default=_utcnow)
 
     # Relacionamentos
