@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.db.models import Chunk, Embedding, Candidate
-from app.core.config import settings
+from app.core.config import settings, EmbeddingMode
 from app.vectorstore import get_vector_store
 
 logger = logging.getLogger(__name__)
@@ -170,20 +170,45 @@ class EmbeddingService:
     """
     Servico para geracao de embeddings e busca vetorial.
 
-    Usa VectorStore para armazenamento e busca,
-    tornando o servico agnostico ao provedor.
+    Suporta dois modos de vetorizacao:
+    - API: Usa OpenAI ou outro provedor de API (custo por token)
+    - CODE: Usa sentence-transformers local (custo zero de API)
+
+    O modo e definido por settings.embedding_mode.
+    Usa VectorStore para armazenamento e busca.
     """
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.openai_api_key
         self.model = settings.embedding_model
         self._client: Optional[AsyncOpenAI] = None
+        self._local_service = None
+
+    @property
+    def is_local_mode(self) -> bool:
+        """Verifica se esta no modo de vetorizacao local (code)"""
+        return settings.embedding_mode == EmbeddingMode.CODE
+
+    @property
+    def active_model_name(self) -> str:
+        """Retorna o nome do modelo ativo baseado no modo"""
+        if self.is_local_mode:
+            return settings.embedding_local_model
+        return self.model
+
+    @property
+    def local_service(self):
+        """Lazy-load do servico local"""
+        if self._local_service is None:
+            from app.services.local_embedding_service import LocalEmbeddingService
+            self._local_service = LocalEmbeddingService()
+        return self._local_service
 
     @property
     def client(self) -> AsyncOpenAI:
         if self._client is None:
             if not self.api_key:
-                raise ValueError("OpenAI API key nao configurada")
+                raise ValueError("OpenAI API key nao configurada. Use EMBEDDING_MODE=code para vetorizacao local.")
             kwargs = {"api_key": self.api_key}
             if settings.openai_base_url:
                 kwargs["base_url"] = settings.openai_base_url
@@ -219,11 +244,14 @@ class EmbeddingService:
         return hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
 
     async def generate_embedding(self, text: str) -> List[float]:
-        """Gera embedding para um texto com preprocessamento"""
-        if not self.api_key:
-            raise ValueError("OpenAI API key nao configurada")
-
+        """Gera embedding para um texto com preprocessamento (API ou local)"""
         text = self.preprocess_for_embedding(text)
+
+        if self.is_local_mode:
+            return self.local_service.generate_embedding(text)
+
+        if not self.api_key:
+            raise ValueError("OpenAI API key nao configurada. Use EMBEDDING_MODE=code para vetorizacao local.")
 
         max_chars = settings.embedding_max_chars
         if len(text) > max_chars:
@@ -243,34 +271,39 @@ class EmbeddingService:
         texts: List[str],
         batch_size: Optional[int] = None,
     ) -> List[List[float]]:
-        """Gera embeddings em lote"""
+        """Gera embeddings em lote (API ou local)"""
         _batch_size = batch_size or settings.embedding_batch_size
+
+        processed = [
+            self.preprocess_for_embedding(t)[:settings.embedding_max_chars]
+            for t in texts
+        ]
+
+        if self.is_local_mode:
+            return self.local_service.generate_embeddings_batch(processed, _batch_size)
+
         all_embeddings = []
 
-        for i in range(0, len(texts), _batch_size):
-            batch = texts[i:i + _batch_size]
-            processed = [
-                self.preprocess_for_embedding(t)[:settings.embedding_max_chars]
-                for t in batch
-            ]
+        for i in range(0, len(processed), _batch_size):
+            batch = processed[i:i + _batch_size]
 
             try:
                 response = await self.client.embeddings.create(
                     model=self.model,
-                    input=processed
+                    input=batch
                 )
                 batch_embeddings = [item.embedding for item in response.data]
                 all_embeddings.extend(batch_embeddings)
             except Exception as e:
                 logger.error(f"Erro no batch de embeddings: {e}")
-                for t in processed:
+                for t in batch:
                     try:
                         resp = await self.client.embeddings.create(
                             model=self.model, input=t
                         )
                         all_embeddings.append(resp.data[0].embedding)
                     except Exception:
-                        all_embeddings.append([0.0] * settings.embedding_dimensions)
+                        all_embeddings.append([0.0] * settings.active_embedding_dimensions)
 
         return all_embeddings
 

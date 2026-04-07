@@ -133,6 +133,35 @@ def require_role(role_name: str):
     return role_checker
 
 
+def get_company_id(current_user: User = Depends(get_current_user)) -> Optional[int]:
+    """
+    Dependency que retorna o company_id do usuario atual.
+    Usado para filtrar dados por tenant (multi-tenant).
+    Superusers sem company_id veem tudo.
+    """
+    return current_user.company_id
+
+
+def require_same_company(company_id: int):
+    """
+    Dependency factory para verificar que o usuario pertence a empresa especificada.
+    Superusers podem acessar qualquer empresa.
+    """
+    async def company_checker(
+        current_user: User = Depends(get_current_user)
+    ) -> User:
+        if current_user.is_superuser:
+            return current_user
+        if current_user.company_id != company_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado: usuario nao pertence a esta empresa"
+            )
+        return current_user
+
+    return company_checker
+
+
 async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
     db: Session = Depends(get_db)

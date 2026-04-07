@@ -39,6 +39,12 @@ class EmbeddingProvider(str, Enum):
     # Extensivel para: huggingface, cohere, local, etc.
 
 
+class EmbeddingMode(str, Enum):
+    """Modo de vetorizacao"""
+    API = "api"        # Vetorizacao via API externa (OpenAI, etc.)
+    CODE = "code"      # Vetorizacao local via sentence-transformers
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -106,17 +112,33 @@ class Settings(BaseSettings):
     # ================================================================
     # Configuracoes de Embeddings
     # ================================================================
+    embedding_mode: EmbeddingMode = Field(
+        default=EmbeddingMode.API,
+        description="Modo de vetorizacao: api (OpenAI etc.) ou code (local sentence-transformers)"
+    )
     embedding_provider: EmbeddingProvider = Field(
         default=EmbeddingProvider.OPENAI,
-        description="Provedor de embeddings"
+        description="Provedor de embeddings (modo API)"
     )
     embedding_model: str = Field(
         default="text-embedding-3-small",
-        description="Modelo de embeddings"
+        description="Modelo de embeddings (API ou local)"
+    )
+    embedding_local_model: str = Field(
+        default="all-MiniLM-L6-v2",
+        description="Modelo sentence-transformers para vetorizacao local (modo code)"
+    )
+    embedding_local_device: str = Field(
+        default="cpu",
+        description="Device para modelo local: cpu, cuda, mps"
     )
     embedding_dimensions: int = Field(
         default=1536,
         description="Dimensoes do vetor de embedding (depende do modelo)"
+    )
+    embedding_local_dimensions: int = Field(
+        default=384,
+        description="Dimensoes do vetor para modelo local (all-MiniLM-L6-v2 = 384)"
     )
     embedding_batch_size: int = Field(
         default=20,
@@ -126,6 +148,13 @@ class Settings(BaseSettings):
         default=32000,
         description="Maximo de caracteres por texto para embedding"
     )
+
+    @property
+    def active_embedding_dimensions(self) -> int:
+        """Retorna dimensoes do embedding ativo baseado no modo"""
+        if self.embedding_mode == EmbeddingMode.CODE:
+            return self.embedding_local_dimensions
+        return self.embedding_dimensions
 
     # ================================================================
     # APIs Externas
@@ -211,6 +240,82 @@ class Settings(BaseSettings):
 
     # Full-text search
     fts_language: str = Field(default="portuguese", description="Idioma do full-text search")
+
+    # ================================================================
+    # Multi-Tenant / Empresas
+    # ================================================================
+    multi_tenant_enabled: bool = Field(
+        default=True,
+        description="Habilitar multi-tenant (cada empresa ve apenas seus curriculos)"
+    )
+    default_company_name: str = Field(
+        default="Empresa Padrao",
+        description="Nome da empresa padrao para novos usuarios"
+    )
+
+    # ================================================================
+    # Branding / Logo
+    # ================================================================
+    company_logo_max_size_kb: int = Field(
+        default=500,
+        description="Tamanho maximo do logo da empresa (KB)"
+    )
+    company_logo_allowed_formats: List[str] = Field(
+        default=["png", "jpg", "jpeg", "svg", "webp"],
+        description="Formatos de imagem permitidos para logo"
+    )
+    company_logo_path: str = Field(
+        default="./uploads/logos",
+        description="Diretorio para armazenamento dos logos"
+    )
+
+    # ================================================================
+    # Precificacao e Uso de IA
+    # ================================================================
+    ai_pricing_enabled: bool = Field(
+        default=True,
+        description="Habilitar calculo de custo de uso da IA"
+    )
+
+    # Precos por 1000 tokens (USD) - configuraveis via env
+    ai_price_embedding_input: float = Field(
+        default=0.00002,
+        description="Preco por 1K tokens de input para embeddings (USD)"
+    )
+    ai_price_llm_input: float = Field(
+        default=0.01,
+        description="Preco por 1K tokens de input para LLM (USD)"
+    )
+    ai_price_llm_output: float = Field(
+        default=0.03,
+        description="Preco por 1K tokens de output para LLM (USD)"
+    )
+    ai_price_chat_input: float = Field(
+        default=0.01,
+        description="Preco por 1K tokens de input para chat (USD)"
+    )
+    ai_price_chat_output: float = Field(
+        default=0.03,
+        description="Preco por 1K tokens de output para chat (USD)"
+    )
+    ai_currency: str = Field(
+        default="USD",
+        description="Moeda para calculo de custos (USD, BRL, EUR)"
+    )
+    ai_currency_exchange_rate: float = Field(
+        default=1.0,
+        description="Taxa de conversao para moeda local (ex: 5.0 para BRL)"
+    )
+
+    # Limites de uso por empresa
+    ai_monthly_token_limit: int = Field(
+        default=0,
+        description="Limite mensal de tokens por empresa (0 = ilimitado)"
+    )
+    ai_monthly_cost_limit: float = Field(
+        default=0.0,
+        description="Limite mensal de custo por empresa em moeda configurada (0 = ilimitado)"
+    )
 
     # ================================================================
     # Seguranca e Autenticacao

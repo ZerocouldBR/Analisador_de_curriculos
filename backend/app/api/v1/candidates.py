@@ -10,8 +10,9 @@ from app.schemas.candidate import (
     DocumentResponse
 )
 from app.services.candidate_service import CandidateService
+from app.core.config import settings
 from app.core.dependencies import get_current_user, require_permission
-from app.db.models import User
+from app.db.models import User, Candidate
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -26,16 +27,19 @@ def list_candidates(
     current_user: User = Depends(require_permission("candidates.read"))
 ):
     """
-    Lista todos os candidatos com filtros opcionais
+    Lista candidatos com filtros opcionais.
+    Multi-tenant: cada usuario ve apenas candidatos da sua empresa.
 
     **Requer permissão:** candidates.read
     """
+    company_id = current_user.company_id if settings.multi_tenant_enabled and not current_user.is_superuser else None
     candidates = CandidateService.get_candidates(
         db,
         skip=skip,
         limit=limit,
         city=city,
-        state=state
+        state=state,
+        company_id=company_id,
     )
     return candidates
 
@@ -71,7 +75,9 @@ def create_candidate(
 
     **Requer permissão:** candidates.create
     """
-    return CandidateService.create_candidate(db, candidate, user_id=current_user.id)
+    return CandidateService.create_candidate(
+        db, candidate, user_id=current_user.id, company_id=current_user.company_id
+    )
 
 
 @router.put("/{candidate_id}", response_model=CandidateResponse)

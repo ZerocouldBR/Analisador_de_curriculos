@@ -55,6 +55,10 @@ supabase>=2.0.0
 # qdrant: pip install qdrant-client
 qdrant-client>=1.7.0
 
+# Vetorizacao local (EMBEDDING_MODE=code) - opcional
+# sentence-transformers: pip install sentence-transformers
+sentence-transformers>=2.2.0
+
 # Encryption (PII protection)
 cryptography>=41.0.0
 
