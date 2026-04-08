@@ -73,9 +73,9 @@ def create_app() -> FastAPI:
     📚 **Documentação Completa:** `/docs/novas_funcionalidades.md`
     """
 
-    # Disable OpenAPI docs in production
-    docs_url = "/docs" if settings.debug else None
-    redoc_url = "/redoc" if settings.debug else None
+    # Enable OpenAPI docs by default, disable only in production with DEBUG=false
+    docs_url = "/docs"
+    redoc_url = "/redoc"
 
     application = FastAPI(
         title="Analisador de Currículos",

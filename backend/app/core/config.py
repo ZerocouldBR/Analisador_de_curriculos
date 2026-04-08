@@ -20,10 +20,16 @@ Categorias:
 - Seguranca e criptografia
 - Celery e filas
 """
+import secrets
+import warnings
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, List
 from enum import Enum
+
+# Chave default para desenvolvimento local - NUNCA usar em producao
+_DEV_SECRET_KEY = secrets.token_urlsafe(32)
 
 
 class VectorDBProvider(str, Enum):
@@ -415,8 +421,8 @@ class Settings(BaseSettings):
     # Seguranca e Autenticacao
     # ================================================================
     secret_key: str = Field(
-        ...,
-        description="Chave secreta para JWT. OBRIGATORIO via env var SECRET_KEY."
+        default=_DEV_SECRET_KEY,
+        description="Chave secreta para JWT. Defina SECRET_KEY em .env para producao."
     )
     algorithm: str = Field(default="HS256", description="Algoritmo de assinatura JWT")
     access_token_expire_minutes: int = Field(default=15, description="TTL do access token (minutos)")
@@ -519,3 +525,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+if settings.secret_key == _DEV_SECRET_KEY:
+    warnings.warn(
+        "\n⚠️  SECRET_KEY nao definida! Usando chave temporaria (tokens JWT invalidados a cada restart)."
+        "\n   Para producao, defina SECRET_KEY no arquivo .env:"
+        "\n   python -c \"import secrets; print(secrets.token_urlsafe(32))\"",
+        stacklevel=1,
+    )
