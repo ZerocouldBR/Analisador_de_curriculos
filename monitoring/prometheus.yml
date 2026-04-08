@@ -19,19 +19,19 @@ scrape_configs:
         labels:
           service: 'celery'
 
-  # Redis Metrics
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis:6379']
-        labels:
-          service: 'redis'
+  # Redis Metrics (requires redis_exporter container - uncomment when added)
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
+  #       labels:
+  #         service: 'redis'
 
-  # PostgreSQL Metrics (requires postgres_exporter if needed)
-  - job_name: 'postgres'
-    static_configs:
-      - targets: ['db:5432']
-        labels:
-          service: 'postgres'
+  # PostgreSQL Metrics (requires postgres_exporter container - uncomment when added)
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
+  #       labels:
+  #         service: 'postgres'
 
   # Prometheus Self-Monitoring
   - job_name: 'prometheus'
