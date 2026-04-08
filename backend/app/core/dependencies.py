@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, WebSocket, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -160,6 +160,33 @@ def require_same_company(company_id: int):
         return current_user
 
     return company_checker
+
+
+async def get_current_user_ws(
+    websocket: WebSocket,
+    token: str = Query(...),
+) -> User:
+    """
+    Dependency para autenticar usuario via WebSocket usando token na query string.
+    """
+    from app.db.database import SessionLocal
+
+    token_data = decode_access_token(token)
+    if token_data is None:
+        await websocket.close(code=1008, reason="Token inválido ou expirado")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == token_data.user_id).first()
+    finally:
+        db.close()
+
+    if user is None or user.status != "active":
+        await websocket.close(code=1008, reason="Usuário não encontrado ou inativo")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário não encontrado")
+
+    return user
 
 
 async def get_optional_user(
