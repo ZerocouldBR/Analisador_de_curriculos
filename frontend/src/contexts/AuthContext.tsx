@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { User, LoginRequest, RegisterRequest } from '../types';
 import { apiService } from '../services/api';
 import { websocketService } from '../services/websocket';
@@ -9,7 +9,9 @@ interface AuthContextType {
   login: (credentials: LoginRequest) => Promise<void>;
   register: (data: RegisterRequest) => Promise<void>;
   logout: () => void;
+  updateUser: (user: User) => void;
   isAuthenticated: boolean;
+  isSuperuser: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -37,12 +39,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         try {
           const currentUser = await apiService.getCurrentUser();
           setUser(currentUser);
-
-          // Connect WebSocket
           websocketService.connect(token);
         } catch (error) {
           console.error('Failed to get current user:', error);
           localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
         }
       }
       setLoading(false);
@@ -51,35 +52,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     initAuth();
   }, []);
 
-  const login = async (credentials: LoginRequest) => {
-    try {
-      const response = await apiService.login(credentials);
-      setUser(response.user);
+  const login = useCallback(async (credentials: LoginRequest) => {
+    const response = await apiService.login(credentials);
+    setUser(response.user);
+    websocketService.connect(response.access_token);
+  }, []);
 
-      // Connect WebSocket
-      websocketService.connect(response.access_token);
-    } catch (error) {
-      console.error('Login failed:', error);
-      throw error;
-    }
-  };
+  const register = useCallback(async (data: RegisterRequest) => {
+    await apiService.register(data);
+    await login({ email: data.email, password: data.password });
+  }, [login]);
 
-  const register = async (data: RegisterRequest) => {
-    try {
-      await apiService.register(data);
-      // After registration, login automatically
-      await login({ email: data.email, password: data.password });
-    } catch (error) {
-      console.error('Registration failed:', error);
-      throw error;
-    }
-  };
-
-  const logout = () => {
+  const logout = useCallback(() => {
     websocketService.disconnect();
-    apiService.logout();
     setUser(null);
-  };
+    apiService.logout();
+  }, []);
+
+  const updateUser = useCallback((updatedUser: User) => {
+    setUser(updatedUser);
+  }, []);
 
   const value: AuthContextType = {
     user,
@@ -87,7 +79,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     login,
     register,
     logout,
+    updateUser,
     isAuthenticated: !!user,
+    isSuperuser: !!user?.is_superuser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
