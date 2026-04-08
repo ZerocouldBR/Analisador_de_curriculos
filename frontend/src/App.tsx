@@ -5,6 +5,7 @@ import { ThemeContextProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import ErrorBoundary from './components/ErrorBoundary';
+import AdminGuard from './components/AdminGuard';
 
 // Layout
 import Layout from './components/Layout';
@@ -99,10 +100,10 @@ function App() {
                   <Route path="search" element={<SearchPage />} />
                   <Route path="upload" element={<UploadPage />} />
                   <Route path="chat" element={<ChatPage />} />
-                  <Route path="settings" element={<SettingsPage />} />
-                  <Route path="roles" element={<RolesPage />} />
+                  <Route path="settings" element={<AdminGuard><SettingsPage /></AdminGuard>} />
+                  <Route path="roles" element={<AdminGuard><RolesPage /></AdminGuard>} />
                   <Route path="profile" element={<ProfilePage />} />
-                  <Route path="companies" element={<CompaniesPage />} />
+                  <Route path="companies" element={<AdminGuard><CompaniesPage /></AdminGuard>} />
                   <Route path="linkedin" element={<LinkedInPage />} />
                 </Route>
 

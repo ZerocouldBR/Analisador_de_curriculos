@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Instalar dependencias do sistema (Tesseract OCR + OpenCV)
+# Install system dependencies (Tesseract OCR + OpenCV)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-por \
@@ -18,15 +18,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Instalar dependencias Python
+# Install Python dependencies
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar codigo da aplicacao
+# Copy application code
 COPY app ./app
 
-# Criar diretorio de uploads
-RUN mkdir -p /app/uploads/logos
+# Create non-root user and set permissions
+RUN addgroup --system appgroup && \
+    adduser --system --ingroup appgroup appuser && \
+    mkdir -p /app/uploads/logos && \
+    chown -R appuser:appgroup /app
+
+USER appuser
 
 EXPOSE 8000
 
@@ -34,5 +39,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Iniciar com Uvicorn (producao: multiplos workers)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--log-level", "warning"]
+# Start with Uvicorn (production: multiple workers)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--log-level", "info"]

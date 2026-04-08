@@ -191,7 +191,15 @@ const CandidateDetailPage: React.FC = () => {
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
-                    <InfoItem icon={<Badge />} label="CPF" value={candidate.doc_id || ''} />
+                    <InfoItem
+                      icon={<Badge />}
+                      label="CPF"
+                      value={
+                        candidate.doc_id
+                          ? candidate.doc_id.replace(/^(\d{3})\d{3}\d{3}(\d{2})$/, '$1.***.***-$2')
+                          : ''
+                      }
+                    />
                   </Grid>
                   {candidate.address && (
                     <Grid item xs={12}>

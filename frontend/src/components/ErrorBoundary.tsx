@@ -22,7 +22,9 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary caught:', error, errorInfo);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('ErrorBoundary caught:', error, errorInfo);
+    }
   }
 
   private handleReset = () => {
@@ -59,22 +61,6 @@ class ErrorBoundary extends Component<Props, State> {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               Ocorreu um erro inesperado. Tente novamente ou recarregue a pagina.
             </Typography>
-            {this.state.error && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{
-                  display: 'block',
-                  mb: 3,
-                  p: 1,
-                  bgcolor: 'grey.100',
-                  borderRadius: 1,
-                  fontFamily: 'monospace',
-                }}
-              >
-                {this.state.error.message}
-              </Typography>
-            )}
             <Box display="flex" gap={2} justifyContent="center">
               <Button variant="outlined" onClick={this.handleReset}>
                 Tentar novamente

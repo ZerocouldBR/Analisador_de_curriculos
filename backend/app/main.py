@@ -1,5 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -70,11 +73,17 @@ def create_app() -> FastAPI:
     📚 **Documentação Completa:** `/docs/novas_funcionalidades.md`
     """
 
+    # Disable OpenAPI docs in production
+    docs_url = "/docs" if settings.debug else None
+    redoc_url = "/redoc" if settings.debug else None
+
     application = FastAPI(
         title="Analisador de Currículos",
         version=settings.app_version,
         description=description,
         lifespan=lifespan,
+        docs_url=docs_url,
+        redoc_url=redoc_url,
         contact={
             "name": "Equipe de Desenvolvimento",
             "url": "https://github.com/ZerocouldBR/Analisador_de_curriculos",
@@ -83,6 +92,21 @@ def create_app() -> FastAPI:
             "name": "MIT",
         }
     )
+
+    # Security headers middleware
+    class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            response: Response = await call_next(request)
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["X-XSS-Protection"] = "1; mode=block"
+            response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+            response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+            if request.url.scheme == "https":
+                response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            return response
+
+    application.add_middleware(SecurityHeadersMiddleware)
 
     # CORS middleware for frontend (configurable via CORS_ORIGINS env var)
     application.add_middleware(

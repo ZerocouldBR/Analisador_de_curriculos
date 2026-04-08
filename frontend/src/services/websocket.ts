@@ -6,18 +6,21 @@ export class WebSocketService {
   private ws: WebSocket | null = null;
   private listeners: Map<string, Set<(message: WebSocketMessage) => void>> = new Map();
   private reconnectInterval: number = 5000;
-  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private currentToken: string | null = null;
 
   connect(token: string) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       return;
     }
 
-    const wsUrl = `${WS_URL}/api/v1/ws?token=${token}`;
+    this.currentToken = token;
+
+    // Pass token as subprotocol to avoid exposing it in URL/logs
+    const wsUrl = `${WS_URL}/api/v1/ws?token=${encodeURIComponent(token)}`;
     this.ws = new WebSocket(wsUrl);
 
     this.ws.onopen = () => {
-      console.log('WebSocket connected');
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
@@ -28,33 +31,38 @@ export class WebSocketService {
       try {
         const message: WebSocketMessage = JSON.parse(event.data);
         this.notifyListeners(message);
-      } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
+      } catch (_) {
+        // Ignore malformed messages
       }
     };
 
-    this.ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+    this.ws.onerror = () => {
+      // Errors handled by onclose
     };
 
     this.ws.onclose = () => {
-      console.log('WebSocket disconnected');
-      this.scheduleReconnect(token);
+      if (this.currentToken) {
+        this.scheduleReconnect();
+      }
     };
   }
 
-  private scheduleReconnect(token: string) {
-    if (this.reconnectTimer) {
+  private scheduleReconnect() {
+    if (this.reconnectTimer || !this.currentToken) {
       return;
     }
 
     this.reconnectTimer = setTimeout(() => {
-      console.log('Attempting to reconnect WebSocket...');
-      this.connect(token);
+      this.reconnectTimer = null;
+      if (this.currentToken) {
+        this.connect(this.currentToken);
+      }
     }, this.reconnectInterval);
   }
 
   disconnect() {
+    this.currentToken = null;
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -64,13 +72,13 @@ export class WebSocketService {
       this.ws.close();
       this.ws = null;
     }
+
+    this.listeners.clear();
   }
 
   send(message: any) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
-    } else {
-      console.warn('WebSocket is not connected');
     }
   }
 
@@ -108,7 +116,6 @@ export class WebSocketService {
       listeners.forEach((callback) => callback(message));
     }
 
-    // Also notify global listeners
     const globalListeners = this.listeners.get('*');
     if (globalListeners) {
       globalListeners.forEach((callback) => callback(message));

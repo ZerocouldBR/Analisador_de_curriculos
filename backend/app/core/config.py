@@ -419,7 +419,7 @@ class Settings(BaseSettings):
         description="Chave secreta para JWT. OBRIGATORIO via env var SECRET_KEY."
     )
     algorithm: str = Field(default="HS256", description="Algoritmo de assinatura JWT")
-    access_token_expire_minutes: int = Field(default=30, description="TTL do access token (minutos)")
+    access_token_expire_minutes: int = Field(default=15, description="TTL do access token (minutos)")
     refresh_token_expire_days: int = Field(default=7, description="TTL do refresh token (dias)")
 
     # PII / Criptografia
