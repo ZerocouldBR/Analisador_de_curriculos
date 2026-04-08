@@ -110,7 +110,7 @@ services:
       - prometheus
     restart: unless-stopped
 
-  # React Frontend
+  # React Frontend (dev com hot reload)
   frontend:
     build:
       context: ./frontend
@@ -119,6 +119,7 @@ services:
     environment:
       - REACT_APP_API_URL=http://localhost:8000
       - REACT_APP_WS_URL=ws://localhost:8000
+      - WATCHPACK_POLLING=true
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public

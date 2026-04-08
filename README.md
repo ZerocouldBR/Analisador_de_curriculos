@@ -2,255 +2,289 @@
 
 Sistema completo de RH on-premises para ingestao, analise, indexacao vetorial e busca inteligente de curriculos.
 
-## Funcionalidades Implementadas
+## Funcionalidades
 
-### Backend (FastAPI)
-- Autenticacao JWT com RBAC completo (admin, recruiter, viewer)
-- Upload de curriculos (PDF, DOCX, TXT, imagens com OCR avancado)
+- Upload e analise de curriculos (PDF, DOCX, TXT, imagens com OCR)
+- Busca semantica com embeddings OpenAI + pgvector
+- Busca hibrida (semantica + texto completo + filtros)
+- Chat inteligente com LLM sobre os curriculos
+- Autenticacao JWT com RBAC (admin, recruiter, viewer)
 - Processamento assincrono com Celery
 - WebSocket para atualizacoes em tempo real
-- Busca semantica com embeddings OpenAI
-- Busca hibrida (semantica + texto completo + filtros)
 - LinkedIn integration para enriquecimento de perfis
 - LGPD compliance com auditoria completa
-- Configuracoes dinamicas e prompts LLM customizaveis
-- API documentada com OpenAPI/Swagger
-- Extracao automatica de experiencias profissionais para tabela dedicada
-- Snapshot de perfis de candidatos versionado
+- Monitoramento com Prometheus + Grafana
 
-### Frontend (React + TypeScript)
-- Interface completa em Material-UI
-- Dashboard com estatisticas e metricas
-- Gerenciamento de candidatos (CRUD completo)
-- Upload com drag & drop e progresso em tempo real
-- Busca inteligente com highlight de resultados
-- Administracao de funcoes e permissoes
-- Configuracoes do sistema
-- WebSocket para notificacoes instantaneas
+---
 
-### Infraestrutura
-- Docker Compose completo com 8 servicos
-- Celery para processamento em background
-- Flower para monitoramento de tarefas
-- Prometheus para coleta de metricas
-- Grafana com dashboards customizados
-- PostgreSQL 16 com pgvector
-- Redis para cache e filas
+## Inicio Rapido
 
-## Estrutura do Projeto
+### Pre-requisitos
 
-```
-analisador-curriculos/
-├── backend/              # API FastAPI
-│   ├── app/
-│   │   ├── api/         # Endpoints REST (v1/)
-│   │   │   └── v1/     # auth, candidates, documents, linkedin, search, settings, websocket
-│   │   ├── core/        # Configuracao, seguranca, celery, websocket
-│   │   ├── db/          # Models, database, init_db, init_roles
-│   │   ├── schemas/     # Validacao Pydantic
-│   │   ├── services/    # Logica de negocio
-│   │   └── tasks/       # Tarefas Celery (document_tasks)
-│   ├── requirements.txt
-│   └── Dockerfile
-├── frontend/            # Interface React
-│   ├── src/
-│   │   ├── components/  # Componentes reutilizaveis
-│   │   ├── contexts/    # Contextos React
-│   │   ├── pages/       # Paginas da aplicacao
-│   │   ├── services/    # API e WebSocket clients
-│   │   └── types/       # TypeScript types
-│   ├── package.json
-│   └── Dockerfile
-├── monitoring/          # Prometheus e Grafana
-│   ├── prometheus.yml
-│   └── grafana/
-│       ├── dashboards/
-│       └── datasources/
-├── docs/               # Documentacao
-│   ├── arquitetura.md
-│   ├── modelo_dados.md
-│   ├── fluxos.md
-│   └── novas_implementacoes.md
-└── docker-compose.yml  # Orquestracao completa
-```
+- **Python 3.11+**
+- **Node.js 18+**
+- **Docker e Docker Compose** (para PostgreSQL e Redis)
 
-## Quick Start
-
-### Iniciar todos os servicos (Recomendado)
+### 1. Clonar o repositorio
 
 ```bash
-# 1. Clonar repositorio
 git clone https://github.com/ZerocouldBR/Analisador_de_curriculos.git
 cd Analisador_de_curriculos
-
-# 2. Configurar ambiente
-cp backend/.env.example backend/.env
-# Edite backend/.env com suas configuracoes
-
-# 3. Iniciar stack completa
-docker-compose up -d
-
-# 4. Verificar status
-docker-compose ps
-
-# 5. Ver logs
-docker-compose logs -f
 ```
 
-### Acessar servicos
+### 2. Gerar arquivo de configuracao
 
-| Servico | URL | Descricao |
-|---------|-----|-----------|
-| Frontend | http://localhost:3000 | Interface React |
-| API | http://localhost:8000 | Backend FastAPI |
-| API Docs | http://localhost:8000/docs | Swagger UI |
-| Flower | http://localhost:5555 | Monitor Celery |
-| Prometheus | http://localhost:9090 | Metricas |
-| Grafana | http://localhost:3001 | Dashboards (admin/admin) |
+```bash
+python setup.py local
+```
 
-### Desenvolvimento Local
+Isso cria `backend/.env` com todas as variaveis configuradas para localhost.
 
-**Backend:**
+### 3. Subir PostgreSQL e Redis
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+
+Isso inicia apenas o banco de dados (PostgreSQL 16 + pgvector) e Redis.
+
+> **Sem Docker?** Instale PostgreSQL 16 com extensao pgvector e Redis 7 manualmente.
+> Crie o banco: `CREATE DATABASE analisador_curriculos;`
+> Crie o usuario: `CREATE USER analisador WITH PASSWORD 'analisador';`
+
+### 4. Configurar o backend
+
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Linux/Mac:
+source .venv/bin/activate
+
+# Windows:
+.venv\Scripts\activate
+
 pip install -r requirements.txt
+```
+
+### 5. Inicializar o banco de dados
+
+```bash
+# Ainda dentro de backend/ com o venv ativado:
+python -m app.db.init_db
+python -m app.db.init_roles
+```
+
+Isso cria todas as tabelas, indices vetoriais, roles e o usuario admin.
+
+### 6. Iniciar o backend
+
+```bash
 uvicorn app.main:app --reload
 ```
 
-**Frontend:**
+API disponivel em http://localhost:8000/docs
+
+### 7. Iniciar o frontend (novo terminal)
+
 ```bash
 cd frontend
 npm install
 npm start
 ```
 
-**Celery Worker:**
+Frontend disponivel em http://localhost:3000
+
+### 8. Login
+
+```
+Email: admin@analisador.com
+Senha: admin123
+```
+
+> **IMPORTANTE:** Altere a senha do admin em producao!
+
+---
+
+## Deploy em VPS (Docker Compose)
+
+Para instalar tudo em uma VPS com Docker:
+
+### 1. Clonar e configurar
+
 ```bash
-cd backend
+git clone https://github.com/ZerocouldBR/Analisador_de_curriculos.git
+cd Analisador_de_curriculos
+python3 setup.py vps
+```
+
+O script gera senhas seguras automaticamente para o banco, Redis, Flower e Grafana.
+
+### 2. Editar configuracoes
+
+```bash
+# Ajuste o dominio e CORS:
+nano backend/.env
+
+# Ajuste o dominio do frontend:
+nano .env
+
+# Adicione sua chave da OpenAI (se usar embeddings):
+# OPENAI_API_KEY=sk-...
+```
+
+### 3. Subir todos os servicos
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+### 4. Inicializar o banco de dados (primeira vez)
+
+```bash
+docker compose -f docker-compose.prod.yml exec api python -m app.db.init_db
+docker compose -f docker-compose.prod.yml exec api python -m app.db.init_roles
+```
+
+### 5. Acessar
+
+| Servico | URL | Descricao |
+|---------|-----|-----------|
+| Frontend | http://seu-ip:3000 | Interface React |
+| API | http://seu-ip:8000 | Backend FastAPI |
+| API Docs | http://seu-ip:8000/docs | Swagger UI |
+| Flower | http://seu-ip:5555 | Monitor Celery |
+| Prometheus | http://seu-ip:9090 | Metricas |
+| Grafana | http://seu-ip:3001 | Dashboards |
+
+Login: `admin@analisador.com` / `admin123`
+
+---
+
+## Docker Compose Completo (Desenvolvimento)
+
+Para rodar **tudo** via Docker (sem instalar Python/Node localmente):
+
+```bash
+cp backend/.env.example backend/.env
+# Edite backend/.env e defina SECRET_KEY
+
+docker compose up -d --build
+
+# Inicializar banco:
+docker compose exec api python -m app.db.init_db
+docker compose exec api python -m app.db.init_roles
+```
+
+---
+
+## Celery Worker (processamento assincrono)
+
+Para processar curriculos em background (upload e indexacao):
+
+```bash
+# Terminal separado, dentro de backend/ com venv ativado:
 celery -A app.core.celery_app worker --loglevel=info
 ```
 
-## Modelo de Dados
+> No Docker Compose, o Celery ja roda automaticamente.
 
-O sistema utiliza PostgreSQL 16 com a extensao pgvector para busca vetorial. Principais tabelas:
+---
 
-- **users / roles / user_roles** - Autenticacao e RBAC
-- **candidates** - Dados pessoais dos candidatos (PII protegida)
-- **candidate_profiles** - Snapshots versionados do curriculo parseado
-- **documents** - Arquivos de curriculo (PDF, DOCX, etc.)
-- **chunks** - Secoes extraidas com metadados enriquecidos
-- **embeddings** - Vetores para busca semantica (pgvector)
-- **experiences** - Experiencias profissionais estruturadas
-- **external_enrichments** - Dados de fontes externas (LinkedIn)
-- **server_settings** - Configuracoes dinamicas do sistema
-- **audit_logs** - Registro completo de operacoes (LGPD)
+## Estrutura do Projeto
 
-Para detalhes completos, veja [docs/modelo_dados.md](docs/modelo_dados.md).
-
-## Pipeline de Processamento
-
-1. **Upload**: Arquivo enviado via API com deduplicacao por SHA-256
-2. **Extracao de Texto**: PDF (pdfplumber), DOCX (python-docx), OCR (Tesseract) com preprocessamento avancado
-3. **Parsing**: Extracao estruturada de dados pessoais, experiencias, formacao, habilidades, certificacoes
-4. **Atualizacao**: Candidato atualizado com dados extraidos (nome, email, CPF, etc.)
-5. **Experiencias**: Tabela `experiences` populada com historico profissional
-6. **Perfil**: Snapshot salvo em `candidate_profiles`
-7. **Chunks**: Secoes criadas com metadados (keywords, perfil industrial)
-8. **Embeddings**: Vetores gerados sob demanda para busca semantica
-
-## Busca Inteligente
-
-O sistema suporta busca hibrida combinando:
-- **40%** Similaridade semantica (embeddings + pgvector)
-- **30%** Busca de texto completo (tsvector Portuguese)
-- **20%** Filtros estruturados (cidade, estado, habilidades)
-- **10%** Dominio de conhecimento (producao, logistica, TI)
-
-## Seguranca e Compliance
-
-### RBAC (Role-Based Access Control)
-
-| Role | Descricao |
-|------|-----------|
-| admin | Acesso completo ao sistema |
-| recruiter | CRUD de candidatos/docs, LinkedIn, busca avancada |
-| viewer | Apenas leitura |
-
-### Permissoes Granulares
-
-Todos os endpoints de escrita requerem autenticacao JWT e permissoes especificas:
-- `candidates.*` - Operacoes com candidatos
-- `documents.*` - Operacoes com documentos
-- `settings.*` - Configuracoes do sistema
-- `linkedin.enrich` - Enriquecimento via LinkedIn
-- `search.advanced` - Busca avancada
-- `users.manage` - Gerenciamento de usuarios
-
-### LGPD
-- Auditoria completa de todas as operacoes
-- Remocao em cascata de dados pessoais
-- Separacao de PII
+```
+Analisador_de_curriculos/
+├── backend/                 # API FastAPI
+│   ├── app/
+│   │   ├── api/v1/         # Endpoints REST
+│   │   ├── core/           # Config, seguranca, celery
+│   │   ├── db/             # Models, database, init
+│   │   ├── schemas/        # Validacao Pydantic
+│   │   ├── services/       # Logica de negocio
+│   │   ├── tasks/          # Tarefas Celery
+│   │   └── vectorstore/    # Integracao vetorial
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── .env.example
+├── frontend/                # Interface React + TypeScript
+│   ├── src/
+│   │   ├── components/     # Componentes reutilizaveis
+│   │   ├── pages/          # Paginas da aplicacao
+│   │   ├── services/       # API clients
+│   │   └── types/          # TypeScript types
+│   ├── package.json
+│   └── Dockerfile
+├── monitoring/              # Prometheus + Grafana
+├── docker-compose.yml       # Dev completo (todos os servicos)
+├── docker-compose.dev.yml   # Dev minimo (so DB + Redis)
+├── docker-compose.prod.yml  # Producao
+└── setup.py                 # Script de setup automatico
+```
 
 ## Configuracao
 
-### Variaveis de Ambiente
+### Variaveis de Ambiente Principais
 
-**Backend (`.env`):**
-```env
-APP_VERSION=0.3.0
-DATABASE_URL=postgresql+psycopg://analisador:analisador@db:5432/analisador_curriculos
-REDIS_URL=redis://redis:6379/0
-SECRET_KEY=your-secret-key-here
-OPENAI_API_KEY=sk-... (opcional, para embeddings)
-```
+| Variavel | Descricao | Default |
+|----------|-----------|---------|
+| `SECRET_KEY` | Chave JWT (obrigatoria em prod) | Auto-gerada para dev |
+| `DATABASE_URL` | URL do PostgreSQL | `localhost:5432` |
+| `REDIS_URL` | URL do Redis | `localhost:6379` |
+| `OPENAI_API_KEY` | Chave da API OpenAI | (opcional) |
+| `CORS_ORIGINS` | Origens permitidas | `["http://localhost:3000"]` |
+| `VECTOR_DB_PROVIDER` | pgvector, supabase, qdrant | `pgvector` |
+| `EMBEDDING_MODE` | api (OpenAI) ou code (local) | `api` |
+| `DEBUG` | Modo debug | `false` |
 
-**Frontend (`.env`):**
-```env
-REACT_APP_API_URL=http://localhost:8000
-REACT_APP_WS_URL=ws://localhost:8000
-```
+Veja todas as opcoes em `backend/.env.example`.
+
+## Modelo de Dados
+
+PostgreSQL 16 com extensao pgvector. Principais tabelas:
+
+- **users / roles** - Autenticacao e RBAC
+- **candidates** - Dados dos candidatos
+- **candidate_profiles** - Snapshots versionados
+- **documents** - Arquivos de curriculo
+- **chunks** - Secoes extraidas com metadados
+- **embeddings** - Vetores para busca semantica
+- **experiences** - Experiencias profissionais
+- **audit_logs** - Registro de operacoes (LGPD)
+
+## Busca Inteligente
+
+Busca hibrida combinando:
+- **40%** Similaridade semantica (embeddings + pgvector)
+- **30%** Busca de texto completo (tsvector Portuguese)
+- **20%** Filtros estruturados (cidade, estado, habilidades)
+- **10%** Dominio de conhecimento
+
+## Seguranca
+
+| Role | Descricao |
+|------|-----------|
+| admin | Acesso completo |
+| recruiter | CRUD candidatos/docs, busca, LinkedIn |
+| viewer | Apenas leitura |
+
+## Tecnologias
+
+**Backend:** FastAPI, PostgreSQL 16 + pgvector, Redis 7, Celery, OpenAI API, Tesseract OCR
+
+**Frontend:** React 18, TypeScript, Material-UI 5, WebSocket
+
+**Infra:** Docker Compose, Prometheus, Grafana, Flower
 
 ## Testes
 
 ```bash
 # Backend
-cd backend
-pytest
+cd backend && pytest
 
 # Frontend
-cd frontend
-npm test
+cd frontend && npm test
 ```
-
-## Monitoramento
-
-### Prometheus
-Acesse http://localhost:9090 para queries de metricas.
-
-### Grafana
-1. Acesse http://localhost:3001
-2. Login: admin/admin
-3. Dashboard "Analisador de Curriculos - System Dashboard"
-
-Metricas disponiveis:
-- Taxa de requisicoes da API
-- Tempo de resposta (p95, p99)
-- Tarefas Celery ativas
-- Taxa de sucesso de tarefas
-- Conexoes do banco de dados
-- Uso de memoria do Redis
-- Upload rate
-- WebSocket connections
-
-## Tecnologias
-
-**Backend:** FastAPI 0.115, PostgreSQL 16 + pgvector, Redis 7, Celery 5.3, OpenAI API, Tesseract OCR
-
-**Frontend:** React 18, TypeScript 5, Material-UI 5, Axios, WebSocket, React Router 6
-
-**Infraestrutura:** Docker & Docker Compose, Prometheus, Grafana, Flower
 
 ## Licenca
 
