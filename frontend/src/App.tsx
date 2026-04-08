@@ -1,7 +1,13 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
+import { CssBaseline, CircularProgress, Box } from '@mui/material';
+import { ThemeContextProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { NotificationProvider } from './contexts/NotificationContext';
+import ErrorBoundary from './components/ErrorBoundary';
+
+// Layout
+import Layout from './components/Layout';
 
 // Pages
 import LoginPage from './pages/LoginPage';
@@ -14,20 +20,9 @@ import UploadPage from './pages/UploadPage';
 import SettingsPage from './pages/SettingsPage';
 import RolesPage from './pages/RolesPage';
 import ChatPage from './pages/ChatPage';
-
-// Components
-import Layout from './components/Layout';
-
-const theme = createTheme({
-  palette: {
-    primary: {
-      main: '#1976d2',
-    },
-    secondary: {
-      main: '#dc004e',
-    },
-  },
-});
+import ProfilePage from './pages/ProfilePage';
+import CompaniesPage from './pages/CompaniesPage';
+import LinkedInPage from './pages/LinkedInPage';
 
 interface ProtectedRouteProps {
   children: React.ReactElement;
@@ -37,44 +32,88 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
 
   if (loading) {
-    return <div>Carregando...</div>;
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
+        <CircularProgress size={48} />
+      </Box>
+    );
   }
 
   return isAuthenticated ? children : <Navigate to="/login" />;
 };
 
+const PublicRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
+        <CircularProgress size={48} />
+      </Box>
+    );
+  }
+
+  return isAuthenticated ? <Navigate to="/dashboard" /> : children;
+};
+
 function App() {
   return (
-    <ThemeProvider theme={theme}>
+    <ThemeContextProvider>
       <CssBaseline />
-      <AuthProvider>
-        <Router>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
+      <NotificationProvider>
+        <ErrorBoundary>
+          <AuthProvider>
+            <Router>
+              <Routes>
+                {/* Public routes */}
+                <Route
+                  path="/login"
+                  element={
+                    <PublicRoute>
+                      <LoginPage />
+                    </PublicRoute>
+                  }
+                />
+                <Route
+                  path="/register"
+                  element={
+                    <PublicRoute>
+                      <RegisterPage />
+                    </PublicRoute>
+                  }
+                />
 
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute>
-                  <Layout />
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<Navigate to="/dashboard" />} />
-              <Route path="dashboard" element={<DashboardPage />} />
-              <Route path="candidates" element={<CandidatesPage />} />
-              <Route path="candidates/:id" element={<CandidateDetailPage />} />
-              <Route path="search" element={<SearchPage />} />
-              <Route path="upload" element={<UploadPage />} />
-              <Route path="settings" element={<SettingsPage />} />
-              <Route path="roles" element={<RolesPage />} />
-              <Route path="chat" element={<ChatPage />} />
-            </Route>
-          </Routes>
-        </Router>
-      </AuthProvider>
-    </ThemeProvider>
+                {/* Protected routes */}
+                <Route
+                  path="/"
+                  element={
+                    <ProtectedRoute>
+                      <Layout />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route index element={<Navigate to="/dashboard" />} />
+                  <Route path="dashboard" element={<DashboardPage />} />
+                  <Route path="candidates" element={<CandidatesPage />} />
+                  <Route path="candidates/:id" element={<CandidateDetailPage />} />
+                  <Route path="search" element={<SearchPage />} />
+                  <Route path="upload" element={<UploadPage />} />
+                  <Route path="chat" element={<ChatPage />} />
+                  <Route path="settings" element={<SettingsPage />} />
+                  <Route path="roles" element={<RolesPage />} />
+                  <Route path="profile" element={<ProfilePage />} />
+                  <Route path="companies" element={<CompaniesPage />} />
+                  <Route path="linkedin" element={<LinkedInPage />} />
+                </Route>
+
+                {/* Catch-all */}
+                <Route path="*" element={<Navigate to="/dashboard" />} />
+              </Routes>
+            </Router>
+          </AuthProvider>
+        </ErrorBoundary>
+      </NotificationProvider>
+    </ThemeContextProvider>
   );
 }
 

@@ -7,6 +7,7 @@ import {
   Candidate,
   Document,
   SearchResult,
+  SearchFilters,
   Role,
   ServerSettings,
   ChatConversation,
@@ -14,6 +15,10 @@ import {
   ChatResponse,
   LinkedInSearchCriteria,
   LinkedInSearchResult,
+  Company,
+  Experience,
+  CandidateProfile,
+  HealthCheck,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -27,9 +32,9 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
       },
+      timeout: 30000,
     });
 
-    // Request interceptor to add auth token
     this.api.interceptors.request.use(
       (config) => {
         const token = localStorage.getItem('access_token');
@@ -41,34 +46,35 @@ class ApiService {
       (error) => Promise.reject(error)
     );
 
-    // Response interceptor for error handling
     this.api.interceptors.response.use(
       (response) => response,
       (error) => {
         if (error.response?.status === 401) {
-          // Unauthorized - clear token and redirect to login
           localStorage.removeItem('access_token');
-          window.location.href = '/login';
+          localStorage.removeItem('refresh_token');
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
         }
         return Promise.reject(error);
       }
     );
   }
 
-  // Auth endpoints
+  // ==================== Auth ====================
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     const formData = new FormData();
     formData.append('username', credentials.email);
     formData.append('password', credentials.password);
 
     const response = await this.api.post<LoginResponse>('/v1/auth/login', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
 
-    // Save token
     localStorage.setItem('access_token', response.data.access_token);
+    if (response.data.refresh_token) {
+      localStorage.setItem('refresh_token', response.data.refresh_token);
+    }
 
     return response.data;
   }
@@ -90,14 +96,24 @@ class ApiService {
     });
   }
 
+  async refreshToken(): Promise<LoginResponse> {
+    const refreshToken = localStorage.getItem('refresh_token');
+    const response = await this.api.post<LoginResponse>('/v1/auth/refresh', {
+      refresh_token: refreshToken,
+    });
+    localStorage.setItem('access_token', response.data.access_token);
+    return response.data;
+  }
+
   logout() {
     localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
     window.location.href = '/login';
   }
 
-  // Candidate endpoints
+  // ==================== Candidates ====================
   async getCandidates(city?: string, state?: string): Promise<Candidate[]> {
-    const params: any = {};
+    const params: Record<string, string> = {};
     if (city) params.city = city;
     if (state) params.state = state;
 
@@ -129,7 +145,17 @@ class ApiService {
     return response.data;
   }
 
-  // Document endpoints
+  async getCandidateExperiences(candidateId: number): Promise<Experience[]> {
+    const response = await this.api.get<Experience[]>(`/v1/candidates/${candidateId}/experiences`);
+    return response.data;
+  }
+
+  async getCandidateProfiles(candidateId: number): Promise<CandidateProfile[]> {
+    const response = await this.api.get<CandidateProfile[]>(`/v1/candidates/${candidateId}/profiles`);
+    return response.data;
+  }
+
+  // ==================== Documents ====================
   async uploadDocument(file: File, candidateId?: number): Promise<Document> {
     const formData = new FormData();
     formData.append('file', file);
@@ -137,10 +163,9 @@ class ApiService {
     const params = candidateId ? { candidate_id: candidateId } : {};
 
     const response = await this.api.post<Document>('/v1/documents/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+      headers: { 'Content-Type': 'multipart/form-data' },
       params,
+      timeout: 120000,
     });
 
     return response.data;
@@ -154,7 +179,7 @@ class ApiService {
     await this.api.delete(`/v1/candidates/documents/${documentId}`);
   }
 
-  // Search endpoints
+  // ==================== Search ====================
   async semanticSearch(query: string, topK: number = 10): Promise<SearchResult[]> {
     const response = await this.api.post<SearchResult[]>('/v1/search/semantic', {
       query,
@@ -163,7 +188,7 @@ class ApiService {
     return response.data;
   }
 
-  async hybridSearch(query: string, filters?: any, topK: number = 10): Promise<SearchResult[]> {
+  async hybridSearch(query: string, filters?: SearchFilters, topK: number = 10): Promise<SearchResult[]> {
     const response = await this.api.post<SearchResult[]>('/v1/search/hybrid', {
       query,
       filters,
@@ -172,14 +197,21 @@ class ApiService {
     return response.data;
   }
 
-  async searchBySkill(skill: string): Promise<Candidate[]> {
-    const response = await this.api.get<Candidate[]>('/v1/search/candidates/by-skill', {
-      params: { skill },
+  async jobAnalysisSearch(jobDescription: string, jobTitle?: string, limit: number = 10): Promise<SearchResult[]> {
+    const response = await this.api.post<SearchResult[]>('/v1/search/job-analysis', {
+      job_description: jobDescription,
+      job_title: jobTitle,
+      limit,
     });
     return response.data;
   }
 
-  // Role endpoints
+  async getKeywords(query: string): Promise<{ keyword: string; score: number }[]> {
+    const response = await this.api.get('/v1/search/keywords', { params: { query } });
+    return response.data;
+  }
+
+  // ==================== Roles ====================
   async getRoles(): Promise<Role[]> {
     const response = await this.api.get<Role[]>('/v1/auth/roles');
     return response.data;
@@ -203,7 +235,7 @@ class ApiService {
     await this.api.delete(`/v1/auth/users/${userId}/roles/${roleName}`);
   }
 
-  // Settings endpoints
+  // ==================== Settings ====================
   async getSettings(): Promise<ServerSettings[]> {
     const response = await this.api.get<ServerSettings[]>('/v1/settings/');
     return response.data;
@@ -221,13 +253,22 @@ class ApiService {
     return response.data;
   }
 
-  // Health check
-  async healthCheck(): Promise<any> {
-    const response = await this.api.get('/health');
+  async getChatPrompts(): Promise<any> {
+    const response = await this.api.get('/v1/settings/prompts/chat');
     return response.data;
   }
 
-  // Chat endpoints
+  async updateChatPrompts(prompts: any): Promise<any> {
+    const response = await this.api.put('/v1/settings/prompts/chat', prompts);
+    return response.data;
+  }
+
+  async resetChatPrompts(): Promise<any> {
+    const response = await this.api.post('/v1/settings/prompts/chat/reset');
+    return response.data;
+  }
+
+  // ==================== Chat ====================
   async createConversation(data: {
     title?: string;
     job_description?: string;
@@ -268,7 +309,8 @@ class ApiService {
   ): Promise<ChatResponse> {
     const response = await this.api.post<ChatResponse>(
       `/v1/chat/conversations/${conversationId}/messages`,
-      { message, candidate_ids: candidateIds }
+      { message, candidate_ids: candidateIds },
+      { timeout: 120000 }
     );
     return response.data;
   }
@@ -281,7 +323,8 @@ class ApiService {
   ): Promise<ChatResponse> {
     const response = await this.api.post<ChatResponse>(
       `/v1/chat/conversations/${conversationId}/analyze-job`,
-      { job_description: jobDescription, job_title: jobTitle, limit }
+      { job_description: jobDescription, job_title: jobTitle, limit },
+      { timeout: 120000 }
     );
     return response.data;
   }
@@ -291,24 +334,69 @@ class ApiService {
     jobTitle: string = '',
     limit: number = 10
   ): Promise<ChatResponse> {
-    const response = await this.api.post<ChatResponse>('/v1/chat/quick-analyze', {
-      job_description: jobDescription,
-      job_title: jobTitle,
-      limit,
-    });
+    const response = await this.api.post<ChatResponse>(
+      '/v1/chat/quick-analyze',
+      { job_description: jobDescription, job_title: jobTitle, limit },
+      { timeout: 120000 }
+    );
     return response.data;
   }
 
-  // LinkedIn search endpoints
-  async searchProfessionals(criteria: LinkedInSearchCriteria): Promise<LinkedInSearchResult> {
-    const response = await this.api.post<LinkedInSearchResult>('/v1/linkedin/search', criteria);
+  // ==================== LinkedIn ====================
+  async linkedInExtract(profileUrl: string): Promise<any> {
+    const response = await this.api.post('/v1/linkedin/extract', { profile_url: profileUrl });
     return response.data;
   }
 
-  async getSearchHistory(limit: number = 20): Promise<any[]> {
-    const response = await this.api.get('/v1/linkedin/search/history', {
-      params: { limit },
-    });
+  async linkedInManualEnrich(candidateId: number, data: any): Promise<any> {
+    const response = await this.api.post(`/v1/linkedin/candidates/${candidateId}/manual`, data);
+    return response.data;
+  }
+
+  async getLinkedInData(candidateId: number): Promise<any> {
+    const response = await this.api.get(`/v1/linkedin/candidates/${candidateId}/linkedin`);
+    return response.data;
+  }
+
+  async syncLinkedIn(candidateId: number): Promise<any> {
+    const response = await this.api.put(`/v1/linkedin/candidates/${candidateId}/sync-from-linkedin`);
+    return response.data;
+  }
+
+  // ==================== Companies ====================
+  async getCompanies(): Promise<Company[]> {
+    const response = await this.api.get<Company[]>('/v1/companies/');
+    return response.data;
+  }
+
+  async createCompany(data: Partial<Company>): Promise<Company> {
+    const response = await this.api.post<Company>('/v1/companies/', data);
+    return response.data;
+  }
+
+  async updateCompany(id: number, data: Partial<Company>): Promise<Company> {
+    const response = await this.api.put<Company>(`/v1/companies/${id}`, data);
+    return response.data;
+  }
+
+  async deleteCompany(id: number): Promise<void> {
+    await this.api.delete(`/v1/companies/${id}`);
+  }
+
+  // ==================== VectorDB ====================
+  async refreshEmbeddings(): Promise<any> {
+    const response = await this.api.post('/v1/vectordb/embeddings/refresh', {}, { timeout: 300000 });
+    return response.data;
+  }
+
+  async getVectorDBStatus(): Promise<any> {
+    const response = await this.api.get('/v1/vectordb/status');
+    return response.data;
+  }
+
+  // ==================== Health ====================
+  async healthCheck(): Promise<HealthCheck> {
+    const response = await this.api.get<HealthCheck>('/health');
     return response.data;
   }
 }

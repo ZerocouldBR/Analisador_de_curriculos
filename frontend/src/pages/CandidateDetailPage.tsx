@@ -6,155 +6,365 @@ import {
   Typography,
   Grid,
   Button,
-  CircularProgress,
   Card,
   CardContent,
   Chip,
   List,
   ListItem,
   ListItemText,
+  ListItemIcon,
+  Divider,
+  IconButton,
+  Tooltip,
+  Tab,
+  Tabs,
+  useTheme,
+  alpha,
 } from '@mui/material';
-import { ArrowBack, Email, Phone, LocationOn } from '@mui/icons-material';
+import {
+  ArrowBack,
+  Email,
+  Phone,
+  LocationOn,
+  Description,
+  Work,
+  Refresh,
+  CalendarToday,
+  Badge,
+  CloudUpload,
+  SmartToy,
+} from '@mui/icons-material';
 import { apiService } from '../services/api';
-import { Candidate, Document } from '../types';
+import { Candidate, Document, Experience } from '../types';
+import { DetailSkeleton } from '../components/LoadingSkeleton';
+import { useNotification } from '../contexts/NotificationContext';
+
+interface TabPanelProps {
+  children?: React.ReactNode;
+  value: number;
+  index: number;
+}
+
+const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => (
+  <div hidden={value !== index}>{value === index && <Box sx={{ py: 2 }}>{children}</Box>}</div>
+);
 
 const CandidateDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const theme = useTheme();
+  const { showError, showSuccess } = useNotification();
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [experiences, setExperiences] = useState<Experience[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState(0);
 
   useEffect(() => {
-    const fetchData = async () => {
-      if (!id) return;
-
-      try {
-        const [candidateData, documentsData] = await Promise.all([
-          apiService.getCandidate(parseInt(id)),
-          apiService.getCandidateDocuments(parseInt(id)),
-        ]);
-
-        setCandidate(candidateData);
-        setDocuments(documentsData);
-      } catch (error) {
-        console.error('Error fetching candidate details:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
+    if (id) fetchData();
   }, [id]);
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
-      </Box>
-    );
-  }
+  const fetchData = async () => {
+    if (!id) return;
+    try {
+      setLoading(true);
+      const candidateId = parseInt(id);
+      const [candidateData, documentsData] = await Promise.all([
+        apiService.getCandidate(candidateId),
+        apiService.getCandidateDocuments(candidateId),
+      ]);
+      setCandidate(candidateData);
+      setDocuments(documentsData);
+
+      try {
+        const experiencesData = await apiService.getCandidateExperiences(candidateId);
+        setExperiences(experiencesData);
+      } catch {
+        // Experiences endpoint might not exist yet
+      }
+    } catch (error) {
+      showError('Erro ao carregar dados do candidato');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReprocess = async (docId: number) => {
+    try {
+      await apiService.reprocessDocument(docId);
+      showSuccess('Documento enviado para reprocessamento');
+    } catch (error) {
+      showError('Erro ao reprocessar documento');
+    }
+  };
+
+  if (loading) return <DetailSkeleton />;
 
   if (!candidate) {
     return (
-      <Box>
-        <Typography variant="h5">Candidato não encontrado</Typography>
+      <Box textAlign="center" py={8}>
+        <Typography variant="h5" gutterBottom>Candidato nao encontrado</Typography>
+        <Button variant="contained" onClick={() => navigate('/candidates')}>
+          Voltar para lista
+        </Button>
       </Box>
     );
   }
 
-  return (
-    <Box>
-      <Button
-        startIcon={<ArrowBack />}
-        onClick={() => navigate('/candidates')}
-        sx={{ mb: 2 }}
+  const InfoItem = ({ icon, label, value }: { icon: React.ReactElement; label: string; value: string }) => (
+    <Box display="flex" alignItems="center" gap={1.5} py={1}>
+      <Box
+        sx={{
+          p: 1,
+          borderRadius: 1.5,
+          bgcolor: alpha(theme.palette.primary.main, 0.08),
+          display: 'flex',
+        }}
       >
-        Voltar
-      </Button>
+        {React.cloneElement(icon, { fontSize: 'small', color: 'primary' })}
+      </Box>
+      <Box>
+        <Typography variant="caption" color="text.secondary">
+          {label}
+        </Typography>
+        <Typography variant="body2" fontWeight={500}>
+          {value || 'Nao informado'}
+        </Typography>
+      </Box>
+    </Box>
+  );
 
-      <Typography variant="h4" gutterBottom>
-        {candidate.full_name}
-      </Typography>
+  return (
+    <Box className="fade-in">
+      {/* Header */}
+      <Box display="flex" alignItems="center" gap={2} mb={3}>
+        <Tooltip title="Voltar">
+          <IconButton onClick={() => navigate('/candidates')}>
+            <ArrowBack />
+          </IconButton>
+        </Tooltip>
+        <Box flexGrow={1}>
+          <Typography variant="h4" fontWeight={700}>
+            {candidate.full_name}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Cadastrado em {new Date(candidate.created_at).toLocaleDateString('pt-BR')}
+          </Typography>
+        </Box>
+        <Button
+          variant="outlined"
+          startIcon={<SmartToy />}
+          onClick={() => navigate('/chat')}
+        >
+          Analisar com IA
+        </Button>
+      </Box>
 
       <Grid container spacing={3}>
+        {/* Left column - Info */}
         <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Informações Pessoais
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <Email color="action" />
-                  <Typography>{candidate.email || 'Não informado'}</Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <Phone color="action" />
-                  <Typography>{candidate.phone || 'Não informado'}</Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12}>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <LocationOn color="action" />
-                  <Typography>
-                    {candidate.city && candidate.state
-                      ? `${candidate.city}, ${candidate.state}`
-                      : 'Não informado'}
-                  </Typography>
-                </Box>
-              </Grid>
-            </Grid>
-          </Paper>
+          <Paper sx={{ border: '1px solid', borderColor: 'divider', mb: 3 }}>
+            <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ px: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Tab label="Informacoes" />
+              <Tab label={`Documentos (${documents.length})`} />
+              <Tab label={`Experiencias (${experiences.length})`} />
+            </Tabs>
 
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Documentos
-            </Typography>
-            <List>
-              {documents.length === 0 ? (
-                <ListItem>
-                  <ListItemText primary="Nenhum documento enviado" />
-                </ListItem>
-              ) : (
-                documents.map((doc) => (
-                  <ListItem key={doc.id}>
-                    <ListItemText
-                      primary={doc.original_filename}
-                      secondary={`Enviado em: ${new Date(doc.uploaded_at).toLocaleString()}`}
+            <TabPanel value={tab} index={0}>
+              <Box sx={{ px: 3 }}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <InfoItem icon={<Email />} label="Email" value={candidate.email || ''} />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <InfoItem icon={<Phone />} label="Telefone" value={candidate.phone || ''} />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <InfoItem
+                      icon={<LocationOn />}
+                      label="Localizacao"
+                      value={
+                        candidate.city && candidate.state
+                          ? `${candidate.city}, ${candidate.state}`
+                          : candidate.city || candidate.state || ''
+                      }
                     />
-                    <Chip label={doc.mime_type} size="small" />
-                  </ListItem>
-                ))
-              )}
-            </List>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <InfoItem icon={<Badge />} label="CPF" value={candidate.doc_id || ''} />
+                  </Grid>
+                  {candidate.address && (
+                    <Grid item xs={12}>
+                      <InfoItem icon={<LocationOn />} label="Endereco" value={candidate.address} />
+                    </Grid>
+                  )}
+                  {candidate.birth_date && (
+                    <Grid item xs={12} sm={6}>
+                      <InfoItem
+                        icon={<CalendarToday />}
+                        label="Data de Nascimento"
+                        value={new Date(candidate.birth_date).toLocaleDateString('pt-BR')}
+                      />
+                    </Grid>
+                  )}
+                </Grid>
+              </Box>
+            </TabPanel>
+
+            <TabPanel value={tab} index={1}>
+              <Box sx={{ px: 3 }}>
+                {documents.length === 0 ? (
+                  <Box textAlign="center" py={4}>
+                    <Description sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+                    <Typography color="text.secondary">Nenhum documento enviado</Typography>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      startIcon={<CloudUpload />}
+                      sx={{ mt: 2 }}
+                      onClick={() => navigate('/upload')}
+                    >
+                      Fazer Upload
+                    </Button>
+                  </Box>
+                ) : (
+                  <List disablePadding>
+                    {documents.map((doc, i) => (
+                      <React.Fragment key={doc.id}>
+                        {i > 0 && <Divider />}
+                        <ListItem
+                          sx={{ px: 0 }}
+                          secondaryAction={
+                            <Tooltip title="Reprocessar">
+                              <IconButton size="small" onClick={() => handleReprocess(doc.id)}>
+                                <Refresh fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          }
+                        >
+                          <ListItemIcon>
+                            <Description color="primary" />
+                          </ListItemIcon>
+                          <ListItemText
+                            primary={
+                              <Typography variant="body2" fontWeight={500}>
+                                {doc.original_filename}
+                              </Typography>
+                            }
+                            secondary={
+                              <Box display="flex" gap={1} alignItems="center" mt={0.5}>
+                                <Chip label={doc.mime_type} size="small" variant="outlined" />
+                                <Typography variant="caption" color="text.secondary">
+                                  {new Date(doc.uploaded_at).toLocaleString('pt-BR')}
+                                </Typography>
+                              </Box>
+                            }
+                          />
+                        </ListItem>
+                      </React.Fragment>
+                    ))}
+                  </List>
+                )}
+              </Box>
+            </TabPanel>
+
+            <TabPanel value={tab} index={2}>
+              <Box sx={{ px: 3 }}>
+                {experiences.length === 0 ? (
+                  <Box textAlign="center" py={4}>
+                    <Work sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+                    <Typography color="text.secondary">
+                      Nenhuma experiencia registrada
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      As experiencias sao extraidas automaticamente dos curriculos
+                    </Typography>
+                  </Box>
+                ) : (
+                  experiences.map((exp, i) => (
+                    <Box
+                      key={exp.id}
+                      sx={{
+                        py: 2,
+                        borderLeft: '3px solid',
+                        borderColor: 'primary.main',
+                        pl: 2,
+                        mb: 2,
+                      }}
+                    >
+                      <Typography variant="subtitle2" fontWeight={600}>
+                        {exp.role_title}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {exp.company_name}
+                        {exp.location ? ` - ${exp.location}` : ''}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {exp.start_date || '?'} - {exp.is_current ? 'Atual' : exp.end_date || '?'}
+                      </Typography>
+                      {exp.description && (
+                        <Typography variant="body2" sx={{ mt: 1 }}>
+                          {exp.description}
+                        </Typography>
+                      )}
+                    </Box>
+                  ))
+                )}
+              </Box>
+            </TabPanel>
           </Paper>
         </Grid>
 
+        {/* Right column - Stats */}
         <Grid item xs={12} md={4}>
-          <Card>
+          <Card sx={{ mb: 3 }}>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Estatísticas
+              <Typography variant="h6" fontWeight={600} gutterBottom>
+                Resumo
               </Typography>
               <Box sx={{ mt: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  Total de Documentos
-                </Typography>
-                <Typography variant="h4">{documents.length}</Typography>
-              </Box>
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  Cadastrado em
-                </Typography>
-                <Typography variant="body1">
-                  {new Date(candidate.created_at).toLocaleDateString()}
-                </Typography>
+                <Box display="flex" justifyContent="space-between" py={1}>
+                  <Typography variant="body2" color="text.secondary">Documentos</Typography>
+                  <Typography variant="body2" fontWeight={600}>{documents.length}</Typography>
+                </Box>
+                <Divider />
+                <Box display="flex" justifyContent="space-between" py={1}>
+                  <Typography variant="body2" color="text.secondary">Experiencias</Typography>
+                  <Typography variant="body2" fontWeight={600}>{experiences.length}</Typography>
+                </Box>
+                <Divider />
+                <Box display="flex" justifyContent="space-between" py={1}>
+                  <Typography variant="body2" color="text.secondary">Cadastro</Typography>
+                  <Typography variant="body2" fontWeight={600}>
+                    {new Date(candidate.created_at).toLocaleDateString('pt-BR')}
+                  </Typography>
+                </Box>
+                <Divider />
+                <Box display="flex" justifyContent="space-between" py={1}>
+                  <Typography variant="body2" color="text.secondary">Atualizado</Typography>
+                  <Typography variant="body2" fontWeight={600}>
+                    {new Date(candidate.updated_at).toLocaleDateString('pt-BR')}
+                  </Typography>
+                </Box>
               </Box>
             </CardContent>
           </Card>
+
+          {candidate.city && (
+            <Card>
+              <CardContent>
+                <Typography variant="h6" fontWeight={600} gutterBottom>
+                  Localizacao
+                </Typography>
+                <Chip
+                  icon={<LocationOn />}
+                  label={`${candidate.city}${candidate.state ? ', ' + candidate.state : ''}`}
+                  color="primary"
+                  variant="outlined"
+                />
+              </CardContent>
+            </Card>
+          )}
         </Grid>
       </Grid>
     </Box>

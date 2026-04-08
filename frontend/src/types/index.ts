@@ -1,10 +1,12 @@
-// API Types
+// ==================== Auth ====================
 export interface User {
   id: number;
   email: string;
   name: string;
   status: string;
   is_superuser: boolean;
+  company_id?: number;
+  roles?: string[];
   created_at: string;
 }
 
@@ -15,6 +17,7 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   access_token: string;
+  refresh_token?: string;
   token_type: string;
   user: User;
 }
@@ -25,6 +28,7 @@ export interface RegisterRequest {
   name: string;
 }
 
+// ==================== Candidates ====================
 export interface Candidate {
   id: number;
   full_name: string;
@@ -36,10 +40,32 @@ export interface Candidate {
   city?: string;
   state?: string;
   country?: string;
+  company_id?: number;
   created_at: string;
   updated_at: string;
 }
 
+export interface CandidateProfile {
+  id: number;
+  candidate_id: number;
+  snapshot_data: Record<string, any>;
+  version: number;
+  created_at: string;
+}
+
+export interface Experience {
+  id: number;
+  candidate_id: number;
+  company_name: string;
+  role_title: string;
+  start_date?: string;
+  end_date?: string;
+  description?: string;
+  location?: string;
+  is_current: boolean;
+}
+
+// ==================== Documents ====================
 export interface Document {
   id: number;
   candidate_id: number;
@@ -47,28 +73,46 @@ export interface Document {
   mime_type: string;
   source_path: string;
   sha256_hash: string;
+  file_size?: number;
+  status?: string;
   uploaded_at: string;
 }
 
+// ==================== Search ====================
 export interface SearchResult {
   candidate_id: number;
   candidate_name: string;
   score: number;
-  matched_chunks: Array<{
-    section: string;
-    content: string;
-    similarity: number;
-  }>;
+  email?: string;
+  city?: string;
+  state?: string;
+  matched_chunks: MatchedChunk[];
 }
 
+export interface MatchedChunk {
+  section: string;
+  content: string;
+  similarity: number;
+}
+
+export interface SearchFilters {
+  city?: string;
+  state?: string;
+  skills?: string[];
+  min_experience?: number;
+}
+
+// ==================== WebSocket ====================
 export interface WebSocketMessage {
   type: string;
   document_id?: number;
   status?: string;
   progress?: number;
   message?: string;
+  data?: Record<string, any>;
 }
 
+// ==================== Roles & Permissions ====================
 export interface Role {
   id: number;
   name: string;
@@ -76,6 +120,7 @@ export interface Role {
   permissions: Record<string, boolean>;
 }
 
+// ==================== Settings ====================
 export interface ServerSettings {
   id: number;
   key: string;
@@ -85,7 +130,7 @@ export interface ServerSettings {
   updated_at: string;
 }
 
-// Chat types
+// ==================== Chat ====================
 export interface ChatConversation {
   id: number;
   title: string;
@@ -114,27 +159,31 @@ export interface ChatResponse {
   message: string;
   conversation_id: number;
   message_id: number;
-  candidates_found: Array<{
-    id: number;
-    name: string;
-    email?: string;
-    city?: string;
-    state?: string;
-    relevance: number;
-  }>;
-  sources: Array<{
-    chunk_id: number;
-    candidate_id: number;
-    candidate_name: string;
-    section: string;
-    relevance: number;
-  }>;
+  candidates_found: ChatCandidate[];
+  sources: ChatSource[];
   suggestions: string[];
   tokens_used: number;
   confidence: number;
 }
 
-// LinkedIn search types
+export interface ChatCandidate {
+  id: number;
+  name: string;
+  email?: string;
+  city?: string;
+  state?: string;
+  relevance: number;
+}
+
+export interface ChatSource {
+  chunk_id: number;
+  candidate_id: number;
+  candidate_name: string;
+  section: string;
+  relevance: number;
+}
+
+// ==================== LinkedIn ====================
 export interface LinkedInSearchCriteria {
   title?: string;
   skills?: string[];
@@ -147,12 +196,83 @@ export interface LinkedInSearchCriteria {
 export interface LinkedInSearchResult {
   search_id: number;
   criteria: LinkedInSearchCriteria;
-  results: Array<{
-    candidate_id: number;
-    name: string;
-    score: number;
-    match_details: string[];
-    source: string;
-  }>;
+  results: LinkedInMatch[];
   total_found: number;
+}
+
+export interface LinkedInMatch {
+  candidate_id: number;
+  name: string;
+  score: number;
+  match_details: string[];
+  source: string;
+}
+
+// ==================== Companies ====================
+export interface Company {
+  id: number;
+  name: string;
+  cnpj?: string;
+  plan: string;
+  logo_url?: string;
+  is_active: boolean;
+  max_candidates?: number;
+  max_monthly_ai_cost?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ==================== Dashboard ====================
+export interface DashboardStats {
+  total_candidates: number;
+  total_documents: number;
+  recent_uploads: number;
+  processed_today: number;
+  candidates_by_state: { name: string; value: number }[];
+  uploads_by_month: { month: string; count: number }[];
+  top_skills: { skill: string; count: number }[];
+}
+
+// ==================== AI Usage ====================
+export interface AIUsageLog {
+  id: number;
+  operation: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  user_id: number;
+  company_id?: number;
+  created_at: string;
+}
+
+// ==================== Audit ====================
+export interface AuditLog {
+  id: number;
+  action: string;
+  entity_type: string;
+  entity_id: number;
+  user_id: number;
+  details?: Record<string, any>;
+  ip_address?: string;
+  created_at: string;
+}
+
+// ==================== Pagination ====================
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+// ==================== Health ====================
+export interface HealthCheck {
+  status: string;
+  version: string;
+  database: string;
+  redis: string;
+  celery: string;
+  vector_db: string;
 }
