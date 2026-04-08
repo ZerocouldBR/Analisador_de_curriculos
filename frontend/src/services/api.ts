@@ -8,7 +8,12 @@ import {
   Document,
   SearchResult,
   Role,
-  ServerSettings
+  ServerSettings,
+  ChatConversation,
+  ChatMessage,
+  ChatResponse,
+  LinkedInSearchCriteria,
+  LinkedInSearchResult,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -219,6 +224,91 @@ class ApiService {
   // Health check
   async healthCheck(): Promise<any> {
     const response = await this.api.get('/health');
+    return response.data;
+  }
+
+  // Chat endpoints
+  async createConversation(data: {
+    title?: string;
+    job_description?: string;
+    job_title?: string;
+    domain?: string;
+  }): Promise<ChatConversation> {
+    const response = await this.api.post<ChatConversation>('/v1/chat/conversations', data);
+    return response.data;
+  }
+
+  async getConversations(status: string = 'active'): Promise<ChatConversation[]> {
+    const response = await this.api.get<ChatConversation[]>('/v1/chat/conversations', {
+      params: { status_filter: status },
+    });
+    return response.data;
+  }
+
+  async getConversation(id: number): Promise<ChatConversation> {
+    const response = await this.api.get<ChatConversation>(`/v1/chat/conversations/${id}`);
+    return response.data;
+  }
+
+  async archiveConversation(id: number): Promise<void> {
+    await this.api.delete(`/v1/chat/conversations/${id}`);
+  }
+
+  async getMessages(conversationId: number): Promise<ChatMessage[]> {
+    const response = await this.api.get<ChatMessage[]>(
+      `/v1/chat/conversations/${conversationId}/messages`
+    );
+    return response.data;
+  }
+
+  async sendMessage(
+    conversationId: number,
+    message: string,
+    candidateIds?: number[]
+  ): Promise<ChatResponse> {
+    const response = await this.api.post<ChatResponse>(
+      `/v1/chat/conversations/${conversationId}/messages`,
+      { message, candidate_ids: candidateIds }
+    );
+    return response.data;
+  }
+
+  async analyzeJob(
+    conversationId: number,
+    jobDescription: string,
+    jobTitle: string = '',
+    limit: number = 10
+  ): Promise<ChatResponse> {
+    const response = await this.api.post<ChatResponse>(
+      `/v1/chat/conversations/${conversationId}/analyze-job`,
+      { job_description: jobDescription, job_title: jobTitle, limit }
+    );
+    return response.data;
+  }
+
+  async quickAnalyze(
+    jobDescription: string,
+    jobTitle: string = '',
+    limit: number = 10
+  ): Promise<ChatResponse> {
+    const response = await this.api.post<ChatResponse>('/v1/chat/quick-analyze', {
+      job_description: jobDescription,
+      job_title: jobTitle,
+      limit,
+    });
+    return response.data;
+  }
+
+  // LinkedIn search endpoints
+  async searchProfessionals(criteria: LinkedInSearchCriteria): Promise<LinkedInSearchResult> {
+    const response = await this.api.post<LinkedInSearchResult>('/v1/linkedin/search', criteria);
+    return response.data;
+  }
+
+  async getSearchHistory(limit: number = 20): Promise<any[]> {
+    const response = await this.api.get('/v1/linkedin/search/history', {
+      params: { limit },
+    });
     return response.data;
   }
 }

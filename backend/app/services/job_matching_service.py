@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 
 from app.db.models import Candidate, Chunk, Embedding
+from app.core.config import settings
 from app.services.keyword_extraction_service import KeywordExtractionService
 
 
@@ -782,9 +783,9 @@ class JobMatchingService:
                     matched_keywords.append(kw)
 
             # Classificar requisitos
-            if score >= 70:
+            if score >= settings.job_matching_strength_threshold:
                 strengths.append(f"{req.name} ({score:.0f}%)")
-            elif score < 30:
+            elif score < settings.job_matching_gap_threshold:
                 if req.required:
                     missing_requirements.append(f"[OBRIGATORIO] {req.name}")
                     gaps.append(
@@ -801,7 +802,7 @@ class JobMatchingService:
         if profile.requires_cnh:
             cnh_pattern = rf'CNH\s*[:\-]?\s*(?:categoria\s*)?.*{profile.requires_cnh}'
             if re.search(cnh_pattern, full_text, re.IGNORECASE):
-                total_score = min(total_score + 5, 100)
+                total_score = min(total_score + settings.job_matching_cnh_bonus, 100)
                 strengths.append(f"Possui CNH {profile.requires_cnh}")
             elif profile.requires_cnh:
                 gaps.append(f"Necessita CNH categoria {profile.requires_cnh}")
@@ -810,7 +811,7 @@ class JobMatchingService:
         if profile.min_experience_years > 0:
             exp_years = cls._estimate_experience_years(full_text)
             if exp_years >= profile.min_experience_years:
-                total_score = min(total_score + 3, 100)
+                total_score = min(total_score + settings.job_matching_experience_bonus, 100)
                 strengths.append(f"~{exp_years} anos de experiencia")
             else:
                 gaps.append(
@@ -885,13 +886,13 @@ class JobMatchingService:
         indexed_ratio = indexed_matches / len(requirement.keywords)
 
         # Score combinado (texto direto tem mais peso)
-        score = (direct_ratio * 0.6 + indexed_ratio * 0.4) * 100
+        score = (direct_ratio * settings.job_matching_direct_text_weight + indexed_ratio * settings.job_matching_indexed_weight) * 100
 
         # Bonus se muitas ocorrencias (experiencia mais profunda)
         for kw in requirement.keywords[:5]:
             count = text_lower.count(kw.lower())
-            if count > 2:
-                score = min(score + 5, 100)
+            if count > settings.job_matching_keyword_repeat_threshold:
+                score = min(score + settings.job_matching_keyword_bonus, 100)
 
         return score
 
@@ -913,7 +914,8 @@ class JobMatchingService:
             date_ranges = year_ranges
 
         total_months = 0
-        current_year = 2026
+        from datetime import datetime
+        current_year = datetime.now().year
 
         for start_str, end_str in date_ranges:
             try:
@@ -992,7 +994,7 @@ class JobMatchingService:
         for profile_key, profile in cls.PRESET_PROFILES.items():
             match = cls._score_candidate(candidate, full_text, candidate_keywords, profile)
 
-            if match.total_score >= 20:  # Limiar baixo para sugestoes
+            if match.total_score >= settings.job_matching_suggestion_threshold:
                 suggestions.append({
                     "profile_key": profile_key,
                     "job_title": profile.title,

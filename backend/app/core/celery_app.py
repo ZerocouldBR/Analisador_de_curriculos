@@ -6,8 +6,8 @@ from app.core.config import settings
 
 celery_app = Celery(
     "analisador_curriculos",
-    broker=settings.REDIS_URL,
-    backend=settings.REDIS_URL,
+    broker=settings.redis_url,
+    backend=settings.redis_url,
     include=["app.tasks.document_tasks"]
 )
 
@@ -21,9 +21,9 @@ celery_app.conf.update(
     task_track_started=True,
     task_send_sent_event=True,
     worker_send_task_events=True,
-    result_expires=3600,  # Results expire after 1 hour
-    task_time_limit=300,  # 5 minutes max per task
-    task_soft_time_limit=240,  # Soft limit at 4 minutes
+    result_expires=settings.celery_result_expires,
+    task_time_limit=settings.celery_task_time_limit,
+    task_soft_time_limit=settings.celery_task_soft_time_limit,
 )
 
 # Task routing

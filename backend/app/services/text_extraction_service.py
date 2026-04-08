@@ -3,9 +3,11 @@ Servico avancado de extracao de texto de documentos
 
 Suporta:
 - PDF (via pdfplumber + OCR avancado para PDFs escaneados)
-- DOCX (via python-docx)
+- DOCX (via python-docx com extracao de imagens embutidas)
 - TXT, RTF (leitura direta)
-- Imagens (via Tesseract OCR com preprocessamento)
+- Imagens (via Tesseract OCR com preprocessamento avancado)
+  - JPEG, PNG, BMP, TIFF, GIF
+  - WEBP, HEIC/HEIF (com conversao automatica)
 - HTML (via BeautifulSoup)
 
 Melhorias de OCR:
@@ -14,6 +16,8 @@ Melhorias de OCR:
 - Score de confianca do OCR
 - Resolucao adaptativa
 - Suporte multi-idioma com deteccao automatica
+- Pipeline de multi-tentativa com diferentes configuracoes PSM
+- Extracao de imagens embutidas em DOCX para OCR
 """
 import io
 import re
@@ -83,14 +87,46 @@ class TextExtractionService:
     - HTML (via BeautifulSoup)
     """
 
-    # Resolucoes para tentativa adaptativa de OCR
-    OCR_RESOLUTIONS = [300, 400, 200]
+    # Valores carregados de settings (sem hardcoding)
+    @staticmethod
+    def _ocr_resolutions():
+        from app.core.config import settings
+        return settings.ocr_resolutions
 
-    # Limiar minimo de caracteres para considerar pagina com texto
-    MIN_TEXT_CHARS = 30
+    @staticmethod
+    def _min_text_chars():
+        from app.core.config import settings
+        return settings.ocr_min_text_chars
 
-    # Confianca minima aceitavel para OCR
-    MIN_OCR_CONFIDENCE = 30.0
+    @staticmethod
+    def _min_ocr_confidence():
+        from app.core.config import settings
+        return settings.ocr_min_confidence
+
+    @staticmethod
+    def _ocr_languages():
+        from app.core.config import settings
+        return settings.ocr_languages
+
+    @staticmethod
+    def _ocr_psm_modes():
+        from app.core.config import settings
+        return settings.ocr_psm_modes
+
+    @staticmethod
+    def _ocr_max_images():
+        from app.core.config import settings
+        return settings.ocr_max_images_per_docx
+
+    # MIME types de imagem suportados (incluindo formatos modernos)
+    SUPPORTED_IMAGE_MIMES = {
+        "image/jpeg", "image/png", "image/bmp", "image/tiff",
+        "image/gif", "image/webp", "image/heic", "image/heif",
+        "image/x-icon", "image/svg+xml",
+    }
+
+    # PSM modes para tentativas progressivas de OCR
+    PSM_MODES = [6, 3, 4, 1]  # 6=bloco, 3=auto, 4=coluna, 1=auto com OSD
 
     @staticmethod
     def extract_text(file_path: str, mime_type: str) -> str:
@@ -118,16 +154,26 @@ class TextExtractionService:
         ]:
             return TextExtractionService._extract_from_docx(path)
 
+        elif mime_type in [
+            "application/vnd.oasis.opendocument.text",  # ODT
+            "application/rtf",
+        ]:
+            return TextExtractionService._extract_from_txt(path)
+
         elif mime_type == "text/plain":
             return TextExtractionService._extract_from_txt(path)
 
         elif mime_type in ["text/html", "application/xhtml+xml"]:
             return TextExtractionService._extract_from_html(path)
 
-        elif mime_type.startswith("image/"):
+        elif mime_type.startswith("image/") or mime_type in TextExtractionService.SUPPORTED_IMAGE_MIMES:
             return TextExtractionService._extract_from_image(path)
 
         else:
+            # Tentar detectar pelo conteudo do arquivo como fallback
+            text = TextExtractionService._try_fallback_extraction(path)
+            if text:
+                return text
             raise ValueError(f"Formato nao suportado: {mime_type}")
 
     @staticmethod
@@ -224,7 +270,7 @@ class TextExtractionService:
                         pass
 
                     # Decidir se precisa OCR
-                    has_sufficient_text = len(direct_text) >= TextExtractionService.MIN_TEXT_CHARS
+                    has_sufficient_text = len(direct_text) >= TextExtractionService._min_text_chars()
                     page_confidence = 1.0
 
                     if has_sufficient_text:
@@ -242,7 +288,7 @@ class TextExtractionService:
                             page_confidence = ocr_confidence / 100.0
                             pages_with_ocr += 1
 
-                            if ocr_confidence < TextExtractionService.MIN_OCR_CONFIDENCE:
+                            if ocr_confidence < TextExtractionService._min_ocr_confidence():
                                 warnings.append(
                                     f"Pagina {page_num + 1}: OCR com baixa confianca "
                                     f"({ocr_confidence:.1f}%)"
@@ -309,7 +355,7 @@ class TextExtractionService:
         best_text = ""
         best_confidence = 0.0
 
-        for resolution in TextExtractionService.OCR_RESOLUTIONS:
+        for resolution in TextExtractionService._ocr_resolutions():
             try:
                 # Converter pagina para imagem
                 page_image = page.to_image(resolution=resolution).original
@@ -320,7 +366,7 @@ class TextExtractionService:
                 # OCR com dados de confianca
                 ocr_data = pytesseract.image_to_data(
                     processed_image,
-                    lang='por+eng',
+                    lang=TextExtractionService._ocr_languages(),
                     output_type=pytesseract.Output.DICT,
                     config='--oem 3 --psm 6'
                 )
@@ -347,7 +393,8 @@ class TextExtractionService:
                         best_confidence = avg_conf
 
                 # Se confianca boa, nao precisa tentar outras resolucoes
-                if best_confidence >= 70:
+                from app.core.config import settings as _settings
+                if best_confidence >= _settings.ocr_good_confidence_threshold:
                     break
 
             except Exception as e:
@@ -587,8 +634,57 @@ class TextExtractionService:
         return result.text
 
     @staticmethod
+    def _convert_image_to_pil(file_path: Path) -> Image.Image:
+        """
+        Converte imagem de qualquer formato suportado para PIL Image.
+        Suporta WEBP, HEIC, HEIF alem dos formatos tradicionais.
+        """
+        suffix = file_path.suffix.lower()
+
+        try:
+            if suffix in ('.heic', '.heif'):
+                # Tentar usar pillow-heif para HEIC/HEIF
+                try:
+                    import pillow_heif
+                    heif_file = pillow_heif.read_heif(str(file_path))
+                    image = Image.frombytes(
+                        heif_file.mode, heif_file.size, heif_file.data,
+                        "raw", heif_file.mode, heif_file.stride,
+                    )
+                    return image
+                except ImportError:
+                    logger.warning("pillow-heif nao disponivel. Tentando conversao com OpenCV.")
+                    if CV2_AVAILABLE:
+                        img_array = cv2.imread(str(file_path))
+                        if img_array is not None:
+                            img_rgb = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)
+                            return Image.fromarray(img_rgb)
+                    raise ValueError(
+                        "Formato HEIC/HEIF requer pillow-heif. "
+                        "Execute: pip install pillow-heif"
+                    )
+            else:
+                image = Image.open(file_path)
+                # Converter WEBP e outros formatos com canal alpha para RGB
+                if image.mode in ('RGBA', 'LA', 'P'):
+                    background = Image.new('RGB', image.size, (255, 255, 255))
+                    if image.mode == 'P':
+                        image = image.convert('RGBA')
+                    background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
+                    image = background
+                elif image.mode != 'RGB' and image.mode != 'L':
+                    image = image.convert('RGB')
+                return image
+
+        except Exception as e:
+            raise ValueError(f"Erro ao abrir imagem {file_path.name}: {str(e)}")
+
+    @staticmethod
     def _extract_from_image_advanced(file_path: Path) -> OCRResult:
-        """Extracao avancada de imagem com metadados"""
+        """
+        Extracao avancada de imagem com metadados.
+        Suporta multiplos formatos e usa multi-tentativa com diferentes PSM modes.
+        """
         if not OCR_AVAILABLE:
             raise ValueError(
                 "Bibliotecas de OCR nao disponiveis. "
@@ -597,38 +693,64 @@ class TextExtractionService:
             )
 
         try:
-            image = Image.open(file_path)
+            image = TextExtractionService._convert_image_to_pil(file_path)
+            original_size = image.size
 
             # Preprocessar imagem
             processed = TextExtractionService._preprocess_image(image)
 
-            # OCR com dados de confianca
-            ocr_data = pytesseract.image_to_data(
-                processed,
-                lang='por+eng',
-                output_type=pytesseract.Output.DICT,
-                config='--oem 3 --psm 6'
-            )
+            # Multi-tentativa com diferentes PSM modes para melhor resultado
+            best_text = ""
+            best_confidence = 0.0
+            best_psm = 6
 
-            # Extrair texto reconstruido
-            text = TextExtractionService._reconstruct_text_from_ocr_data(ocr_data)
+            for psm in TextExtractionService._ocr_psm_modes():
+                try:
+                    ocr_data = pytesseract.image_to_data(
+                        processed,
+                        lang=TextExtractionService._ocr_languages(),
+                        output_type=pytesseract.Output.DICT,
+                        config=f'--oem 3 --psm {psm}'
+                    )
 
-            # Calcular confianca media
-            confidences = [
-                float(c) for c in ocr_data['conf']
-                if c != -1 and ocr_data['text'][ocr_data['conf'].index(c)].strip()
-            ]
-            avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+                    text = TextExtractionService._reconstruct_text_from_ocr_data(ocr_data)
 
-            language = TextExtractionService.detect_language(text)
+                    # Calcular confianca com indice correto
+                    confidences = []
+                    for i, conf in enumerate(ocr_data['conf']):
+                        if conf != -1 and ocr_data['text'][i].strip():
+                            confidences.append(float(conf))
+
+                    avg_conf = sum(confidences) / len(confidences) if confidences else 0
+
+                    # Preferir resultado com mais texto e melhor confianca
+                    text_quality = len(text.strip()) * (avg_conf / 100.0)
+                    best_quality = len(best_text.strip()) * (best_confidence / 100.0)
+
+                    if text_quality > best_quality:
+                        best_text = text
+                        best_confidence = avg_conf
+                        best_psm = psm
+
+                    # Se confianca boa, nao precisa tentar outros PSMs
+                    if avg_conf >= 75 and len(text.strip()) > 50:
+                        break
+
+                except Exception as e:
+                    logger.debug(f"OCR PSM {psm} falhou: {e}")
+                    continue
+
+            language = TextExtractionService.detect_language(best_text)
 
             warnings = []
-            if avg_confidence < TextExtractionService.MIN_OCR_CONFIDENCE:
-                warnings.append(f"Baixa confianca do OCR: {avg_confidence:.1f}%")
+            if best_confidence < TextExtractionService._min_ocr_confidence():
+                warnings.append(f"Baixa confianca do OCR: {best_confidence:.1f}%")
+            if not best_text.strip():
+                warnings.append("Nenhum texto detectado na imagem")
 
             return OCRResult(
-                text=text.strip(),
-                confidence=avg_confidence / 100.0,
+                text=best_text.strip(),
+                confidence=best_confidence / 100.0,
                 language=language,
                 pages_processed=1,
                 pages_with_ocr=1,
@@ -636,8 +758,10 @@ class TextExtractionService:
                 warnings=warnings,
                 metadata={
                     "file": str(file_path),
-                    "image_size": image.size,
-                    "ocr_engine": "tesseract"
+                    "image_size": original_size,
+                    "ocr_engine": "tesseract",
+                    "psm_used": best_psm,
+                    "format": file_path.suffix.lower(),
                 }
             )
 
@@ -650,7 +774,7 @@ class TextExtractionService:
 
     @staticmethod
     def _extract_from_docx(file_path: Path) -> str:
-        """Extrai texto de DOCX incluindo headers, footers e imagens embutidas"""
+        """Extrai texto de DOCX incluindo headers, footers, tabelas e imagens embutidas via OCR"""
         if not DOCX_AVAILABLE:
             raise ValueError("python-docx nao esta instalado. Execute: pip install python-docx")
 
@@ -671,10 +795,60 @@ class TextExtractionService:
                     if row_text:
                         text.append(" | ".join(row_text))
 
+            # Extrair texto de imagens embutidas via OCR
+            if OCR_AVAILABLE:
+                image_texts = TextExtractionService._extract_images_from_docx(file_path)
+                if image_texts:
+                    text.append("\n[TEXTO EXTRAIDO DE IMAGENS EMBUTIDAS]")
+                    text.extend(image_texts)
+
             return "\n".join(text)
 
         except Exception as e:
             raise ValueError(f"Erro ao extrair texto do DOCX: {str(e)}")
+
+    @staticmethod
+    def _extract_images_from_docx(file_path: Path) -> list:
+        """Extrai e faz OCR em imagens embutidas dentro de DOCX"""
+        import zipfile
+        image_texts = []
+
+        try:
+            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                image_files = [
+                    f for f in zip_ref.namelist()
+                    if f.startswith('word/media/') and any(
+                        f.lower().endswith(ext) for ext in
+                        ('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif')
+                    )
+                ]
+
+                for img_file in image_files[:TextExtractionService._ocr_max_images()]:
+                    try:
+                        img_data = zip_ref.read(img_file)
+                        image = Image.open(io.BytesIO(img_data))
+
+                        # So processar imagens grandes o suficiente para conter texto
+                        if image.size[0] < 100 or image.size[1] < 50:
+                            continue
+
+                        processed = TextExtractionService._preprocess_image(image)
+                        ocr_text = pytesseract.image_to_string(
+                            processed, lang=TextExtractionService._ocr_languages(),
+                            config='--oem 3 --psm 6'
+                        ).strip()
+
+                        if len(ocr_text) > 20:  # Ignorar textos muito curtos
+                            image_texts.append(ocr_text)
+
+                    except Exception as e:
+                        logger.debug(f"Erro OCR em imagem embutida {img_file}: {e}")
+                        continue
+
+        except Exception as e:
+            logger.debug(f"Erro ao extrair imagens do DOCX: {e}")
+
+        return image_texts
 
     @staticmethod
     def _extract_from_txt(file_path: Path) -> str:
@@ -781,6 +955,50 @@ class TextExtractionService:
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
         return text
+
+    @staticmethod
+    def _try_fallback_extraction(file_path: Path) -> Optional[str]:
+        """
+        Tenta extrair texto por deteccao de conteudo quando mime type eh desconhecido.
+        Usa magic bytes para detectar o formato real do arquivo.
+        """
+        try:
+            with open(file_path, 'rb') as f:
+                header = f.read(16)
+
+            # PDF magic bytes
+            if header[:5] == b'%PDF-':
+                if PDF_AVAILABLE:
+                    return TextExtractionService._extract_from_pdf(file_path)
+
+            # DOCX/ZIP magic bytes
+            if header[:4] == b'PK\x03\x04':
+                if DOCX_AVAILABLE:
+                    try:
+                        return TextExtractionService._extract_from_docx(file_path)
+                    except Exception:
+                        pass
+
+            # JPEG magic bytes
+            if header[:3] == b'\xff\xd8\xff':
+                if OCR_AVAILABLE:
+                    return TextExtractionService._extract_from_image(file_path)
+
+            # PNG magic bytes
+            if header[:8] == b'\x89PNG\r\n\x1a\n':
+                if OCR_AVAILABLE:
+                    return TextExtractionService._extract_from_image(file_path)
+
+            # Tentar como texto puro
+            try:
+                return TextExtractionService._extract_from_txt(file_path)
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.debug(f"Fallback extraction falhou: {e}")
+
+        return None
 
     @staticmethod
     def detect_language(text: str) -> str:

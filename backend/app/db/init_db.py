@@ -1,15 +1,13 @@
 """
-Script para inicialização do banco de dados
-Cria as tabelas, extensões e índices vetoriais necessários
+Script para inicializacao do banco de dados
 
-Inclui:
-- Extensão pgvector
-- Índice HNSW para busca vetorial eficiente
-- Índices de texto para full-text search
+Cria tabelas, extensoes e indices.
+Todos os parametros vem de settings (nada hardcoded).
 """
 
 from sqlalchemy import text
 from app.db.database import engine, Base
+from app.core.config import settings
 from app.db.models import (
     User,
     Role,
@@ -22,147 +20,136 @@ from app.db.models import (
     Consent,
     ExternalEnrichment,
     ServerSettings,
-    AuditLog
+    AuditLog,
+    ChatConversation,
+    ChatMessage,
+    LinkedInSearch,
+    EncryptedPII,
 )
 
 
 def create_vector_indexes():
-    """
-    Cria índices vetoriais HNSW para busca eficiente
-
-    HNSW (Hierarchical Navigable Small World) oferece:
-    - Busca aproximada muito rápida
-    - Bom trade-off entre velocidade e precisão
-    - Melhor performance para grandes volumes de dados
-    """
-    print("Criando índices vetoriais...")
+    """Cria indices vetoriais e full-text usando parametros de settings"""
+    print("Criando indices...")
 
     with engine.connect() as connection:
-        # Índice HNSW para busca por similaridade de cosseno
+        # Indice HNSW para busca vetorial
+        if settings.enable_hnsw_index:
+            try:
+                result = connection.execute(text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE indexname = 'idx_embeddings_vector_hnsw'"
+                ))
+                if result.fetchone() is None:
+                    connection.execute(text(
+                        f"CREATE INDEX idx_embeddings_vector_hnsw "
+                        f"ON embeddings USING hnsw (vector {settings.pgvector_distance_ops}) "
+                        f"WITH (m = {settings.pgvector_hnsw_m}, "
+                        f"ef_construction = {settings.pgvector_hnsw_ef_construction});"
+                    ))
+                    connection.commit()
+                    print(f"  HNSW index created (m={settings.pgvector_hnsw_m}, "
+                          f"ef={settings.pgvector_hnsw_ef_construction}, "
+                          f"metric={settings.pgvector_distance_metric})")
+                else:
+                    print("  HNSW index already exists")
+            except Exception as e:
+                print(f"  Warning: HNSW index: {e}")
+
+        # Indice GIN para full-text search
         try:
-            # Primeiro, verificar se o índice já existe
-            result = connection.execute(text("""
-                SELECT indexname FROM pg_indexes
-                WHERE indexname = 'idx_embeddings_vector_hnsw'
-            """))
-
+            result = connection.execute(text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE indexname = 'idx_chunks_content_fts'"
+            ))
             if result.fetchone() is None:
-                # Criar índice HNSW com parâmetros otimizados
-                # m: número de conexões por nó (16 é bom para 1536 dims)
-                # ef_construction: qualidade da construção (maior = melhor mas mais lento)
-                connection.execute(text("""
-                    CREATE INDEX idx_embeddings_vector_hnsw
-                    ON embeddings
-                    USING hnsw (vector vector_cosine_ops)
-                    WITH (m = 16, ef_construction = 64);
-                """))
+                connection.execute(text(
+                    f"CREATE INDEX idx_chunks_content_fts "
+                    f"ON chunks USING GIN ("
+                    f"to_tsvector('{settings.fts_language}', content));"
+                ))
                 connection.commit()
-                print("✓ Índice HNSW criado para embeddings")
+                print(f"  FTS index created (language={settings.fts_language})")
             else:
-                print("✓ Índice HNSW já existe")
-
+                print("  FTS index already exists")
         except Exception as e:
-            print(f"⚠ Erro ao criar índice HNSW: {e}")
-            print("  O índice pode já existir ou a versão do pgvector não suporta HNSW")
+            print(f"  Warning: FTS index: {e}")
 
-        # Criar índice GIN para busca full-text em português
+        # Indice GIN para meta_json
         try:
-            result = connection.execute(text("""
-                SELECT indexname FROM pg_indexes
-                WHERE indexname = 'idx_chunks_content_fts'
-            """))
-
+            result = connection.execute(text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE indexname = 'idx_chunks_meta_json'"
+            ))
             if result.fetchone() is None:
-                connection.execute(text("""
-                    CREATE INDEX idx_chunks_content_fts
-                    ON chunks
-                    USING GIN (to_tsvector('portuguese', content));
-                """))
+                connection.execute(text(
+                    "CREATE INDEX idx_chunks_meta_json "
+                    "ON chunks USING GIN (meta_json jsonb_path_ops);"
+                ))
                 connection.commit()
-                print("✓ Índice GIN para full-text search criado")
+                print("  JSON metadata index created")
             else:
-                print("✓ Índice GIN já existe")
-
+                print("  JSON metadata index already exists")
         except Exception as e:
-            print(f"⚠ Erro ao criar índice GIN: {e}")
+            print(f"  Warning: JSON index: {e}")
 
-        # Criar índice para meta_json (keywords)
-        try:
-            result = connection.execute(text("""
-                SELECT indexname FROM pg_indexes
-                WHERE indexname = 'idx_chunks_meta_json'
-            """))
-
-            if result.fetchone() is None:
-                connection.execute(text("""
-                    CREATE INDEX idx_chunks_meta_json
-                    ON chunks
-                    USING GIN (meta_json jsonb_path_ops);
-                """))
-                connection.commit()
-                print("✓ Índice GIN para metadados JSON criado")
-            else:
-                print("✓ Índice GIN para JSON já existe")
-
-        except Exception as e:
-            print(f"⚠ Erro ao criar índice GIN para JSON: {e}")
-
-    print("✓ Índices vetoriais configurados")
+    print("  Indices configurados")
 
 
 def init_db():
     """
     Inicializa o banco de dados:
-    1. Cria extensão pgvector
+    1. Cria extensao pgvector
     2. Cria todas as tabelas
-    3. Cria índices vetoriais HNSW
-    4. Inicializa roles padrão (opcional)
+    3. Cria indices
     """
-    print("Inicializando banco de dados...")
+    print(f"Initializing database...")
+    print(f"  Provider: {settings.vector_db_provider.value}")
+    print(f"  Embedding model: {settings.embedding_model}")
+    print(f"  Embedding dimensions: {settings.embedding_dimensions}")
 
-    # Criar extensão pgvector
-    with engine.connect() as connection:
-        try:
-            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-            connection.commit()
-            print("✓ Extensão pgvector criada/verificada")
-        except Exception as e:
-            print(f"⚠ Erro ao criar extensão pgvector: {e}")
-            print("  Certifique-se de que a extensão pgvector está instalada no PostgreSQL")
+    # Criar extensao pgvector (se usando pgvector ou supabase)
+    if settings.vector_db_provider.value in ("pgvector", "supabase"):
+        with engine.connect() as connection:
+            try:
+                connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                connection.commit()
+                print("  pgvector extension verified")
+            except Exception as e:
+                print(f"  Warning: pgvector extension: {e}")
 
-    # Criar todas as tabelas
+    # Criar tabelas
     try:
         Base.metadata.create_all(bind=engine)
-        print("✓ Tabelas criadas com sucesso")
+        print("  Tables created")
     except Exception as e:
-        print(f"✗ Erro ao criar tabelas: {e}")
+        print(f"  Error creating tables: {e}")
         raise
 
-    # Criar índices vetoriais
-    create_vector_indexes()
+    # Criar indices (se usando pgvector)
+    if settings.vector_db_provider.value in ("pgvector",):
+        create_vector_indexes()
 
-    print("✓ Banco de dados inicializado com sucesso!")
-    print("\nPara inicializar roles e superuser padrão, execute:")
-    print("  python -m app.db.init_roles")
+    print("  Database initialized successfully")
+    print(f"\n  Vector DB: {settings.vector_db_provider.value}")
+    print(f"  To init roles: python -m app.db.init_roles")
 
 
 def drop_all_tables():
-    """
-    Remove todas as tabelas (usar com cuidado!)
-    """
-    print("⚠ ATENÇÃO: Removendo todas as tabelas...")
+    """Remove todas as tabelas"""
+    print("WARNING: Dropping all tables...")
     Base.metadata.drop_all(bind=engine)
-    print("✓ Todas as tabelas foram removidas")
+    print("All tables dropped")
 
 
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) > 1 and sys.argv[1] == "--drop":
-        confirm = input("Tem certeza que deseja remover todas as tabelas? (yes/no): ")
+        confirm = input("Are you sure? (yes/no): ")
         if confirm.lower() == "yes":
             drop_all_tables()
         else:
-            print("Operação cancelada")
+            print("Cancelled")
     else:
         init_db()

@@ -16,11 +16,14 @@ class CandidateService:
         skip: int = 0,
         limit: int = 100,
         city: Optional[str] = None,
-        state: Optional[str] = None
+        state: Optional[str] = None,
+        company_id: Optional[int] = None,
     ) -> list[Candidate]:
-        """Lista candidatos com filtros opcionais"""
+        """Lista candidatos com filtros opcionais e isolamento por empresa"""
         query = db.query(Candidate)
 
+        if company_id is not None:
+            query = query.filter(Candidate.company_id == company_id)
         if city:
             query = query.filter(Candidate.city == city)
         if state:
@@ -32,10 +35,13 @@ class CandidateService:
     def create_candidate(
         db: Session,
         candidate: CandidateCreate,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        company_id: Optional[int] = None,
     ) -> Candidate:
-        """Cria um novo candidato"""
+        """Cria um novo candidato, associando a empresa do usuario"""
         db_candidate = Candidate(**candidate.model_dump())
+        if company_id is not None:
+            db_candidate.company_id = company_id
         db.add(db_candidate)
         db.commit()
         db.refresh(db_candidate)

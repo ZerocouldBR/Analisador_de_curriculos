@@ -13,6 +13,7 @@ import SearchPage from './pages/SearchPage';
 import UploadPage from './pages/UploadPage';
 import SettingsPage from './pages/SettingsPage';
 import RolesPage from './pages/RolesPage';
+import ChatPage from './pages/ChatPage';
 
 // Components
 import Layout from './components/Layout';
@@ -68,6 +69,7 @@ function App() {
               <Route path="upload" element={<UploadPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="roles" element={<RolesPage />} />
+              <Route path="chat" element={<ChatPage />} />
             </Route>
           </Routes>
         </Router>

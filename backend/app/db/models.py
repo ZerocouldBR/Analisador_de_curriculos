@@ -25,6 +25,65 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 
+class Company(Base):
+    """Empresa/Tenant - cada empresa ve apenas seus proprios curriculos"""
+    __tablename__ = "companies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    slug = Column(String, unique=True, nullable=False, index=True)
+    cnpj = Column(String, unique=True, nullable=True)
+    email = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    address = Column(Text, nullable=True)
+    city = Column(String, nullable=True)
+    state = Column(String, nullable=True)
+    logo_url = Column(String, nullable=True)  # Caminho do logo
+    website = Column(String, nullable=True)
+    plan = Column(String, default="free")  # free, basic, pro, enterprise
+    is_active = Column(Boolean, default=True)
+    settings_json = Column(JSONB, default=dict)  # Config personalizada da empresa
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relacionamentos
+    users = relationship("User", back_populates="company")
+    candidates = relationship("Candidate", back_populates="company")
+    ai_usage_logs = relationship("AIUsageLog", back_populates="company", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_company_active", "is_active"),
+    )
+
+
+class AIUsageLog(Base):
+    """Registro de uso e custos de IA por empresa/usuario"""
+    __tablename__ = "ai_usage_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    operation = Column(String, nullable=False)  # embedding, chat, llm_query, job_analysis
+    model = Column(String, nullable=True)
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    cost_usd = Column(Float, default=0.0)
+    cost_local = Column(Float, default=0.0)  # Custo em moeda local
+    currency = Column(String, default="USD")
+    metadata_json = Column(JSONB, nullable=True)  # detalhes adicionais
+    created_at = Column(DateTime, default=_utcnow)
+
+    # Relacionamentos
+    company = relationship("Company", back_populates="ai_usage_logs")
+    user = relationship("User", back_populates="ai_usage_logs")
+
+    __table_args__ = (
+        Index("idx_ai_usage_company_date", "company_id", "created_at"),
+        Index("idx_ai_usage_operation", "operation"),
+    )
+
+
 # Tabela de associação User-Role (many-to-many)
 user_roles = Table(
     'user_roles',
@@ -53,6 +112,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
     name = Column(String, nullable=False)
@@ -62,14 +122,18 @@ class User(Base):
     last_login = Column(DateTime, nullable=True)
 
     # Relacionamentos
+    company = relationship("Company", back_populates="users")
     roles = relationship("Role", secondary=user_roles, back_populates="users")
     audit_logs = relationship("AuditLog", back_populates="user")
+    conversations = relationship("ChatConversation", back_populates="user", cascade="all, delete-orphan")
+    ai_usage_logs = relationship("AIUsageLog", back_populates="user")
 
 
 class Candidate(Base):
     __tablename__ = "candidates"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True)
     full_name = Column(String, nullable=False)
     email = Column(String, index=True)
     phone = Column(String)
@@ -83,12 +147,14 @@ class Candidate(Base):
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     # Relacionamentos
+    company = relationship("Company", back_populates="candidates")
     profiles = relationship("CandidateProfile", back_populates="candidate", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="candidate", cascade="all, delete-orphan")
     chunks = relationship("Chunk", back_populates="candidate", cascade="all, delete-orphan")
     experiences = relationship("Experience", back_populates="candidate", cascade="all, delete-orphan")
     consents = relationship("Consent", back_populates="candidate", cascade="all, delete-orphan")
     external_enrichments = relationship("ExternalEnrichment", back_populates="candidate", cascade="all, delete-orphan")
+    encrypted_pii = relationship("EncryptedPII", back_populates="candidate", uselist=False, cascade="all, delete-orphan")
 
 
 class CandidateProfile(Base):
@@ -146,8 +212,8 @@ class Embedding(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     chunk_id = Column(Integer, ForeignKey("chunks.id", ondelete="CASCADE"), nullable=False)
-    model = Column(String, default="text-embedding-3-small")
-    vector = Column(Vector(1536))  # Dimensão padrão do OpenAI embedding
+    model = Column(String)
+    vector = Column(Vector(1536))  # Dimensao configurada via EMBEDDING_DIMENSIONS
     created_at = Column(DateTime, default=_utcnow)
 
     # Relacionamentos
@@ -217,6 +283,86 @@ class ServerSettings(Base):
     version = Column(Integer, default=1)
     updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class ChatConversation(Base):
+    """Conversas do chat de analise de curriculos"""
+    __tablename__ = "chat_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String, default="Nova Conversa")
+    job_description = Column(Text, nullable=True)
+    job_title = Column(String, nullable=True)
+    domain = Column(String, default="general")  # production, logistics, quality, general
+    status = Column(String, default="active")  # active, archived
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relacionamentos
+    user = relationship("User", back_populates="conversations")
+    messages = relationship("ChatMessage", back_populates="conversation", cascade="all, delete-orphan",
+                          order_by="ChatMessage.created_at")
+
+    __table_args__ = (
+        Index("idx_chat_conversation_user", "user_id", "status"),
+    )
+
+
+class ChatMessage(Base):
+    """Mensagens individuais do chat"""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String, nullable=False)  # user, assistant, system
+    content = Column(Text, nullable=False)
+    metadata_json = Column(JSONB, nullable=True)  # sources, candidates_mentioned, confidence, etc.
+    tokens_used = Column(Integer, default=0)
+    created_at = Column(DateTime, default=_utcnow)
+
+    # Relacionamentos
+    conversation = relationship("ChatConversation", back_populates="messages")
+
+    __table_args__ = (
+        Index("idx_chat_message_conversation", "conversation_id", "created_at"),
+    )
+
+
+class LinkedInSearch(Base):
+    """Historico de buscas no LinkedIn"""
+    __tablename__ = "linkedin_searches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    search_criteria = Column(JSONB, nullable=False)  # keywords, location, title, skills, etc.
+    results_count = Column(Integer, default=0)
+    results_json = Column(JSONB, nullable=True)
+    status = Column(String, default="pending")  # pending, completed, failed
+    created_at = Column(DateTime, default=_utcnow)
+
+    __table_args__ = (
+        Index("idx_linkedin_search_user", "user_id", "created_at"),
+    )
+
+
+class EncryptedPII(Base):
+    """Dados pessoais sensíveis criptografados (LGPD)"""
+    __tablename__ = "encrypted_pii"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, unique=True)
+    cpf_encrypted = Column(Text, nullable=True)
+    rg_encrypted = Column(Text, nullable=True)
+    birth_date_encrypted = Column(Text, nullable=True)
+    address_encrypted = Column(Text, nullable=True)
+    phone_encrypted = Column(Text, nullable=True)
+    extra_pii_json = Column(Text, nullable=True)  # JSONB criptografado como texto
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relacionamentos
+    candidate = relationship("Candidate", back_populates="encrypted_pii")
 
 
 class AuditLog(Base):

@@ -23,6 +23,7 @@ from app.services.storage_service import storage_service
 from app.services.text_extraction_service import TextExtractionService
 from app.services.resume_parser_service import ResumeParserService
 from app.services.keyword_extraction_service import KeywordExtractionService
+from app.services.embedding_service import SemanticChunker
 from app.core.websocket_manager import websocket_manager
 from app.core.config import settings
 
@@ -265,8 +266,14 @@ def process_document_task(
         ).delete(synchronize_session=False)
         db.flush()
 
+        # Usar chunking semantico para o texto completo
+        semantic_chunks = SemanticChunker.create_semantic_chunks(
+            text, section_name="full_text",
+            chunk_size=settings.chunk_size,
+            overlap=settings.chunk_overlap,
+        )
+
         sections = [
-            ("full_text", text),
             ("personal_info", str(resume_data.get("personal_info", {}))),
             ("experiences", str(resume_data.get("experiences", []))),
             ("education", str(resume_data.get("education", []))),
@@ -274,6 +281,11 @@ def process_document_task(
             ("languages", str(resume_data.get("languages", []))),
             ("certifications", ", ".join(resume_data.get("certifications", []))),
         ]
+
+        # Adicionar chunks semanticos do texto completo
+        for sc in semantic_chunks:
+            sc_section = sc["metadata"].get("section", "full_text")
+            sections.insert(0, (sc_section, sc["content"]))
 
         # Add production/logistics specific sections
         if resume_data.get("licenses"):
@@ -335,7 +347,7 @@ def process_document_task(
                 # Create enhanced metadata for this chunk
                 chunk_metadata = KeywordExtractionService.create_chunk_metadata(
                     section=section_name,
-                    content=section_content[:10000],
+                    content=section_content[:settings.chunk_max_content_size],
                     keywords=document_keywords,
                     chunk_index=chunks_created,
                     total_chunks=total_sections
@@ -370,7 +382,7 @@ def process_document_task(
                     document_id=document.id,
                     candidate_id=document.candidate_id,
                     section=section_name,
-                    content=section_content[:10000],
+                    content=section_content[:settings.chunk_max_content_size],
                     meta_json=chunk_metadata
                 )
                 db.add(chunk)
