@@ -228,7 +228,7 @@ Diretrizes:
         db: Session,
         question: str,
         filters: Optional[Dict[str, Any]] = None,
-        max_retries: int = DEFAULT_MAX_RETRIES,
+        max_retries: Optional[int] = None,
         include_sources: bool = True,
         domain: Optional[str] = None
     ) -> QueryResult:
@@ -275,6 +275,7 @@ Diretrizes:
                 confidence_score=0.0
             )
 
+        _max_retries = max_retries if max_retries is not None else settings.llm_max_retries
         retries = 0
         last_error = None
         accumulated_answer = ""
@@ -282,10 +283,10 @@ Diretrizes:
         character_limits = settings.llm_character_limits
         chunks_per_retry = settings.llm_chunks_per_retry
 
-        while retries < min(max_retries, len(character_limits)):
+        while retries < min(_max_retries, len(character_limits)):
             try:
-                max_chunks = chunks_per_retry[retries] if retries < len(chunks_per_retry) else 3
-                char_limit = character_limits[retries] if retries < len(character_limits) else 6000
+                max_chunks = chunks_per_retry[retries] if retries < len(chunks_per_retry) else settings.llm_chunks_per_retry_fallback
+                char_limit = character_limits[retries] if retries < len(character_limits) else settings.llm_character_limit_fallback
 
                 selected_chunks = self._select_chunks_for_attempt(
                     all_chunks, max_chunks, char_limit
@@ -452,8 +453,9 @@ Diretrizes:
 
     async def _generate_embedding(self, text: str) -> List[float]:
         """Gera embedding para um texto"""
-        if len(text) > 32000:
-            text = text[:32000]
+        max_chars = settings.embedding_max_chars
+        if len(text) > max_chars:
+            text = text[:max_chars]
 
         response = await openai.Embedding.acreate(
             model=self.embedding_model,
@@ -495,7 +497,7 @@ Diretrizes:
                 chunk_chars = char_limit - total_chars
 
             section = chunk.chunk.section
-            if section_counts.get(section, 0) >= 3:
+            if section_counts.get(section, 0) >= settings.llm_section_max_chunks:
                 continue
 
             selected.append(chunk)

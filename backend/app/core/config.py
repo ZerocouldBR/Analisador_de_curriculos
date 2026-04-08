@@ -226,6 +226,100 @@ class Settings(BaseSettings):
     # Confidence scoring
     confidence_score_weight: float = Field(default=0.7, description="Peso do score medio na confianca")
     confidence_coverage_weight: float = Field(default=0.3, description="Peso da cobertura na confianca")
+    confidence_coverage_divisor: int = Field(default=5, description="Divisor para normalizacao de cobertura (min chunks para 100%)")
+
+    # ================================================================
+    # Job Matching
+    # ================================================================
+    job_matching_strength_threshold: float = Field(
+        default=70.0, description="Score minimo para considerar requisito como ponto forte"
+    )
+    job_matching_gap_threshold: float = Field(
+        default=30.0, description="Score abaixo do qual requisito e considerado gap"
+    )
+    job_matching_cnh_bonus: float = Field(
+        default=5.0, description="Bonus de score para candidato com CNH requerida"
+    )
+    job_matching_experience_bonus: float = Field(
+        default=3.0, description="Bonus de score para candidato com experiencia suficiente"
+    )
+    job_matching_keyword_repeat_threshold: int = Field(
+        default=2, description="Repeticoes de keyword para ganhar bonus"
+    )
+    job_matching_keyword_bonus: float = Field(
+        default=5.0, description="Bonus por keyword repetida acima do threshold"
+    )
+    job_matching_direct_text_weight: float = Field(
+        default=0.6, description="Peso do match direto no texto"
+    )
+    job_matching_indexed_weight: float = Field(
+        default=0.4, description="Peso do match no indice de keywords"
+    )
+    job_matching_suggestion_threshold: float = Field(
+        default=20.0, description="Score minimo para sugerir vaga a candidato"
+    )
+
+    # ================================================================
+    # LLM Internals
+    # ================================================================
+    llm_section_max_chunks: int = Field(
+        default=3, description="Max chunks por secao em uma tentativa de query"
+    )
+    llm_character_limit_fallback: int = Field(
+        default=6000, description="Fallback de limite de caracteres quando fora do range de retries"
+    )
+    llm_chunks_per_retry_fallback: int = Field(
+        default=3, description="Fallback de chunks quando fora do range de retries"
+    )
+    llm_domain_score_multiplier: float = Field(
+        default=0.5, description="Multiplicador do score de dominio na busca hibrida"
+    )
+
+    # ================================================================
+    # Keyword Extraction
+    # ================================================================
+    keyword_idf_default: float = Field(
+        default=2.5, description="IDF padrao para termos gerais"
+    )
+    keyword_idf_domain: float = Field(
+        default=3.0, description="IDF para termos de dominio (producao, logistica, qualidade)"
+    )
+    keyword_idf_long_word_multiplier: float = Field(
+        default=1.2, description="Multiplicador IDF para palavras longas (>8 chars)"
+    )
+
+    # ================================================================
+    # LinkedIn
+    # ================================================================
+    linkedin_enrichment_score_weight: float = Field(
+        default=0.3, description="Peso do score LinkedIn ao enriquecer resultados"
+    )
+    linkedin_request_timeout: float = Field(
+        default=30.0, description="Timeout para requisicoes ao LinkedIn (segundos)"
+    )
+    linkedin_search_results_limit: int = Field(
+        default=50, description="Max resultados por busca no LinkedIn"
+    )
+    linkedin_internal_search_limit: int = Field(
+        default=200, description="Max candidatos internos a considerar em busca LinkedIn"
+    )
+
+    # ================================================================
+    # OCR Avancado
+    # ================================================================
+    ocr_good_confidence_threshold: float = Field(
+        default=70.0, description="Confianca a partir da qual OCR para de tentar outras resolucoes"
+    )
+
+    # ================================================================
+    # API Defaults (valores padrao para paginacao e truncamento)
+    # ================================================================
+    search_result_highlight_chars: int = Field(
+        default=200, description="Max chars no highlight de resultado de busca"
+    )
+    keyword_max_results: int = Field(
+        default=50, description="Max keywords/ngrams retornados"
+    )
 
     # ================================================================
     # Chunking e Indexacao

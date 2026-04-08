@@ -557,7 +557,7 @@ class EmbeddingService:
                     c.candidate_id,
                     CASE
                         WHEN c.meta_json->>'candidate_profile_type' IS NOT NULL
-                        THEN :domain_w * 0.5
+                        THEN :domain_w * :domain_multiplier
                         ELSE 0
                     END as domain_score
                 FROM chunks c
@@ -589,6 +589,7 @@ class EmbeddingService:
             "vector_w": settings.hybrid_vector_weight,
             "text_w": settings.hybrid_text_weight,
             "domain_w": settings.hybrid_domain_weight,
+            "domain_multiplier": settings.llm_domain_score_multiplier,
             "pre_threshold": pre_threshold,
             "limit": limit,
             **filter_params,

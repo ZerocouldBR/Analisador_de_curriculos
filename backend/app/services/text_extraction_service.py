@@ -393,7 +393,8 @@ class TextExtractionService:
                         best_confidence = avg_conf
 
                 # Se confianca boa, nao precisa tentar outras resolucoes
-                if best_confidence >= 70:
+                from app.core.config import settings as _settings
+                if best_confidence >= _settings.ocr_good_confidence_threshold:
                     break
 
             except Exception as e:

@@ -481,7 +481,7 @@ class ChatService:
             section_header = f"[Secao: {chunk.section} | Relevancia: {score:.0%}]"
 
             content = chunk.content
-            remaining = self.MAX_CONTEXT_CHARS - total_chars
+            remaining = settings.chat_max_context_chars - total_chars
             if len(content) > remaining:
                 content = content[:remaining] + "..."
 
@@ -557,8 +557,8 @@ class ChatService:
             return 0.0
         scores = [score for _, score in chunks]
         avg = sum(scores) / len(scores)
-        coverage = min(len(chunks) / 5, 1.0)
-        return round(avg * 0.7 + coverage * 0.3, 3)
+        coverage = min(len(chunks) / settings.confidence_coverage_divisor, 1.0)
+        return round(avg * settings.confidence_score_weight + coverage * settings.confidence_coverage_weight, 3)
 
     def _generate_suggestions(
         self, message: str, conversation: ChatConversation

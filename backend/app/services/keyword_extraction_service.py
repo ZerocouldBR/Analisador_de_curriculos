@@ -580,13 +580,16 @@ class KeywordExtractionService:
                         "logistics_operations", "supply_chain",
                         "quality_control", "safety_norms", "maintenance"
                     ]:
-                        idf = 3.0
+                        from app.core.config import settings as _s
+                        idf = _s.keyword_idf_domain
                     else:
-                        idf = 2.5
+                        from app.core.config import settings as _s
+                        idf = _s.keyword_idf_default
                     break
 
             if len(word) > 8:
-                idf *= 1.2
+                from app.core.config import settings as _s
+                idf *= _s.keyword_idf_long_word_multiplier
 
             tfidf = tf * idf
 

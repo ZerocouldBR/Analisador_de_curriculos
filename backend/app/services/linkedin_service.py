@@ -66,7 +66,7 @@ class LinkedInService:
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=settings.linkedin_request_timeout) as client:
                 response = await client.get(
                     profile_url, headers=headers, follow_redirects=True
                 )
@@ -171,7 +171,7 @@ class LinkedInService:
                 "internal_matches": len(internal_results),
                 "linkedin_matches": len(linkedin_results),
                 "total": len(all_results),
-                "candidates": all_results[:50],  # Limitar a 50
+                "candidates": all_results[:settings.linkedin_search_results_limit],  # Limitar a 50
             }
             search_record.status = "completed"
             db.commit()
@@ -193,7 +193,7 @@ class LinkedInService:
             return {
                 "search_id": search_record.id,
                 "criteria": criteria,
-                "results": all_results[:50],
+                "results": all_results[:settings.linkedin_search_results_limit],
                 "total_found": len(all_results),
                 "sources": {
                     "internal_database": len(internal_results),
@@ -232,7 +232,7 @@ class LinkedInService:
                 )
             )
 
-        candidates = query.limit(200).all()
+        candidates = query.limit(settings.linkedin_internal_search_limit).all()
 
         for candidate in candidates:
             score = 0.0
@@ -389,7 +389,7 @@ class LinkedInService:
                 for m in merged:
                     if m.get("candidate_id") == cid:
                         m["linkedin_url"] = result.get("linkedin_url")
-                        m["score"] += result.get("score", 0) * 0.3
+                        m["score"] += result.get("score", 0) * settings.linkedin_enrichment_score_weight
                         break
 
         merged.sort(key=lambda x: x.get("score", 0), reverse=True)

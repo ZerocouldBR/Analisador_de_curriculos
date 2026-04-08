@@ -72,7 +72,7 @@ async def semantic_search(
                 city=chunk.candidate.city,
                 state=chunk.candidate.state,
                 score=similarity,
-                highlight=chunk.content[:200] + "..."
+                highlight=chunk.content[:settings.search_result_highlight_chars] + "..."
             ))
 
         return search_results
@@ -123,7 +123,7 @@ async def hybrid_search(
 
             highlight = ""
             if top_chunk:
-                highlight = top_chunk.content[:200] + "..."
+                highlight = top_chunk.content[:settings.search_result_highlight_chars] + "..."
 
             search_results.append(SearchResult(
                 candidate_id=candidate.id,
@@ -670,7 +670,7 @@ async def reindex_candidate(
         if keyword_chunk:
             keyword_chunk.content = document_keywords["search_index"]
             keyword_chunk.meta_json = {
-                "keywords": document_keywords["keywords"][:50],
+                "keywords": document_keywords["keywords"][:settings.keyword_max_results],
                 "technical_skills": document_keywords["technical_skills"],
                 "soft_skills": document_keywords["soft_skills"],
                 "production_skills": document_keywords.get("production_skills", []),
@@ -698,7 +698,7 @@ async def reindex_candidate(
                     section="keyword_index",
                     content=document_keywords["search_index"],
                     meta_json={
-                        "keywords": document_keywords["keywords"][:50],
+                        "keywords": document_keywords["keywords"][:settings.keyword_max_results],
                         "technical_skills": document_keywords["technical_skills"],
                         "soft_skills": document_keywords["soft_skills"],
                         "production_skills": document_keywords.get("production_skills", []),
