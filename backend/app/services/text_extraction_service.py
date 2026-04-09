@@ -53,8 +53,9 @@ try:
     import cv2
     import numpy as np
     CV2_AVAILABLE = True
-except ImportError:
+except (ImportError, AttributeError, Exception):
     CV2_AVAILABLE = False
+    np = None  # type: ignore
 
 # HTML
 from bs4 import BeautifulSoup
@@ -501,7 +502,7 @@ class TextExtractionService:
         return Image.fromarray(binary)
 
     @staticmethod
-    def _deskew_opencv(image: np.ndarray) -> np.ndarray:
+    def _deskew_opencv(image: "np.ndarray") -> "np.ndarray":
         """Corrige inclinacao da imagem usando OpenCV"""
         try:
             # Detectar angulo de inclinacao
@@ -534,7 +535,7 @@ class TextExtractionService:
         return image
 
     @staticmethod
-    def _remove_scan_borders(image: np.ndarray) -> np.ndarray:
+    def _remove_scan_borders(image: "np.ndarray") -> "np.ndarray":
         """Remove bordas escuras tipicas de documentos escaneados"""
         try:
             h, w = image.shape[:2]
