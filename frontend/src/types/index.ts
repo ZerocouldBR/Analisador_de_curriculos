@@ -130,6 +130,42 @@ export interface ServerSettings {
   updated_at: string;
 }
 
+// System Config - Configuracoes completas do sistema
+export interface SystemConfigField {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'boolean' | 'select' | 'password' | 'textarea' | 'list_int' | 'list_str';
+  description: string;
+  restart_required: boolean;
+  sensitive: boolean;
+  value: any;
+  options?: string[];
+  min_value?: number;
+  max_value?: number;
+  step?: number;
+  placeholder?: string;
+}
+
+export interface SystemConfigCategory {
+  category: string;
+  label: string;
+  icon: string;
+  description: string;
+  fields: SystemConfigField[];
+}
+
+export interface SystemConfigResponse {
+  categories: SystemConfigCategory[];
+  has_overrides: boolean;
+  override_keys: string[];
+}
+
+export interface SystemConfigUpdateResult {
+  updated_keys: string[];
+  total_overrides: number;
+  restart_required: boolean;
+}
+
 // ==================== Chat ====================
 export interface ChatConversation {
   id: number;

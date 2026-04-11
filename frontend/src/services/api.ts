@@ -19,6 +19,8 @@ import {
   Experience,
   CandidateProfile,
   HealthCheck,
+  SystemConfigResponse,
+  SystemConfigUpdateResult,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -265,6 +267,24 @@ class ApiService {
 
   async resetChatPrompts(): Promise<any> {
     const response = await this.api.post('/v1/settings/prompts/chat/reset');
+    return response.data;
+  }
+
+  // ==================== System Config ====================
+  async getSystemConfig(): Promise<SystemConfigResponse> {
+    const response = await this.api.get<SystemConfigResponse>('/v1/settings/system/config');
+    return response.data;
+  }
+
+  async updateSystemConfig(values: Record<string, any>): Promise<SystemConfigUpdateResult> {
+    const response = await this.api.put<SystemConfigUpdateResult>('/v1/settings/system/config', {
+      values,
+    });
+    return response.data;
+  }
+
+  async resetSystemConfig(): Promise<any> {
+    const response = await this.api.post('/v1/settings/system/config/reset');
     return response.data;
   }
 
