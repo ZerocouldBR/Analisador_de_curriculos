@@ -4,7 +4,7 @@ Script de setup rapido para o Analisador de Curriculos.
 
 Uso:
     python setup.py local    # Configurar para desenvolvimento local
-    python setup.py vps      # Configurar para producao em VPS
+    python setup.py vps      # Configurar para producao em VPS (interativo)
     python setup.py initdb   # Inicializar banco de dados e usuario admin
 """
 import os
@@ -17,6 +17,16 @@ import time
 
 def generate_secret():
     return secrets.token_urlsafe(32)
+
+
+def prompt_input(label, default="", sensitive=False):
+    """Solicita input do usuario com valor padrao"""
+    if default:
+        display = "****" if sensitive else default
+        raw = input(f"  {label} [{display}]: ").strip()
+    else:
+        raw = input(f"  {label}: ").strip()
+    return raw if raw else default
 
 
 def create_env_local(backend_dir):
@@ -60,14 +70,57 @@ EMBEDDING_MODE=api
 
 
 def create_env_vps(backend_dir):
-    """Cria .env para producao em VPS"""
+    """Cria .env para producao em VPS com configuracao interativa"""
+    root_dir = os.path.dirname(backend_dir)
+
+    print("\n  Configuracao interativa para producao em VPS.")
+    print("  Pressione ENTER para aceitar o valor padrao entre colchetes.\n")
+
+    # Dominio
+    domain = prompt_input("Dominio (ex: curriculos.meusite.com.br)", "curriculos.seudominio.com.br")
+
+    # Embeddings
+    print("\n  Modo de vetorizacao:")
+    print("    api  = OpenAI (pago, melhor qualidade)")
+    print("    code = Local sentence-transformers (gratis, mais lento)")
+    embedding_mode = prompt_input("Modo de vetorizacao", "code")
+
+    openai_key = ""
+    if embedding_mode == "api":
+        openai_key = prompt_input("OpenAI API Key (sk-...)", "")
+
+    # Chat model
+    chat_model = prompt_input("Modelo LLM do chat", "gpt-4-turbo-preview")
+
+    # OCR
+    ocr_langs = prompt_input("Idiomas OCR (Tesseract)", "por+eng")
+
+    # Upload
+    max_upload = prompt_input("Tamanho max upload em MB", "20")
+
+    # Moeda
+    print("\n  Precificacao de IA:")
+    currency = prompt_input("Moeda (USD, BRL, EUR)", "BRL")
+    exchange_rate = "1.0"
+    if currency == "BRL":
+        exchange_rate = prompt_input("Taxa de cambio USD->BRL", "5.50")
+    elif currency == "EUR":
+        exchange_rate = prompt_input("Taxa de cambio USD->EUR", "0.92")
+
+    # Senhas automaticas
     secret = generate_secret()
     db_password = secrets.token_urlsafe(16)
     redis_password = secrets.token_urlsafe(16)
     flower_password = secrets.token_urlsafe(12)
     grafana_password = secrets.token_urlsafe(12)
 
-    env_content = f"""# === Gerado automaticamente por setup.py (producao VPS) ===
+    # OpenAI line
+    openai_line = f"OPENAI_API_KEY={openai_key}" if openai_key else "# OPENAI_API_KEY=sk-your-api-key-here"
+
+    env_content = f"""# ================================================================
+# Analisador de Curriculos - Configuracao de Producao
+# Gerado automaticamente por setup.py
+# ================================================================
 
 # Aplicacao
 APP_VERSION=0.3.0
@@ -82,48 +135,83 @@ REDIS_URL=redis://:{redis_password}@redis:6379/0
 
 # JWT
 SECRET_KEY={secret}
+ACCESS_TOKEN_EXPIRE_MINUTES=15
+REFRESH_TOKEN_EXPIRE_DAYS=7
 
-# CORS (altere para seu dominio)
-CORS_ORIGINS=["https://curriculos.seudominio.com.br"]
+# CORS (dominio configurado)
+CORS_ORIGINS=["https://{domain}"]
 
-# OpenAI (descomente e preencha)
-# OPENAI_API_KEY=sk-your-api-key-here
+# Embeddings
+EMBEDDING_MODE={embedding_mode}
+EMBEDDING_LOCAL_MODEL=all-MiniLM-L6-v2
+EMBEDDING_MODEL=text-embedding-3-small
+
+# OpenAI
+{openai_line}
+
+# LLM / Chat
+CHAT_MODEL={chat_model}
 
 # Vector DB
 VECTOR_DB_PROVIDER=pgvector
-EMBEDDING_MODE=api
+
+# Upload / Storage
+MAX_UPLOAD_SIZE_MB={max_upload}
+STORAGE_BACKEND=local
+STORAGE_PATH=/app/uploads
+
+# OCR
+OCR_LANGUAGES={ocr_langs}
+
+# LGPD
+ENABLE_PII_ENCRYPTION=true
+
+# Precificacao IA
+AI_PRICING_ENABLED=true
+AI_CURRENCY={currency}
+AI_CURRENCY_EXCHANGE_RATE={exchange_rate}
 """
     env_path = os.path.join(backend_dir, ".env")
     if os.path.exists(env_path):
-        print(f"  [!] {env_path} ja existe. Criando backup .env.bak")
+        print(f"\n  [!] {env_path} ja existe. Criando backup .env.bak")
         shutil.copy2(env_path, env_path + ".bak")
 
     with open(env_path, "w", encoding="utf-8") as f:
         f.write(env_content)
 
     # Criar .env na raiz para docker-compose.prod.yml
-    root_dir = os.path.dirname(backend_dir)
     root_env = os.path.join(root_dir, ".env")
     root_env_content = f"""# Variaveis para docker-compose.prod.yml
+# Gerado automaticamente por setup.py
 DB_PASSWORD={db_password}
 REDIS_PASSWORD={redis_password}
 FLOWER_USER=admin
 FLOWER_PASSWORD={flower_password}
 GRAFANA_USER=admin
 GRAFANA_PASSWORD={grafana_password}
-FRONTEND_API_URL=https://curriculos.seudominio.com.br
-FRONTEND_WS_URL=wss://curriculos.seudominio.com.br
+FRONTEND_API_URL=https://{domain}
+FRONTEND_WS_URL=wss://{domain}
 """
+    if os.path.exists(root_env):
+        shutil.copy2(root_env, root_env + ".bak")
+
     with open(root_env, "w", encoding="utf-8") as f:
         f.write(root_env_content)
 
-    print(f"  [OK] {env_path} criado")
+    print(f"\n  [OK] {env_path} criado")
     print(f"  [OK] {root_env} criado")
-    print(f"\n  Senhas geradas automaticamente:")
+    print(f"\n  ========================================")
+    print(f"  CREDENCIAIS GERADAS (SALVE EM LOCAL SEGURO!)")
+    print(f"  ========================================")
+    print(f"    Dominio:          {domain}")
     print(f"    DB Password:      {db_password}")
     print(f"    Redis Password:   {redis_password}")
     print(f"    Flower Password:  {flower_password}")
     print(f"    Grafana Password: {grafana_password}")
+    print(f"    JWT Secret:       {secret[:16]}...")
+    print(f"    Embedding Mode:   {embedding_mode}")
+    print(f"    Moeda:            {currency}")
+    print(f"  ========================================")
     return secret, db_password, redis_password
 
 
@@ -204,7 +292,7 @@ print('OK')
     print("\n  Usuario admin criado:")
     print("    Email: admin@analisador.com")
     print("    Senha: admin123")
-    print("    ** ALTERE A SENHA EM PRODUCAO! **")
+    print("    ** ALTERE A SENHA APOS O PRIMEIRO LOGIN! **")
     return True
 
 
@@ -216,15 +304,18 @@ def main():
         print(__doc__)
         print("Modos disponiveis:")
         print("  local   - Gerar .env para desenvolvimento local")
-        print("  vps     - Gerar .env para producao em VPS com Docker")
+        print("  vps     - Gerar .env para producao em VPS com Docker (interativo)")
         print("  initdb  - Inicializar banco de dados e criar usuario admin")
         print()
-        print("Fluxo completo para desenvolvimento local:")
-        print("  1. python setup.py local")
-        print("  2. docker compose -f docker-compose.dev.yml up -d")
-        print("  3. python setup.py initdb")
-        print("  4. cd backend && uvicorn app.main:app --reload")
-        print("  5. cd frontend && npm install && npm start")
+        print("Fluxo completo para VPS:")
+        print("  1. python setup.py vps           # Gera configs (interativo)")
+        print("  2. docker compose -f docker-compose.prod.yml build --no-cache")
+        print("  3. docker compose -f docker-compose.prod.yml up -d")
+        print("  4. docker compose -f docker-compose.prod.yml exec api python -m app.db.init_db")
+        print("  5. docker compose -f docker-compose.prod.yml exec api python -m app.db.init_roles")
+        print("  6. Acessar o frontend e configurar tudo pela interface!")
+        print()
+        print("Guia completo: DEPLOY_VPS.md")
         sys.exit(1)
 
     mode = sys.argv[1]
@@ -281,7 +372,7 @@ def main():
         print("     Login:    admin@analisador.com / admin123")
 
     elif mode == "vps":
-        print("[1/2] Criando .env para producao...")
+        print("[1/2] Configuracao interativa para producao...")
         secret, db_pass, redis_pass = create_env_vps(backend_dir)
 
         print("\n[2/2] Verificando Docker...")
@@ -289,33 +380,36 @@ def main():
         if has_docker:
             print("  [OK] Docker encontrado")
         else:
-            print("  [ERRO] Docker nao encontrado!")
-            print("  Instale: https://docs.docker.com/engine/install/")
-            sys.exit(1)
+            print("  [!] Docker nao encontrado")
+            print("  Instale: curl -fsSL https://get.docker.com | sudo sh")
 
         print(f"\n{'='*60}")
         print("  Proximos passos:")
         print(f"{'='*60}\n")
 
-        print("  1. Edite os dominios:")
-        print("     backend/.env  -> CORS_ORIGINS")
-        print("     .env          -> FRONTEND_API_URL, FRONTEND_WS_URL\n")
+        print("  1. Construir e subir os containers:")
+        print("     docker compose -f docker-compose.prod.yml build --no-cache")
+        print("     docker compose -f docker-compose.prod.yml up -d\n")
 
-        print("  2. Adicione sua OPENAI_API_KEY no backend/.env\n")
-
-        print("  3. Suba tudo com Docker Compose:")
-        print("     docker compose -f docker-compose.prod.yml up -d --build\n")
-
-        print("  4. Inicialize o banco (executar uma vez apos o primeiro deploy):")
+        print("  2. Inicializar o banco de dados:")
         print("     docker compose -f docker-compose.prod.yml exec api python -m app.db.init_db")
         print("     docker compose -f docker-compose.prod.yml exec api python -m app.db.init_roles\n")
 
-        print("  5. Acesse:")
-        print("     Frontend: http://seu-ip:3000")
-        print("     API Docs: http://seu-ip:8000/docs")
-        print("     Flower:   http://seu-ip:5555")
-        print("     Grafana:  http://seu-ip:3001")
-        print("     Login:    admin@analisador.com / admin123")
+        print("  3. Configurar Nginx e SSL (veja DEPLOY_VPS.md secao 10)\n")
+
+        print("  4. Acessar o frontend e configurar TUDO pela interface:")
+        print("     - IA & Embeddings (modo, modelo, API key)")
+        print("     - LLM & Chat (modelo, temperatura)")
+        print("     - Busca (pesos, thresholds)")
+        print("     - OCR, Storage, Seguranca, Custos...")
+        print("     Ir em: Configuracoes do Sistema\n")
+
+        print("  5. Login inicial:")
+        print("     Email: admin@analisador.com")
+        print("     Senha: admin123")
+        print("     ** TROQUE A SENHA NO PRIMEIRO LOGIN! **\n")
+
+        print("  Guia completo: DEPLOY_VPS.md")
 
     elif mode == "initdb":
         init_database(backend_dir)

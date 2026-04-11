@@ -9,7 +9,9 @@ from app.schemas.settings import (
     SettingCreate,
     SettingUpdate,
     PromptConfigBase,
-    PromptConfigUpdate
+    PromptConfigUpdate,
+    SystemConfigResponse,
+    SystemConfigUpdateRequest,
 )
 from app.services.settings_service import SettingsService
 from app.core.dependencies import require_permission, get_current_superuser
@@ -17,6 +19,74 @@ from app.db.models import User
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
+
+# ============================================
+# System Config - Configuracoes completas
+# ============================================
+
+@router.get("/system/config", response_model=SystemConfigResponse)
+def get_system_config(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("settings.read"))
+):
+    """
+    Retorna TODAS as configuracoes do sistema organizadas por categoria.
+
+    Cada campo inclui: valor atual, tipo, descricao, se requer restart.
+    O frontend renderiza formularios dinamicamente a partir desta resposta.
+
+    **Requer permissao:** settings.read
+    """
+    return SettingsService.get_system_config(db)
+
+
+@router.put("/system/config")
+def update_system_config(
+    payload: SystemConfigUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_superuser),
+):
+    """
+    Atualiza configuracoes do sistema.
+
+    Aceita um dicionario chave:valor. Valores sao salvos como overrides
+    no banco de dados. Algumas mudancas requerem restart dos servicos.
+
+    **Requer:** Superuser
+    """
+    if not payload.values:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nenhum valor fornecido para atualizar"
+        )
+
+    result = SettingsService.update_system_config(
+        db, payload.values, user_id=current_user.id
+    )
+    return result
+
+
+@router.post("/system/config/reset")
+def reset_system_config(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_superuser),
+):
+    """
+    Remove todos os overrides de configuracao, voltando aos valores padrao
+    do arquivo .env / config.py.
+
+    **Requer:** Superuser
+    """
+    deleted = SettingsService.reset_system_config(db, user_id=current_user.id)
+    return {
+        "reset": deleted,
+        "message": "Configuracoes restauradas aos valores padrao. Reinicie os servicos."
+    }
+
+
+# ============================================
+# Settings CRUD (server_settings generico)
+# ============================================
 
 @router.get("/", response_model=List[SettingResponse])
 def list_settings(
@@ -264,12 +334,5 @@ def admin_overview(
             "pii_encryption": app_settings.enable_pii_encryption,
             "rate_limit_per_minute": app_settings.rate_limit_per_minute,
             "access_token_expire_minutes": app_settings.access_token_expire_minutes,
-        },
-        "env_vars_guide": {
-            "switch_vectorization_mode": "EMBEDDING_MODE=code  (ou api)",
-            "switch_vector_db": "VECTOR_DB_PROVIDER=qdrant  (ou pgvector, supabase)",
-            "set_ai_currency": "AI_CURRENCY=BRL  AI_CURRENCY_EXCHANGE_RATE=5.0",
-            "set_monthly_limit": "AI_MONTHLY_TOKEN_LIMIT=1000000  AI_MONTHLY_COST_LIMIT=100.0",
-            "set_local_model": "EMBEDDING_LOCAL_MODEL=all-MiniLM-L6-v2  EMBEDDING_LOCAL_DEVICE=cuda",
         },
     }

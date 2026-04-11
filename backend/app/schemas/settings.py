@@ -41,3 +41,47 @@ class SettingResponse(SettingBase):
 
     class Config:
         from_attributes = True
+
+
+# ============================================================
+# System Config - Configuracoes completas do sistema via frontend
+# ============================================================
+
+class SystemConfigField(BaseModel):
+    """Um campo de configuracao individual"""
+    key: str
+    label: str
+    type: str  # text, number, boolean, select, password, textarea, list_int, list_str
+    description: str = ""
+    restart_required: bool = False
+    sensitive: bool = False
+    value: Any = None
+    options: Optional[list[str]] = None
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    step: Optional[float] = None
+    placeholder: str = ""
+
+
+class SystemConfigCategory(BaseModel):
+    """Uma categoria de configuracoes"""
+    category: str
+    label: str
+    icon: str
+    description: str
+    fields: list[SystemConfigField]
+
+
+class SystemConfigResponse(BaseModel):
+    """Resposta completa com todas as categorias e valores atuais"""
+    categories: list[SystemConfigCategory]
+    has_overrides: bool = False
+    override_keys: list[str] = []
+
+
+class SystemConfigUpdateRequest(BaseModel):
+    """Payload para atualizar configuracoes do sistema"""
+    values: dict[str, Any] = Field(
+        ...,
+        description="Dicionario chave:valor com as configuracoes a serem atualizadas"
+    )
