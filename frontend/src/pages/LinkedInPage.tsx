@@ -17,6 +17,7 @@ import {
   useTheme,
   alpha,
   Autocomplete,
+  Alert,
 } from '@mui/material';
 import {
   LinkedIn,
@@ -26,6 +27,8 @@ import {
   Work,
   LocationOn,
   OpenInNew,
+  MenuBook,
+  Info,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../services/api';
@@ -142,6 +145,7 @@ const LinkedInPage: React.FC = () => {
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
         <Tab label="Extrair Perfil" icon={<LinkIcon />} iconPosition="start" />
         <Tab label="Enriquecimento Manual" icon={<Person />} iconPosition="start" />
+        <Tab label="Guia de Integracao" icon={<MenuBook />} iconPosition="start" />
       </Tabs>
 
       {/* Extract Profile Tab */}
@@ -224,6 +228,198 @@ const LinkedInPage: React.FC = () => {
                     </Box>
                   ))}
                 </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      )}
+
+      {/* Integration Guide Tab */}
+      {tab === 2 && (
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={8}>
+            <Paper sx={{ p: 3, border: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="h5" fontWeight={700} gutterBottom>
+                Guia Completo: Buscar Curriculos pelo LinkedIn
+              </Typography>
+
+              <Alert severity="info" sx={{ mb: 3 }}>
+                O LinkedIn restringe scraping automatico. Para buscar perfis de pessoas-chave,
+                use uma das abordagens oficiais ou autorizadas abaixo.
+              </Alert>
+
+              {/* Opcao 1: Proxycurl */}
+              <Typography variant="h6" fontWeight={600} gutterBottom sx={{ mt: 3 }}>
+                1. Proxycurl API (Recomendado)
+              </Typography>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                Servico pago que fornece API oficial para dados do LinkedIn. Mais confiavel e dentro dos termos de uso.
+              </Typography>
+              <Paper sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 1, mb: 2 }}>
+                <Typography variant="body2" fontFamily="monospace" sx={{ whiteSpace: 'pre-wrap' }}>
+{`Passo a passo:
+1. Crie conta em https://nubela.co/proxycurl
+2. Obtenha sua API key
+3. Configure no .env do backend:
+   PROXYCURL_API_KEY=sua_chave_aqui
+
+4. Exemplo de uso na API:
+   curl -H "Authorization: Bearer SUA_KEY" \\
+     "https://nubela.co/proxycurl/api/v2/linkedin?url=https://linkedin.com/in/pessoa"
+
+5. Retorna JSON com: nome, cargo, empresa, skills, educacao, experiencias`}
+                </Typography>
+              </Paper>
+
+              {/* Opcao 2: RapidAPI */}
+              <Typography variant="h6" fontWeight={600} gutterBottom sx={{ mt: 3 }}>
+                2. RapidAPI - LinkedIn Endpoints
+              </Typography>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                Marketplace com varios provedores de dados LinkedIn. Planos gratuitos limitados disponiveis.
+              </Typography>
+              <Paper sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 1, mb: 2 }}>
+                <Typography variant="body2" fontFamily="monospace" sx={{ whiteSpace: 'pre-wrap' }}>
+{`Passo a passo:
+1. Acesse https://rapidapi.com e crie conta
+2. Busque por "LinkedIn Profile" ou "LinkedIn Data"
+3. Provedores recomendados:
+   - "Fresh LinkedIn Profile Data" (melhor custo-beneficio)
+   - "LinkedIn Profile and Company Data"
+4. Assine um plano e copie sua X-RapidAPI-Key
+5. Configure no .env:
+   RAPIDAPI_KEY=sua_chave_aqui
+   RAPIDAPI_HOST=fresh-linkedin-profile-data.p.rapidapi.com`}
+                </Typography>
+              </Paper>
+
+              {/* Opcao 3: PhantomBuster */}
+              <Typography variant="h6" fontWeight={600} gutterBottom sx={{ mt: 3 }}>
+                3. PhantomBuster (Automacao Visual)
+              </Typography>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                Ferramenta de automacao que simula navegacao no LinkedIn. Ideal para buscar perfis em massa.
+              </Typography>
+              <Paper sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 1, mb: 2 }}>
+                <Typography variant="body2" fontFamily="monospace" sx={{ whiteSpace: 'pre-wrap' }}>
+{`Passo a passo para buscar pessoas-chave:
+1. Crie conta em https://phantombuster.com
+2. Use o Phantom "LinkedIn Profile Scraper"
+3. Configure:
+   - Cookie de sessao do LinkedIn (li_at)
+   - Lista de URLs de perfis OU termos de busca
+4. O Phantom coleta: nome, cargo, empresa, localizacao, skills
+5. Exporte CSV e importe no sistema via "Enriquecimento Manual"
+
+Para buscar por cargo/empresa especifica:
+1. Use o Phantom "LinkedIn Search Export"
+2. Configure a busca: "Gerente de Producao" em "Sao Paulo"
+3. Exporte resultados com URLs dos perfis
+4. Use os URLs no Phantom "LinkedIn Profile Scraper"`}
+                </Typography>
+              </Paper>
+
+              {/* Opcao 4: LinkedIn API Oficial */}
+              <Typography variant="h6" fontWeight={600} gutterBottom sx={{ mt: 3 }}>
+                4. LinkedIn API Oficial (Para Empresas)
+              </Typography>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                Requer parceria com o LinkedIn. Acesso mais completo, mas processo de aprovacao demorado.
+              </Typography>
+              <Paper sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 1, mb: 2 }}>
+                <Typography variant="body2" fontFamily="monospace" sx={{ whiteSpace: 'pre-wrap' }}>
+{`Passo a passo:
+1. Acesse https://developer.linkedin.com
+2. Crie um App em "My Apps"
+3. Solicite os produtos:
+   - "Sign In with LinkedIn using OpenID Connect"
+   - "Share on LinkedIn" (para postar vagas)
+   - Para dados de perfil: solicite "Marketing Developer Platform"
+4. Configure OAuth 2.0:
+   LINKEDIN_CLIENT_ID=seu_client_id
+   LINKEDIN_CLIENT_SECRET=seu_client_secret
+   LINKEDIN_REDIRECT_URI=https://seusite.com/api/v1/linkedin/callback
+5. O usuario autoriza via OAuth e voce acessa o perfil dele
+
+IMPORTANTE: A API oficial so acessa dados de usuarios que
+autorizarem via OAuth. NAO permite buscar perfis arbitrarios.`}
+                </Typography>
+              </Paper>
+
+              {/* Opcao 5: Manual com CSV */}
+              <Typography variant="h6" fontWeight={600} gutterBottom sx={{ mt: 3 }}>
+                5. Busca Manual + Importacao (Sem Custo)
+              </Typography>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                Para equipes pequenas: busque manualmente e use o enriquecimento manual do sistema.
+              </Typography>
+              <Paper sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 1, mb: 2 }}>
+                <Typography variant="body2" fontFamily="monospace" sx={{ whiteSpace: 'pre-wrap' }}>
+{`Passo a passo para buscar pessoas-chave:
+1. Acesse linkedin.com e faca login
+2. Use a busca avancada:
+   - Filtro "Pessoas"
+   - Cargo: "Gerente de Producao" ou "Operador CNC"
+   - Localizacao: "Sao Leopoldo, RS"
+   - Empresa atual: nome da empresa alvo
+3. Para cada perfil relevante:
+   a. Copie a URL do perfil
+   b. Copie os dados: nome, cargo, skills, experiencia
+4. No sistema, va em "Enriquecimento Manual"
+5. Insira o ID do candidato e os dados copiados
+6. O sistema indexa para busca semantica
+
+Dica: Use LinkedIn Sales Navigator para busca avancada
+(filtros por senioridade, tamanho da empresa, etc.)`}
+                </Typography>
+              </Paper>
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12} md={4}>
+            <Card sx={{ mb: 3 }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={600} gutterBottom>
+                  Comparativo de Opcoes
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  {[
+                    { name: 'Proxycurl', cost: '$$', reliability: 'Alta', setup: 'Facil' },
+                    { name: 'RapidAPI', cost: '$-$$', reliability: 'Media', setup: 'Facil' },
+                    { name: 'PhantomBuster', cost: '$$', reliability: 'Media', setup: 'Media' },
+                    { name: 'API Oficial', cost: 'Gratis', reliability: 'Alta', setup: 'Dificil' },
+                    { name: 'Manual', cost: 'Gratis', reliability: 'Alta', setup: 'Sem setup' },
+                  ].map((opt) => (
+                    <Box key={opt.name} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                      <Typography variant="body2" fontWeight={600}>{opt.name}</Typography>
+                      <Box display="flex" gap={0.5} mt={0.5}>
+                        <Chip label={`Custo: ${opt.cost}`} size="small" variant="outlined" />
+                        <Chip label={opt.reliability} size="small" color="success" variant="outlined" />
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent>
+                <Typography variant="h6" fontWeight={600} gutterBottom>
+                  Variaveis de Ambiente
+                </Typography>
+                <Paper sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+                  <Typography variant="caption" fontFamily="monospace" sx={{ whiteSpace: 'pre-wrap' }}>
+{`# .env do backend
+LINKEDIN_API_ENABLED=true
+LINKEDIN_CLIENT_ID=
+LINKEDIN_CLIENT_SECRET=
+LINKEDIN_REDIRECT_URI=
+
+# Opcional (servicos terceiros)
+PROXYCURL_API_KEY=
+RAPIDAPI_KEY=`}
+                  </Typography>
+                </Paper>
               </CardContent>
             </Card>
           </Grid>

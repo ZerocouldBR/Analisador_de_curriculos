@@ -1,3 +1,4 @@
+import logging
 from sqlalchemy.orm import Session
 from fastapi import UploadFile
 from typing import Optional, BinaryIO
@@ -8,6 +9,8 @@ from app.services.storage_service import storage_service
 from app.services.text_extraction_service import TextExtractionService
 from app.services.resume_parser_service import ResumeParserService
 from app.schemas.candidate import CandidateCreate
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentService:
@@ -32,8 +35,14 @@ class DocumentService:
         Returns:
             Document criado
         """
+        logger.info(
+            f"Upload de curriculo: {file.filename} (candidate_id={candidate_id})",
+            extra={"operation": "upload_resume", "user_id": user_id},
+        )
+
         # Verificar formato suportado
         if not storage_service.is_supported_format(file.filename):
+            logger.warning(f"Formato nao suportado: {file.filename}")
             raise ValueError(f"Formato não suportado: {file.filename}")
 
         # Ler arquivo
@@ -100,12 +109,21 @@ class DocumentService:
         db.add(audit)
         db.commit()
 
+        logger.info(
+            f"Documento salvo: id={document.id}, filename={file.filename}, candidate_id={candidate_id}",
+            extra={"operation": "upload_resume", "document_id": document.id},
+        )
+
         # Processar documento em background usando Celery
         try:
             from app.tasks.document_tasks import process_document_task
             process_document_task.delay(document.id, user_id)
+            logger.info(f"Documento {document.id} enfileirado para processamento")
         except Exception as e:
-            print(f"Erro ao enfileirar processamento do documento: {e}")
+            logger.error(
+                f"Erro ao enfileirar processamento do documento {document.id}: {e}",
+                extra={"operation": "celery_enqueue", "document_id": document.id},
+            )
             # Não falhar upload por erro de processamento
 
         return document

@@ -419,6 +419,51 @@ class ApiService {
     const response = await this.api.get<HealthCheck>('/health');
     return response.data;
   }
+
+  // ==================== Diagnostics ====================
+  async runDiagnostics(): Promise<any> {
+    const response = await this.api.get('/v1/diagnostics/full', { timeout: 120000 });
+    return response.data;
+  }
+
+  async testService(serviceName: string): Promise<any> {
+    const response = await this.api.get(`/v1/diagnostics/test/${serviceName}`, { timeout: 60000 });
+    return response.data;
+  }
+
+  async getConfigSummary(): Promise<any> {
+    const response = await this.api.get('/v1/diagnostics/config-summary');
+    return response.data;
+  }
+
+  // ==================== Batch Import ====================
+  async scanFolder(folderPath: string, recursive: boolean = true): Promise<any> {
+    const response = await this.api.post('/v1/batch-import/scan', {
+      folder_path: folderPath,
+      recursive,
+    });
+    return response.data;
+  }
+
+  async batchImport(
+    folderPath: string,
+    recursive: boolean = true,
+    skipDuplicates: boolean = true,
+    maxFiles: number = 100
+  ): Promise<any> {
+    const response = await this.api.post('/v1/batch-import/import', {
+      folder_path: folderPath,
+      recursive,
+      skip_duplicates: skipDuplicates,
+      max_files: maxFiles,
+    }, { timeout: 600000 });
+    return response.data;
+  }
+
+  async getSupportedFormats(): Promise<any> {
+    const response = await this.api.get('/v1/batch-import/supported-formats');
+    return response.data;
+  }
 }
 
 export const apiService = new ApiService();

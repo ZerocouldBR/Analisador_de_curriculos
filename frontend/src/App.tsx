@@ -24,6 +24,8 @@ import ChatPage from './pages/ChatPage';
 import ProfilePage from './pages/ProfilePage';
 import CompaniesPage from './pages/CompaniesPage';
 import LinkedInPage from './pages/LinkedInPage';
+import DiagnosticsPage from './pages/DiagnosticsPage';
+import BatchImportPage from './pages/BatchImportPage';
 
 interface ProtectedRouteProps {
   children: React.ReactElement;
@@ -105,6 +107,8 @@ function App() {
                   <Route path="profile" element={<ProfilePage />} />
                   <Route path="companies" element={<AdminGuard><CompaniesPage /></AdminGuard>} />
                   <Route path="linkedin" element={<LinkedInPage />} />
+                  <Route path="batch-import" element={<BatchImportPage />} />
+                  <Route path="diagnostics" element={<AdminGuard><DiagnosticsPage /></AdminGuard>} />
                 </Route>
 
                 {/* Catch-all */}

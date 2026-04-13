@@ -37,6 +37,8 @@ import {
   DarkMode,
   LightMode,
   ChevronLeft,
+  FolderCopy,
+  MonitorHeart,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useThemeMode } from '../contexts/ThemeContext';
@@ -56,8 +58,10 @@ const menuItems: MenuItem_[] = [
   { text: 'Candidatos', icon: <People />, path: '/candidates' },
   { text: 'Busca Inteligente', icon: <Search />, path: '/search' },
   { text: 'Upload de Curriculos', icon: <CloudUpload />, path: '/upload' },
+  { text: 'Importacao em Lote', icon: <FolderCopy />, path: '/batch-import' },
   { text: 'LinkedIn', icon: <LinkedIn />, path: '/linkedin', dividerAfter: true },
   { text: 'Empresas', icon: <Business />, path: '/companies' },
+  { text: 'Diagnostico', icon: <MonitorHeart />, path: '/diagnostics' },
   { text: 'Configuracoes', icon: <Settings />, path: '/settings' },
   { text: 'Funcoes e Permissoes', icon: <AdminPanelSettings />, path: '/roles' },
 ];
