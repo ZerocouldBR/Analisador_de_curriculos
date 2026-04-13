@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.db.database import get_db
 from app.db.models import User, ChatConversation, ChatMessage
+from app.core.config import settings
 from app.core.dependencies import get_current_user, require_permission
 from app.services.chat_service import chat_service
 
@@ -252,12 +253,16 @@ async def send_message(
         )
 
     try:
+        # Multi-tenant: filtrar candidatos por empresa
+        company_id = current_user.company_id if settings.multi_tenant_enabled and not current_user.is_superuser else None
+
         response = await chat_service.send_message(
             db=db,
             conversation_id=conversation_id,
             user_id=current_user.id,
             message=data.message,
             candidate_ids=data.candidate_ids,
+            company_id=company_id,
         )
 
         return ChatResponseModel(

@@ -55,7 +55,7 @@ def create_access_token(
     else:
         expire = now + timedelta(minutes=settings.access_token_expire_minutes)
 
-    to_encode.update({"exp": expire, "iat": now})
+    to_encode.update({"exp": expire, "iat": now, "type": "access"})
 
     encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
     return encoded_jwt
@@ -63,7 +63,7 @@ def create_access_token(
 
 def decode_access_token(token: str) -> Optional[TokenData]:
     """
-    Decodifica e valida um token JWT
+    Decodifica e valida um token JWT de acesso
 
     Args:
         token: Token JWT a ser decodificado
@@ -73,6 +73,42 @@ def decode_access_token(token: str) -> Optional[TokenData]:
     """
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+
+        # Rejeitar refresh tokens usados como access tokens
+        token_type = payload.get("type", "access")
+        if token_type != "access":
+            return None
+
+        user_id: int = payload.get("user_id")
+        email: str = payload.get("email")
+        roles: list[str] = payload.get("roles", [])
+
+        if user_id is None or email is None:
+            return None
+
+        return TokenData(user_id=user_id, email=email, roles=roles)
+
+    except JWTError:
+        return None
+
+
+def decode_refresh_token(token: str) -> Optional[TokenData]:
+    """
+    Decodifica e valida um token JWT de refresh
+
+    Args:
+        token: Token JWT de refresh
+
+    Returns:
+        TokenData se valido, None caso contrario
+    """
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+
+        # Deve ser um refresh token
+        token_type = payload.get("type")
+        if token_type != "refresh":
+            return None
 
         user_id: int = payload.get("user_id")
         email: str = payload.get("email")

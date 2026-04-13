@@ -88,6 +88,13 @@ def get_candidate(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Candidato {candidate_id} não encontrado"
         )
+    # Multi-tenant: verificar que candidato pertence a empresa do usuario
+    if settings.multi_tenant_enabled and not current_user.is_superuser and current_user.company_id:
+        if candidate.company_id != current_user.company_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Candidato {candidate_id} não encontrado"
+            )
     return candidate
 
 

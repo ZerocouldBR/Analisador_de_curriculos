@@ -1,8 +1,12 @@
+import re
+import uuid
+import logging
+
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timezone
 
-from app.db.models import User, Role, AuditLog
+from app.db.models import User, Role, Company, AuditLog
 from app.schemas.auth import UserCreate, UserLogin
 from app.core.security import (
     verify_password,
@@ -11,32 +15,65 @@ from app.core.security import (
     create_refresh_token
 )
 
+logger = logging.getLogger(__name__)
+
 
 class AuthService:
     @staticmethod
     def create_user(db: Session, user_data: UserCreate, role_names: list[str] = None) -> User:
         """
-        Cria um novo usuário
+        Cria um novo usuario
+
+        Se company_name for informado, cria uma nova empresa e associa o usuario como admin.
+        Se company_id for informado, associa o usuario a empresa existente.
 
         Args:
-            db: Sessão do banco de dados
-            user_data: Dados do usuário
-            role_names: Lista de nomes de roles para atribuir ao usuário
+            db: Sessao do banco de dados
+            user_data: Dados do usuario (inclui campos de empresa opcionais)
+            role_names: Lista de nomes de roles para atribuir ao usuario
 
         Returns:
-            Usuário criado
+            Usuario criado
         """
-        # Verificar se email já existe
+        # Verificar se email ja existe (mensagem generica para evitar enumeracao)
         existing_user = db.query(User).filter(User.email == user_data.email).first()
         if existing_user:
-            raise ValueError("Email já cadastrado")
+            raise ValueError("Nao foi possivel criar a conta. Verifique os dados e tente novamente.")
 
-        # Criar usuário
+        company_id = None
+
+        # Criar nova empresa se company_name foi informado
+        if hasattr(user_data, 'company_name') and user_data.company_name:
+            company = AuthService._create_company_for_registration(
+                db,
+                name=user_data.company_name,
+                cnpj=getattr(user_data, 'company_cnpj', None),
+                phone=getattr(user_data, 'company_phone', None),
+                email=user_data.email,
+            )
+            company_id = company.id
+            # Se criou empresa, default role e admin
+            if not role_names:
+                role_names = ["admin"]
+            logger.info(f"Empresa '{user_data.company_name}' criada no registro (id={company.id})")
+
+        # Vincular a empresa existente se company_id informado
+        elif hasattr(user_data, 'company_id') and user_data.company_id:
+            company = db.query(Company).filter(
+                Company.id == user_data.company_id,
+                Company.is_active == True,
+            ).first()
+            if not company:
+                raise ValueError(f"Empresa {user_data.company_id} nao encontrada ou inativa")
+            company_id = company.id
+
+        # Criar usuario
         db_user = User(
             email=user_data.email,
             name=user_data.name,
             password_hash=get_password_hash(user_data.password),
-            status="active"
+            status="active",
+            company_id=company_id,
         )
 
         db.add(db_user)
@@ -49,7 +86,7 @@ class AuthService:
                 if role:
                     db_user.roles.append(role)
         else:
-            # Role padrão: viewer
+            # Role padrao: viewer
             default_role = db.query(Role).filter(Role.name == "viewer").first()
             if default_role:
                 db_user.roles.append(default_role)
@@ -63,7 +100,11 @@ class AuthService:
             action="create_user",
             entity="user",
             entity_id=db_user.id,
-            metadata_json={"email": user_data.email, "name": user_data.name}
+            metadata_json={
+                "email": user_data.email,
+                "name": user_data.name,
+                "company_id": company_id,
+            }
         )
         db.add(audit)
         db.commit()
@@ -71,27 +112,68 @@ class AuthService:
         return db_user
 
     @staticmethod
+    def _create_company_for_registration(
+        db: Session,
+        name: str,
+        cnpj: Optional[str] = None,
+        phone: Optional[str] = None,
+        email: Optional[str] = None,
+    ) -> Company:
+        """Cria empresa durante o registro de usuario"""
+        slug = re.sub(r'[^a-z0-9]+', '-', name.lower().strip()).strip('-') or "empresa"
+
+        # Slug unico
+        existing = db.query(Company).filter(Company.slug == slug).first()
+        if existing:
+            slug = f"{slug}-{uuid.uuid4().hex[:6]}"
+
+        # CNPJ unico
+        if cnpj:
+            existing_cnpj = db.query(Company).filter(Company.cnpj == cnpj).first()
+            if existing_cnpj:
+                raise ValueError(f"CNPJ '{cnpj}' ja cadastrado")
+
+        company = Company(
+            name=name,
+            slug=slug,
+            cnpj=cnpj,
+            phone=phone,
+            email=email,
+            plan="free",
+        )
+        db.add(company)
+        db.flush()
+
+        return company
+
+    @staticmethod
     def authenticate_user(db: Session, credentials: UserLogin) -> Optional[User]:
         """
-        Autentica um usuário
+        Autentica um usuario
+
+        Prevencao contra timing attacks: sempre executa verify_password
+        mesmo que usuario nao exista, para evitar enumeration.
 
         Args:
-            db: Sessão do banco de dados
+            db: Sessao do banco de dados
             credentials: Credenciais de login
 
         Returns:
-            Usuário autenticado ou None se credenciais inválidas
+            Usuario autenticado ou None se credenciais invalidas
         """
         user = db.query(User).filter(User.email == credentials.email).first()
 
-        if not user:
-            return None
+        # Dummy hash para manter tempo constante quando usuario nao existe
+        _dummy_hash = "$2b$12$LJ3m4ys3Lz0rNqV956Fx7etXMWxGMuaL2b0HOrdFVMpMYP7QmFi2C"
+        stored_hash = user.password_hash if user else _dummy_hash
 
-        if not verify_password(credentials.password, user.password_hash):
+        password_valid = verify_password(credentials.password, stored_hash)
+
+        if not user or not password_valid:
             return None
 
         if user.status != "active":
-            raise ValueError("Usuário inativo ou suspenso")
+            raise ValueError("Conta inativa ou suspensa")
 
         # Atualizar último login
         user.last_login = datetime.now(timezone.utc)
@@ -170,7 +252,11 @@ class AuthService:
         """
         # Verificar senha antiga
         if not verify_password(old_password, user.password_hash):
-            raise ValueError("Senha antiga incorreta")
+            raise ValueError("Senha atual incorreta")
+
+        # Nao permitir reusar a mesma senha
+        if old_password == new_password:
+            raise ValueError("A nova senha deve ser diferente da senha atual")
 
         # Atualizar senha
         user.password_hash = get_password_hash(new_password)

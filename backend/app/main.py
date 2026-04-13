@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -8,7 +10,9 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.api.routes import api_router
 from app.core.config import settings
-from app.core.logging import configure_logging
+from app.core.logging import configure_logging, RequestLoggingMiddleware
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -16,25 +20,39 @@ async def lifespan(app: FastAPI):
     """
     Gerencia o ciclo de vida da aplicação
     """
+    logger.info("=" * 60)
+    logger.info(f"Iniciando {settings.app_name} v{settings.app_version}")
+    logger.info("=" * 60)
+
     # Startup: Inicializar banco de dados
     try:
         from app.db.init_db import init_db
         init_db()
+        logger.info("Banco de dados inicializado com sucesso")
     except Exception as e:
-        print(f"Warning: Erro ao inicializar banco de dados: {e}")
-        print("  Execute manualmente: python -m app.db.init_db")
+        logger.error(f"Erro ao inicializar banco de dados: {e}", exc_info=True)
+        logger.warning("Execute manualmente: python -m app.db.init_db")
 
     # Startup: Inicializar vector store
     try:
         from app.vectorstore.factory import initialize_vector_store
         await initialize_vector_store()
-        print(f"  Vector store initialized: {settings.vector_db_provider.value}")
+        logger.info(f"Vector store inicializado: {settings.vector_db_provider.value}")
     except Exception as e:
-        print(f"Warning: Erro ao inicializar vector store: {e}")
-        print("  O vector store sera inicializado sob demanda na primeira requisicao")
+        logger.error(f"Erro ao inicializar vector store: {e}", exc_info=True)
+        logger.warning("O vector store sera inicializado sob demanda na primeira requisicao")
+
+    # Log configuracao ativa
+    logger.info(f"Embedding mode: {settings.embedding_mode.value}")
+    logger.info(f"Vector DB provider: {settings.vector_db_provider.value}")
+    logger.info(f"OpenAI API key: {'configurada' if settings.openai_api_key else 'NAO CONFIGURADA'}")
+    logger.info(f"LinkedIn API: {'habilitada' if settings.linkedin_api_enabled else 'desabilitada'}")
+    logger.info(f"CORS origins: {settings.cors_origins}")
 
     yield
-    # Shutdown: Limpeza se necessário
+
+    # Shutdown
+    logger.info("Aplicacao encerrada")
 
 
 def create_app() -> FastAPI:
@@ -108,11 +126,16 @@ def create_app() -> FastAPI:
 
     application.add_middleware(SecurityHeadersMiddleware)
 
+    # Request logging middleware
+    application.add_middleware(RequestLoggingMiddleware)
+
     # CORS middleware for frontend (configurable via CORS_ORIGINS env var)
+    # Seguranca: nao permitir credentials com wildcard origin
+    cors_allow_credentials = "*" not in settings.cors_origins
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        allow_credentials=cors_allow_credentials,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )

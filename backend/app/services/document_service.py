@@ -18,7 +18,8 @@ class DocumentService:
         db: Session,
         file: UploadFile,
         candidate_id: Optional[int] = None,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
+        company_id: Optional[int] = None,
     ) -> Document:
         """
         Faz upload de um currículo e processa
@@ -66,7 +67,8 @@ class DocumentService:
         if not candidate_id:
             candidate = Candidate(
                 full_name="Aguardando processamento",
-                email=None
+                email=None,
+                company_id=company_id,
             )
             db.add(candidate)
             db.flush()

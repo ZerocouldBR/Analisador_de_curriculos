@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ from app.schemas.auth import (
     RoleUpdate
 )
 from app.services.auth_service import AuthService
-from app.core.security import decode_access_token, create_access_token, create_refresh_token
+from app.core.security import decode_access_token, decode_refresh_token, create_access_token, create_refresh_token
 from app.core.dependencies import (
     get_current_user,
     get_current_superuser,
@@ -32,33 +32,52 @@ class RefreshTokenRequest(BaseModel):
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
+def _build_user_response(user: User) -> UserResponse:
+    """Constroi UserResponse incluindo dados da empresa"""
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        status=user.status,
+        is_superuser=user.is_superuser,
+        company_id=user.company_id,
+        company_name=user.company.name if user.company else None,
+        roles=[role.name for role in user.roles],
+        created_at=user.created_at,
+        last_login=user.last_login,
+    )
+
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(
     user_data: UserCreate,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """
-    Registra um novo usuário
+    Registra um novo usuario (e opcionalmente uma empresa de RH)
 
-    - **email**: Email único do usuário
+    **Campos obrigatorios:**
+    - **email**: Email unico do usuario
     - **name**: Nome completo
-    - **password**: Senha (mínimo 8 caracteres)
+    - **password**: Senha (minimo 8 caracteres, maiuscula, minuscula, numero e especial)
 
-    O usuário criado recebe o role 'viewer' por padrão.
+    **Campos opcionais para empresa:**
+    - **company_name**: Nome da empresa de RH (cria nova empresa e vincula)
+    - **company_cnpj**: CNPJ da empresa
+    - **company_phone**: Telefone da empresa
+    - **company_id**: ID de empresa existente para vincular
+
+    Se `company_name` for informado, o usuario recebe role 'admin' da empresa.
+    Caso contrario, recebe role 'viewer' por padrao.
     """
+    from app.core.rate_limit import check_rate_limit
+    check_rate_limit(request, key_prefix="register", max_requests=5, window_seconds=300)
+
     try:
         user = AuthService.create_user(db, user_data)
 
-        return UserResponse(
-            id=user.id,
-            email=user.email,
-            name=user.name,
-            status=user.status,
-            is_superuser=user.is_superuser,
-            roles=[role.name for role in user.roles],
-            created_at=user.created_at,
-            last_login=user.last_login
-        )
+        return _build_user_response(user)
 
     except ValueError as e:
         raise HTTPException(
@@ -69,21 +88,25 @@ def register(
 
 @router.post("/login", response_model=LoginResponse)
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
     """
-    Faz login e retorna tokens de acesso + dados do usuário
+    Faz login e retorna tokens de acesso + dados do usuario
 
     Aceita form data (OAuth2) com campos:
-    - **username**: Email do usuário
+    - **username**: Email do usuario
     - **password**: Senha
 
     Retorna:
-    - **access_token**: Token JWT de acesso (válido por 30 minutos)
-    - **refresh_token**: Token de refresh (válido por 7 dias)
-    - **user**: Dados do usuário autenticado
+    - **access_token**: Token JWT de acesso (valido por 15 minutos)
+    - **refresh_token**: Token de refresh (valido por 7 dias)
+    - **user**: Dados do usuario autenticado
     """
+    from app.core.rate_limit import check_rate_limit
+    check_rate_limit(request, key_prefix="login", max_requests=10, window_seconds=60)
+
     try:
         credentials = UserLogin(email=form_data.username, password=form_data.password)
         user = AuthService.authenticate_user(db, credentials)
@@ -97,22 +120,11 @@ def login(
 
         tokens = AuthService.create_tokens(user)
 
-        user_response = UserResponse(
-            id=user.id,
-            email=user.email,
-            name=user.name,
-            status=user.status,
-            is_superuser=user.is_superuser,
-            roles=[role.name for role in user.roles],
-            created_at=user.created_at,
-            last_login=user.last_login
-        )
-
         return LoginResponse(
             access_token=tokens["access_token"],
             refresh_token=tokens["refresh_token"],
             token_type=tokens["token_type"],
-            user=user_response
+            user=_build_user_response(user),
         )
 
     except ValueError as e:
@@ -131,16 +143,7 @@ def get_current_user_info(
 
     Requer autenticação via Bearer token.
     """
-    return UserResponse(
-        id=current_user.id,
-        email=current_user.email,
-        name=current_user.name,
-        status=current_user.status,
-        is_superuser=current_user.is_superuser,
-        roles=[role.name for role in current_user.roles],
-        created_at=current_user.created_at,
-        last_login=current_user.last_login
-    )
+    return _build_user_response(current_user)
 
 
 @router.post("/change-password")
@@ -184,7 +187,7 @@ def refresh_token(
 
     Retorna novos tokens e dados do usuario.
     """
-    token_data = decode_access_token(payload.refresh_token)
+    token_data = decode_refresh_token(payload.refresh_token)
 
     if token_data is None:
         raise HTTPException(
@@ -203,22 +206,11 @@ def refresh_token(
 
     tokens = AuthService.create_tokens(user)
 
-    user_response = UserResponse(
-        id=user.id,
-        email=user.email,
-        name=user.name,
-        status=user.status,
-        is_superuser=user.is_superuser,
-        roles=[role.name for role in user.roles],
-        created_at=user.created_at,
-        last_login=user.last_login
-    )
-
     return LoginResponse(
         access_token=tokens["access_token"],
         refresh_token=tokens["refresh_token"],
         token_type=tokens["token_type"],
-        user=user_response
+        user=_build_user_response(user),
     )
 
 

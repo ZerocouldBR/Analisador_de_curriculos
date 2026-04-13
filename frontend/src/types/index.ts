@@ -6,6 +6,7 @@ export interface User {
   status: string;
   is_superuser: boolean;
   company_id?: number;
+  company_name?: string;
   roles?: string[];
   created_at: string;
   last_login?: string;
@@ -27,6 +28,10 @@ export interface RegisterRequest {
   email: string;
   password: string;
   name: string;
+  company_name?: string;
+  company_cnpj?: string;
+  company_phone?: string;
+  company_id?: number;
 }
 
 // ==================== Candidates ====================
@@ -249,10 +254,20 @@ export interface LinkedInMatch {
 export interface Company {
   id: number;
   name: string;
+  slug?: string;
   cnpj?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  website?: string;
   plan: string;
   logo_url?: string;
   is_active: boolean;
+  settings_json?: Record<string, any>;
+  user_count?: number;
+  candidate_count?: number;
   max_candidates?: number;
   max_monthly_ai_cost?: number;
   created_at: string;

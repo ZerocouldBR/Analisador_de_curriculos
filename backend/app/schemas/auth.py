@@ -1,6 +1,6 @@
 import re
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -27,6 +27,11 @@ class UserCreate(UserBase):
         ..., min_length=8, max_length=128,
         description="Senha: mínimo 8 caracteres, com maiúscula, minúscula, número e especial"
     )
+    # Campos opcionais para criar empresa junto com o usuario
+    company_name: Optional[str] = Field(None, min_length=2, max_length=200, description="Nome da empresa de RH (cria nova empresa)")
+    company_cnpj: Optional[str] = Field(None, max_length=18, description="CNPJ da empresa")
+    company_phone: Optional[str] = Field(None, max_length=20, description="Telefone da empresa")
+    company_id: Optional[int] = Field(None, description="ID de empresa existente para vincular")
 
     @field_validator('password')
     @classmethod
@@ -43,6 +48,8 @@ class UserResponse(UserBase):
     id: int
     status: str
     is_superuser: bool
+    company_id: Optional[int] = None
+    company_name: Optional[str] = None
     roles: list[str] = []
     created_at: datetime
     last_login: Optional[datetime] = None

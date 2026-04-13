@@ -526,7 +526,15 @@ class EmbeddingService:
                 filter_clauses += " AND LOWER(cand.state) = LOWER(:filter_state)"
                 filter_params["filter_state"] = filters["state"]
 
+        # Whitelist de idiomas validos para prevenir SQL injection
+        _VALID_FTS_LANGS = {
+            "portuguese", "english", "spanish", "french", "german",
+            "italian", "dutch", "russian", "simple",
+        }
         fts_lang = settings.fts_language
+        if fts_lang not in _VALID_FTS_LANGS:
+            logger.warning(f"fts_language invalido: {fts_lang}, usando 'portuguese'")
+            fts_lang = "portuguese"
 
         sql = text(f"""
             WITH vector_scores AS (

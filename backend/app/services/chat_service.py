@@ -206,6 +206,7 @@ class ChatService:
         user_id: int,
         message: str,
         candidate_ids: Optional[List[int]] = None,
+        company_id: Optional[int] = None,
     ) -> ChatResponse:
         """
         Envia mensagem no chat e obtem resposta do LLM
@@ -216,6 +217,7 @@ class ChatService:
             user_id: ID do usuario
             message: Mensagem do usuario
             candidate_ids: IDs de candidatos especificos para focar
+            company_id: ID da empresa para filtrar candidatos (multi-tenant)
 
         Returns:
             ChatResponse com resposta e metadados
@@ -236,9 +238,9 @@ class ChatService:
         db.refresh(user_msg)
 
         try:
-            # Buscar chunks relevantes
+            # Buscar chunks relevantes (filtrado por empresa)
             relevant_chunks = await self._search_relevant_chunks(
-                db, message, candidate_ids
+                db, message, candidate_ids, company_id
             )
 
             # Construir contexto de curriculos
@@ -405,16 +407,17 @@ class ChatService:
         db: Session,
         query: str,
         candidate_ids: Optional[List[int]] = None,
+        company_id: Optional[int] = None,
     ) -> List[Tuple[Chunk, float]]:
-        """Busca chunks relevantes para a query"""
+        """Busca chunks relevantes para a query, filtrado por empresa"""
         try:
             query_embedding = await embedding_service.generate_embedding(query)
         except Exception as e:
             logger.warning(f"Falha ao gerar embedding: {e}")
             return []
 
-        # Construir filtro de candidatos
-        candidate_filter = ""
+        # Construir filtros
+        extra_filters = ""
         params = {
             "query_vector": str(query_embedding),
             "threshold": settings.vector_search_pre_filter_threshold,
@@ -422,8 +425,15 @@ class ChatService:
         }
 
         if candidate_ids:
-            candidate_filter = "AND c.candidate_id = ANY(:candidate_ids)"
+            extra_filters += " AND c.candidate_id = ANY(:candidate_ids)"
             params["candidate_ids"] = candidate_ids
+
+        # Filtrar por empresa (multi-tenant)
+        if company_id:
+            extra_filters += " AND cand.company_id = :company_id"
+            params["company_id"] = company_id
+
+        company_join = "JOIN candidates cand ON cand.id = c.candidate_id" if company_id else ""
 
         sql = sql_text(f"""
             SELECT
@@ -434,8 +444,9 @@ class ChatService:
                 1 - (e.vector <=> :query_vector::vector) as similarity
             FROM chunks c
             JOIN embeddings e ON e.chunk_id = c.id
+            {company_join}
             WHERE 1 - (e.vector <=> :query_vector::vector) >= :threshold
-            {candidate_filter}
+            {extra_filters}
             ORDER BY e.vector <=> :query_vector::vector
             LIMIT :limit
         """)
