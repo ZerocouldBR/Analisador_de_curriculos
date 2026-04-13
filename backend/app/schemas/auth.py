@@ -57,6 +57,11 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+class LoginResponse(Token):
+    """Response for login endpoint - includes user data along with tokens"""
+    user: UserResponse
+
+
 class TokenPayload(BaseModel):
     user_id: int
     email: str

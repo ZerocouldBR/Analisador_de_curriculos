@@ -5,15 +5,19 @@ Sistema completo de RH on-premises para ingestao, analise, indexacao vetorial e 
 ## Funcionalidades
 
 - Upload e analise de curriculos (PDF, DOCX, TXT, imagens com OCR)
-- Busca semantica com embeddings OpenAI + pgvector
-- Busca hibrida (semantica + texto completo + filtros)
+- Busca semantica com embeddings (OpenAI API ou local com sentence-transformers)
+- Busca hibrida (semantica + texto completo + filtros + dominio)
 - Chat inteligente com LLM sobre os curriculos
-- Autenticacao JWT com RBAC (admin, recruiter, viewer)
+- Matching automatico candidato x vaga (producao, logistica, qualidade)
+- Autenticacao JWT com refresh tokens e RBAC (admin, recruiter, viewer)
 - Processamento assincrono com Celery
 - WebSocket para atualizacoes em tempo real
 - LinkedIn integration para enriquecimento de perfis
-- LGPD compliance com auditoria completa
+- LGPD compliance com auditoria completa e criptografia PII
 - Monitoramento com Prometheus + Grafana
+- Configuracao completa via interface web (sem editar arquivos)
+- Multi-tenant (separacao por empresas)
+- 3 provedores de vector DB: pgvector, Supabase, Qdrant
 
 ---
 
@@ -270,11 +274,35 @@ Busca hibrida combinando:
 
 ## Tecnologias
 
-**Backend:** FastAPI, PostgreSQL 16 + pgvector, Redis 7, Celery, OpenAI API, Tesseract OCR
+**Backend:** FastAPI, PostgreSQL 16 + pgvector, Redis 7, Celery, OpenAI API, Tesseract OCR, sentence-transformers
 
-**Frontend:** React 18, TypeScript, Material-UI 5, WebSocket
+**Frontend:** React 18, TypeScript, Material-UI 5, WebSocket, Axios
 
-**Infra:** Docker Compose, Prometheus, Grafana, Flower
+**Infra:** Docker Compose, Nginx, Prometheus, Grafana, Flower, Let's Encrypt
+
+## API - Endpoints Principais
+
+### Autenticacao
+- `POST /api/v1/auth/login` - Login (form data OAuth2, retorna tokens + user)
+- `POST /api/v1/auth/refresh` - Renovar access token com refresh token
+- `GET /api/v1/auth/me` - Dados do usuario autenticado
+
+### Busca
+- `POST /api/v1/search/semantic` - Busca semantica (query + limit)
+- `POST /api/v1/search/hybrid` - Busca hibrida (query + filters + limit)
+- `POST /api/v1/search/job-match` - Matching candidato x vaga
+- `POST /api/v1/search/keywords/extract` - Extrai keywords de texto
+
+### Candidatos
+- `GET /api/v1/candidates/` - Listar (filtros: city, state)
+- `GET /api/v1/candidates/{id}/experiences` - Experiencias profissionais
+- `GET /api/v1/candidates/{id}/profiles` - Perfis/snapshots versionados
+
+### Configuracoes
+- `GET /api/v1/settings/system/config` - Todas as configuracoes do sistema
+- `PUT /api/v1/settings/system/config` - Atualizar configuracoes via frontend
+
+Documentacao interativa completa: `http://localhost:8000/docs` (Swagger UI)
 
 ## Testes
 
@@ -285,6 +313,17 @@ cd backend && pytest
 # Frontend
 cd frontend && npm test
 ```
+
+## Deploy em Producao (VPS)
+
+Veja o guia completo em [DEPLOY_VPS.md](DEPLOY_VPS.md) com:
+- Preparacao da VPS (Ubuntu 22.04+)
+- Docker + Docker Compose
+- PostgreSQL 16 + pgvector + Redis 7
+- Nginx reverse proxy + SSL (Let's Encrypt)
+- Monitoramento (Prometheus + Grafana + Flower)
+- Backup automatizado diario
+- Configuracao completa via interface web
 
 ## Licenca
 

@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -7,18 +9,24 @@ from app.schemas.auth import (
     UserLogin,
     UserResponse,
     Token,
+    LoginResponse,
     PasswordChange,
     RoleCreate,
     RoleResponse,
     RoleUpdate
 )
 from app.services.auth_service import AuthService
+from app.core.security import decode_access_token, create_access_token, create_refresh_token
 from app.core.dependencies import (
     get_current_user,
     get_current_superuser,
     require_permission
 )
 from app.db.models import User, Role
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
 
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -59,22 +67,25 @@ def register(
         )
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=LoginResponse)
 def login(
-    credentials: UserLogin,
+    form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
     """
-    Faz login e retorna tokens de acesso
+    Faz login e retorna tokens de acesso + dados do usuário
 
-    - **email**: Email do usuário
+    Aceita form data (OAuth2) com campos:
+    - **username**: Email do usuário
     - **password**: Senha
 
     Retorna:
     - **access_token**: Token JWT de acesso (válido por 30 minutos)
     - **refresh_token**: Token de refresh (válido por 7 dias)
+    - **user**: Dados do usuário autenticado
     """
     try:
+        credentials = UserLogin(email=form_data.username, password=form_data.password)
         user = AuthService.authenticate_user(db, credentials)
 
         if user is None:
@@ -85,7 +96,24 @@ def login(
             )
 
         tokens = AuthService.create_tokens(user)
-        return Token(**tokens)
+
+        user_response = UserResponse(
+            id=user.id,
+            email=user.email,
+            name=user.name,
+            status=user.status,
+            is_superuser=user.is_superuser,
+            roles=[role.name for role in user.roles],
+            created_at=user.created_at,
+            last_login=user.last_login
+        )
+
+        return LoginResponse(
+            access_token=tokens["access_token"],
+            refresh_token=tokens["refresh_token"],
+            token_type=tokens["token_type"],
+            user=user_response
+        )
 
     except ValueError as e:
         raise HTTPException(
@@ -142,6 +170,56 @@ def change_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+
+
+@router.post("/refresh", response_model=LoginResponse)
+def refresh_token(
+    payload: RefreshTokenRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Renova o access token usando um refresh token valido
+
+    - **refresh_token**: Token de refresh obtido no login
+
+    Retorna novos tokens e dados do usuario.
+    """
+    token_data = decode_access_token(payload.refresh_token)
+
+    if token_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token invalido ou expirado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = AuthService.get_user_by_id(db, token_data.user_id)
+
+    if user is None or user.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario nao encontrado ou inativo",
+        )
+
+    tokens = AuthService.create_tokens(user)
+
+    user_response = UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        status=user.status,
+        is_superuser=user.is_superuser,
+        roles=[role.name for role in user.roles],
+        created_at=user.created_at,
+        last_login=user.last_login
+    )
+
+    return LoginResponse(
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+        token_type=tokens["token_type"],
+        user=user_response
+    )
 
 
 # Endpoints de gerenciamento de roles (apenas superuser)

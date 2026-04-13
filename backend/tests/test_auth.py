@@ -90,11 +90,11 @@ class TestAuthentication:
             }
         )
 
-        # Login
+        # Login (OAuth2 form data)
         response = client.post(
             "/api/v1/auth/login",
-            json={
-                "email": "test@example.com",
+            data={
+                "username": "test@example.com",
                 "password": "testpass123"
             }
         )
@@ -104,6 +104,8 @@ class TestAuthentication:
         assert "access_token" in data
         assert "refresh_token" in data
         assert data["token_type"] == "bearer"
+        assert "user" in data
+        assert data["user"]["email"] == "test@example.com"
 
     def test_login_wrong_password(self, setup_database):
         """Testa login com senha incorreta"""
@@ -120,8 +122,8 @@ class TestAuthentication:
         # Tentar login com senha errada
         response = client.post(
             "/api/v1/auth/login",
-            json={
-                "email": "test@example.com",
+            data={
+                "username": "test@example.com",
                 "password": "wrongpassword"
             }
         )
@@ -142,8 +144,8 @@ class TestAuthentication:
 
         login_response = client.post(
             "/api/v1/auth/login",
-            json={
-                "email": "test@example.com",
+            data={
+                "username": "test@example.com",
                 "password": "testpass123"
             }
         )
