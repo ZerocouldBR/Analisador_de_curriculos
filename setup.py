@@ -19,6 +19,13 @@ def generate_secret():
     return secrets.token_urlsafe(32)
 
 
+def mask_secret(value, visible=4):
+    """Mascara um segredo, exibindo apenas os primeiros caracteres"""
+    if len(value) <= visible:
+        return "*" * len(value)
+    return value[:visible] + "*" * (len(value) - visible)
+
+
 def prompt_input(label, default="", sensitive=False):
     """Solicita input do usuario com valor padrao"""
     if default:
@@ -204,13 +211,14 @@ FRONTEND_WS_URL=wss://{domain}
     print(f"  CREDENCIAIS GERADAS (SALVE EM LOCAL SEGURO!)")
     print(f"  ========================================")
     print(f"    Dominio:          {domain}")
-    print(f"    DB Password:      {db_password}")
-    print(f"    Redis Password:   {redis_password}")
-    print(f"    Flower Password:  {flower_password}")
-    print(f"    Grafana Password: {grafana_password}")
-    print(f"    JWT Secret:       {secret[:16]}...")
+    print(f"    DB Password:      {mask_secret(db_password)}")
+    print(f"    Redis Password:   {mask_secret(redis_password)}")
+    print(f"    Flower Password:  {mask_secret(flower_password)}")
+    print(f"    Grafana Password: {mask_secret(grafana_password)}")
+    print(f"    JWT Secret:       {mask_secret(secret)}")
     print(f"    Embedding Mode:   {embedding_mode}")
     print(f"    Moeda:            {currency}")
+    print(f"\n  As senhas completas estao nos arquivos .env gerados.")
     print(f"  ========================================")
     return secret, db_password, redis_password
 
