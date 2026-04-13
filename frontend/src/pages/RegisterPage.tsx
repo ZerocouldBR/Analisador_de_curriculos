@@ -12,6 +12,8 @@ import {
   InputAdornment,
   IconButton,
   useTheme,
+  Divider,
+  Collapse,
 } from '@mui/material';
 import {
   Visibility,
@@ -20,6 +22,10 @@ import {
   Lock,
   Person,
   SmartToy,
+  Business,
+  Phone,
+  ExpandMore,
+  ExpandLess,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -31,6 +37,10 @@ const RegisterPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showCompanyFields, setShowCompanyFields] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+  const [companyCnpj, setCompanyCnpj] = useState('');
+  const [companyPhone, setCompanyPhone] = useState('');
   const { register } = useAuth();
   const navigate = useNavigate();
   const theme = useTheme();
@@ -39,8 +49,8 @@ const RegisterPage: React.FC = () => {
     e.preventDefault();
     setError('');
 
-    if (password.length < 6) {
-      setError('A senha deve ter pelo menos 6 caracteres');
+    if (password.length < 8) {
+      setError('A senha deve ter pelo menos 8 caracteres');
       return;
     }
 
@@ -52,7 +62,15 @@ const RegisterPage: React.FC = () => {
     setLoading(true);
 
     try {
-      await register({ name, email, password });
+      const registerData: any = { name, email, password };
+
+      if (showCompanyFields && companyName.trim()) {
+        registerData.company_name = companyName.trim();
+        if (companyCnpj.trim()) registerData.company_cnpj = companyCnpj.trim();
+        if (companyPhone.trim()) registerData.company_phone = companyPhone.trim();
+      }
+
+      await register(registerData);
       navigate('/dashboard');
     } catch (err: any) {
       const detail = err.response?.data?.detail;
@@ -86,7 +104,7 @@ const RegisterPage: React.FC = () => {
         sx={{
           p: 5,
           width: '100%',
-          maxWidth: 480,
+          maxWidth: 520,
           borderRadius: 3,
         }}
       >
@@ -150,7 +168,7 @@ const RegisterPage: React.FC = () => {
             required
             autoComplete="new-password"
             sx={{ mb: 2.5 }}
-            helperText="Minimo de 6 caracteres"
+            helperText="Minimo 8 caracteres, com maiuscula, minuscula, numero e especial"
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
@@ -193,6 +211,66 @@ const RegisterPage: React.FC = () => {
               ),
             }}
           />
+
+          {/* Secao de empresa */}
+          <Divider sx={{ mb: 2 }} />
+          <Button
+            fullWidth
+            variant="text"
+            size="small"
+            onClick={() => setShowCompanyFields(!showCompanyFields)}
+            endIcon={showCompanyFields ? <ExpandLess /> : <ExpandMore />}
+            startIcon={<Business />}
+            sx={{ mb: 1, justifyContent: 'flex-start', textTransform: 'none' }}
+          >
+            {showCompanyFields ? 'Ocultar dados da empresa' : 'Cadastrar empresa de RH (opcional)'}
+          </Button>
+          <Collapse in={showCompanyFields}>
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+                Cadastre sua empresa para gerenciar candidatos de forma isolada. Voce sera o administrador.
+              </Typography>
+              <TextField
+                fullWidth
+                label="Nome da Empresa"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                sx={{ mb: 2 }}
+                placeholder="Ex: RH Solutions Ltda"
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Business color="action" fontSize="small" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <Box display="flex" gap={2}>
+                <TextField
+                  fullWidth
+                  label="CNPJ"
+                  value={companyCnpj}
+                  onChange={(e) => setCompanyCnpj(e.target.value)}
+                  placeholder="00.000.000/0001-00"
+                />
+                <TextField
+                  fullWidth
+                  label="Telefone"
+                  value={companyPhone}
+                  onChange={(e) => setCompanyPhone(e.target.value)}
+                  placeholder="(00) 00000-0000"
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <Phone color="action" fontSize="small" />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Box>
+            </Box>
+          </Collapse>
+
           <Button
             type="submit"
             fullWidth

@@ -28,6 +28,12 @@ import {
   Refresh,
   CheckCircle,
   Cancel,
+  People,
+  Description,
+  Email,
+  Phone,
+  LocationOn,
+  Language,
 } from '@mui/icons-material';
 import { apiService } from '../services/api';
 import { Company } from '../types';
@@ -41,6 +47,36 @@ const plans = [
   { value: 'enterprise', label: 'Enterprise', color: 'secondary' as const },
 ];
 
+const brStates = [
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO',
+  'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI',
+  'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+];
+
+interface CompanyFormData {
+  name: string;
+  cnpj: string;
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  website: string;
+  plan: string;
+}
+
+const emptyForm: CompanyFormData = {
+  name: '',
+  cnpj: '',
+  email: '',
+  phone: '',
+  address: '',
+  city: '',
+  state: '',
+  website: '',
+  plan: 'free',
+};
+
 const CompaniesPage: React.FC = () => {
   const theme = useTheme();
   const { showSuccess, showError } = useNotification();
@@ -48,13 +84,7 @@ const CompaniesPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
-  const [formData, setFormData] = useState({
-    name: '',
-    cnpj: '',
-    plan: 'free',
-    max_candidates: 100,
-    max_monthly_ai_cost: 50,
-  });
+  const [formData, setFormData] = useState<CompanyFormData>({ ...emptyForm });
 
   useEffect(() => {
     fetchCompanies();
@@ -78,13 +108,17 @@ const CompaniesPage: React.FC = () => {
       setFormData({
         name: company.name,
         cnpj: company.cnpj || '',
+        email: company.email || '',
+        phone: company.phone || '',
+        address: company.address || '',
+        city: company.city || '',
+        state: company.state || '',
+        website: company.website || '',
         plan: company.plan,
-        max_candidates: company.max_candidates || 100,
-        max_monthly_ai_cost: company.max_monthly_ai_cost || 50,
       });
     } else {
       setEditingCompany(null);
-      setFormData({ name: '', cnpj: '', plan: 'free', max_candidates: 100, max_monthly_ai_cost: 50 });
+      setFormData({ ...emptyForm });
     }
     setOpenDialog(true);
   };
@@ -111,15 +145,19 @@ const CompaniesPage: React.FC = () => {
   };
 
   const handleDelete = async (id: number, name: string) => {
-    if (window.confirm(`Tem certeza que deseja excluir "${name}"?`)) {
+    if (window.confirm(`Tem certeza que deseja desativar "${name}"? Os dados serao preservados.`)) {
       try {
         await apiService.deleteCompany(id);
-        showSuccess('Empresa excluida com sucesso');
+        showSuccess('Empresa desativada com sucesso');
         fetchCompanies();
       } catch (error) {
-        showError('Erro ao excluir empresa');
+        showError('Erro ao desativar empresa');
       }
     }
+  };
+
+  const updateField = (field: keyof CompanyFormData, value: string) => {
+    setFormData({ ...formData, [field]: value });
   };
 
   if (loading) return <TableSkeleton />;
@@ -129,10 +167,10 @@ const CompaniesPage: React.FC = () => {
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
           <Typography variant="h4" fontWeight={700}>
-            Empresas
+            Empresas de RH
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Gerencie as empresas e seus planos de uso
+            Gerencie as empresas de RH, seus dados e planos de uso
           </Typography>
         </Box>
         <Box display="flex" gap={1}>
@@ -211,12 +249,59 @@ const CompaniesPage: React.FC = () => {
                       variant="outlined"
                     />
                   </Box>
-                  {company.max_candidates && (
-                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                      <Typography variant="body2" color="text.secondary">Max. Candidatos</Typography>
-                      <Typography variant="body2" fontWeight={600}>{company.max_candidates}</Typography>
+
+                  {/* Contadores */}
+                  {(company.user_count !== undefined || company.candidate_count !== undefined) && (
+                    <>
+                      {company.user_count !== undefined && (
+                        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                          <Box display="flex" alignItems="center" gap={0.5}>
+                            <People sx={{ fontSize: 16, color: 'text.secondary' }} />
+                            <Typography variant="body2" color="text.secondary">Usuarios</Typography>
+                          </Box>
+                          <Typography variant="body2" fontWeight={600}>{company.user_count}</Typography>
+                        </Box>
+                      )}
+                      {company.candidate_count !== undefined && (
+                        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                          <Box display="flex" alignItems="center" gap={0.5}>
+                            <Description sx={{ fontSize: 16, color: 'text.secondary' }} />
+                            <Typography variant="body2" color="text.secondary">Candidatos</Typography>
+                          </Box>
+                          <Typography variant="body2" fontWeight={600}>{company.candidate_count}</Typography>
+                        </Box>
+                      )}
+                    </>
+                  )}
+
+                  {/* Contato */}
+                  {company.email && (
+                    <Box display="flex" alignItems="center" gap={0.5} mb={0.5}>
+                      <Email sx={{ fontSize: 14, color: 'text.disabled' }} />
+                      <Typography variant="caption" color="text.secondary">{company.email}</Typography>
                     </Box>
                   )}
+                  {company.phone && (
+                    <Box display="flex" alignItems="center" gap={0.5} mb={0.5}>
+                      <Phone sx={{ fontSize: 14, color: 'text.disabled' }} />
+                      <Typography variant="caption" color="text.secondary">{company.phone}</Typography>
+                    </Box>
+                  )}
+                  {(company.city || company.state) && (
+                    <Box display="flex" alignItems="center" gap={0.5} mb={0.5}>
+                      <LocationOn sx={{ fontSize: 14, color: 'text.disabled' }} />
+                      <Typography variant="caption" color="text.secondary">
+                        {[company.city, company.state].filter(Boolean).join(' - ')}
+                      </Typography>
+                    </Box>
+                  )}
+                  {company.website && (
+                    <Box display="flex" alignItems="center" gap={0.5} mb={0.5}>
+                      <Language sx={{ fontSize: 14, color: 'text.disabled' }} />
+                      <Typography variant="caption" color="text.secondary">{company.website}</Typography>
+                    </Box>
+                  )}
+
                   <Typography variant="caption" color="text.secondary" display="block" mt={1}>
                     Criada em {new Date(company.created_at).toLocaleDateString('pt-BR')}
                   </Typography>
@@ -233,68 +318,147 @@ const CompaniesPage: React.FC = () => {
           <Typography variant="h6" gutterBottom>
             Nenhuma empresa cadastrada
           </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Cadastre empresas de RH para gerenciar candidatos e curriculos de forma isolada.
+          </Typography>
           <Button variant="contained" startIcon={<Add />} onClick={() => handleOpenDialog()}>
-            Criar primeira empresa
+            Cadastrar primeira empresa
           </Button>
         </Paper>
       )}
 
-      {/* Dialog */}
-      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
+      {/* Dialog de cadastro/edicao */}
+      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="md" fullWidth>
         <DialogTitle fontWeight={600}>
-          {editingCompany ? 'Editar Empresa' : 'Nova Empresa'}
+          {editingCompany ? 'Editar Empresa de RH' : 'Nova Empresa de RH'}
         </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {/* Dados basicos */}
+            <Typography variant="subtitle2" color="primary" fontWeight={600}>
+              Dados da Empresa
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={8}>
+                <TextField
+                  label="Nome da Empresa *"
+                  fullWidth
+                  value={formData.name}
+                  onChange={(e) => updateField('name', e.target.value)}
+                  required
+                  autoFocus
+                  placeholder="Ex: RH Solutions Ltda"
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="CNPJ"
+                  fullWidth
+                  value={formData.cnpj}
+                  onChange={(e) => updateField('cnpj', e.target.value)}
+                  placeholder="00.000.000/0001-00"
+                />
+              </Grid>
+            </Grid>
+
+            {/* Contato */}
+            <Typography variant="subtitle2" color="primary" fontWeight={600} sx={{ mt: 1 }}>
+              Contato
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Email"
+                  fullWidth
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => updateField('email', e.target.value)}
+                  placeholder="contato@empresa.com.br"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Telefone"
+                  fullWidth
+                  value={formData.phone}
+                  onChange={(e) => updateField('phone', e.target.value)}
+                  placeholder="(00) 00000-0000"
+                />
+              </Grid>
+            </Grid>
+
+            {/* Endereco */}
+            <Typography variant="subtitle2" color="primary" fontWeight={600} sx={{ mt: 1 }}>
+              Endereco
+            </Typography>
             <TextField
-              label="Nome da Empresa"
+              label="Endereco"
               fullWidth
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              required
-              autoFocus
+              value={formData.address}
+              onChange={(e) => updateField('address', e.target.value)}
+              placeholder="Rua, numero, complemento"
             />
-            <TextField
-              label="CNPJ"
-              fullWidth
-              value={formData.cnpj}
-              onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
-            />
-            <TextField
-              label="Plano"
-              select
-              fullWidth
-              value={formData.plan}
-              onChange={(e) => setFormData({ ...formData, plan: e.target.value })}
-            >
-              {plans.map((plan) => (
-                <MenuItem key={plan.value} value={plan.value}>
-                  {plan.label}
-                </MenuItem>
-              ))}
-            </TextField>
-            <Box display="flex" gap={2}>
-              <TextField
-                label="Max. Candidatos"
-                type="number"
-                fullWidth
-                value={formData.max_candidates}
-                onChange={(e) => setFormData({ ...formData, max_candidates: parseInt(e.target.value) || 0 })}
-              />
-              <TextField
-                label="Max. Custo IA Mensal (USD)"
-                type="number"
-                fullWidth
-                value={formData.max_monthly_ai_cost}
-                onChange={(e) => setFormData({ ...formData, max_monthly_ai_cost: parseFloat(e.target.value) || 0 })}
-              />
-            </Box>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={8}>
+                <TextField
+                  label="Cidade"
+                  fullWidth
+                  value={formData.city}
+                  onChange={(e) => updateField('city', e.target.value)}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="Estado"
+                  select
+                  fullWidth
+                  value={formData.state}
+                  onChange={(e) => updateField('state', e.target.value)}
+                >
+                  <MenuItem value="">Selecione</MenuItem>
+                  {brStates.map((s) => (
+                    <MenuItem key={s} value={s}>{s}</MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+            </Grid>
+
+            {/* Web e plano */}
+            <Typography variant="subtitle2" color="primary" fontWeight={600} sx={{ mt: 1 }}>
+              Web e Plano
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={8}>
+                <TextField
+                  label="Website"
+                  fullWidth
+                  value={formData.website}
+                  onChange={(e) => updateField('website', e.target.value)}
+                  placeholder="https://www.empresa.com.br"
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="Plano"
+                  select
+                  fullWidth
+                  value={formData.plan}
+                  onChange={(e) => updateField('plan', e.target.value)}
+                >
+                  {plans.map((plan) => (
+                    <MenuItem key={plan.value} value={plan.value}>
+                      {plan.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+            </Grid>
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setOpenDialog(false)}>Cancelar</Button>
           <Button onClick={handleSubmit} variant="contained">
-            Salvar
+            {editingCompany ? 'Salvar Alteracoes' : 'Cadastrar Empresa'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -48,7 +48,8 @@ async def upload_resume(
             db,
             file,
             candidate_id,
-            current_user.id
+            current_user.id,
+            company_id=current_user.company_id,
         )
 
         return DocumentResponse(

@@ -369,6 +369,7 @@ def batch_import_from_folder(
                 candidate = Candidate(
                     full_name="Aguardando processamento",
                     email=None,
+                    company_id=current_user.company_id,
                 )
                 db.add(candidate)
                 db.flush()

@@ -32,33 +32,48 @@ class RefreshTokenRequest(BaseModel):
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
+def _build_user_response(user: User) -> UserResponse:
+    """Constroi UserResponse incluindo dados da empresa"""
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        status=user.status,
+        is_superuser=user.is_superuser,
+        company_id=user.company_id,
+        company_name=user.company.name if user.company else None,
+        roles=[role.name for role in user.roles],
+        created_at=user.created_at,
+        last_login=user.last_login,
+    )
+
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(
     user_data: UserCreate,
     db: Session = Depends(get_db)
 ):
     """
-    Registra um novo usuário
+    Registra um novo usuario (e opcionalmente uma empresa de RH)
 
-    - **email**: Email único do usuário
+    **Campos obrigatorios:**
+    - **email**: Email unico do usuario
     - **name**: Nome completo
-    - **password**: Senha (mínimo 8 caracteres)
+    - **password**: Senha (minimo 8 caracteres, maiuscula, minuscula, numero e especial)
 
-    O usuário criado recebe o role 'viewer' por padrão.
+    **Campos opcionais para empresa:**
+    - **company_name**: Nome da empresa de RH (cria nova empresa e vincula)
+    - **company_cnpj**: CNPJ da empresa
+    - **company_phone**: Telefone da empresa
+    - **company_id**: ID de empresa existente para vincular
+
+    Se `company_name` for informado, o usuario recebe role 'admin' da empresa.
+    Caso contrario, recebe role 'viewer' por padrao.
     """
     try:
         user = AuthService.create_user(db, user_data)
 
-        return UserResponse(
-            id=user.id,
-            email=user.email,
-            name=user.name,
-            status=user.status,
-            is_superuser=user.is_superuser,
-            roles=[role.name for role in user.roles],
-            created_at=user.created_at,
-            last_login=user.last_login
-        )
+        return _build_user_response(user)
 
     except ValueError as e:
         raise HTTPException(
@@ -97,22 +112,11 @@ def login(
 
         tokens = AuthService.create_tokens(user)
 
-        user_response = UserResponse(
-            id=user.id,
-            email=user.email,
-            name=user.name,
-            status=user.status,
-            is_superuser=user.is_superuser,
-            roles=[role.name for role in user.roles],
-            created_at=user.created_at,
-            last_login=user.last_login
-        )
-
         return LoginResponse(
             access_token=tokens["access_token"],
             refresh_token=tokens["refresh_token"],
             token_type=tokens["token_type"],
-            user=user_response
+            user=_build_user_response(user),
         )
 
     except ValueError as e:
@@ -131,16 +135,7 @@ def get_current_user_info(
 
     Requer autenticação via Bearer token.
     """
-    return UserResponse(
-        id=current_user.id,
-        email=current_user.email,
-        name=current_user.name,
-        status=current_user.status,
-        is_superuser=current_user.is_superuser,
-        roles=[role.name for role in current_user.roles],
-        created_at=current_user.created_at,
-        last_login=current_user.last_login
-    )
+    return _build_user_response(current_user)
 
 
 @router.post("/change-password")
@@ -203,22 +198,11 @@ def refresh_token(
 
     tokens = AuthService.create_tokens(user)
 
-    user_response = UserResponse(
-        id=user.id,
-        email=user.email,
-        name=user.name,
-        status=user.status,
-        is_superuser=user.is_superuser,
-        roles=[role.name for role in user.roles],
-        created_at=user.created_at,
-        last_login=user.last_login
-    )
-
     return LoginResponse(
         access_token=tokens["access_token"],
         refresh_token=tokens["refresh_token"],
         token_type=tokens["token_type"],
-        user=user_response
+        user=_build_user_response(user),
     )
 
 

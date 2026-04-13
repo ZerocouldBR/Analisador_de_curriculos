@@ -163,6 +163,58 @@ def get_my_company(
     return resp
 
 
+@router.put("/me", response_model=CompanyResponse)
+def update_my_company(
+    company_update: CompanyUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("settings.update")),
+):
+    """
+    Atualiza dados da empresa do usuario atual
+
+    Permite que administradores da empresa editem os dados
+    sem precisar de acesso superuser.
+
+    **Requer permissao:** settings.update
+    """
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario nao esta associado a nenhuma empresa"
+        )
+
+    company = db.query(Company).filter(Company.id == current_user.company_id).first()
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Empresa nao encontrada"
+        )
+
+    update_data = company_update.model_dump(exclude_unset=True)
+    # Nao permitir que admin mude o plano ou status
+    update_data.pop("plan", None)
+    update_data.pop("is_active", None)
+
+    for field, value in update_data.items():
+        setattr(company, field, value)
+
+    if "name" in update_data:
+        company.slug = _generate_slug(update_data["name"])
+        existing = db.query(Company).filter(
+            Company.slug == company.slug, Company.id != company.id
+        ).first()
+        if existing:
+            company.slug = f"{company.slug}-{uuid.uuid4().hex[:6]}"
+
+    db.commit()
+    db.refresh(company)
+
+    resp = CompanyResponse.model_validate(company)
+    resp.user_count = len(company.users)
+    resp.candidate_count = len(company.candidates)
+    return resp
+
+
 @router.get("/{company_id}", response_model=CompanyResponse)
 def get_company(
     company_id: int,

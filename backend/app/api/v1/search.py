@@ -63,8 +63,13 @@ async def semantic_search(
         )
 
         search_results = []
+        company_id = current_user.company_id if settings.multi_tenant_enabled and not current_user.is_superuser else None
 
         for chunk, similarity in results:
+            # Filtrar por empresa do usuario (multi-tenant)
+            if company_id and chunk.candidate and chunk.candidate.company_id != company_id:
+                continue
+
             search_results.append(SearchResult(
                 candidate_id=chunk.candidate_id,
                 candidate_name=chunk.candidate.full_name,
@@ -115,8 +120,13 @@ async def hybrid_search(
         )
 
         search_results = []
+        company_id = current_user.company_id if settings.multi_tenant_enabled and not current_user.is_superuser else None
 
         for candidate, score in results:
+            # Filtrar por empresa (multi-tenant)
+            if company_id and candidate.company_id != company_id:
+                continue
+
             top_chunk = db.query(Chunk).filter(
                 Chunk.candidate_id == candidate.id
             ).first()
