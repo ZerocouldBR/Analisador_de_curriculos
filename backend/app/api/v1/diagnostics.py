@@ -661,13 +661,11 @@ async def full_system_diagnostics(
         "app_version": settings.app_version,
         "embedding_mode": settings.embedding_mode.value,
         "vector_db_provider": settings.vector_db_provider.value,
-        "openai_api_key": "configurada" if settings.openai_api_key else "NAO CONFIGURADA",
-        "linkedin_api": "habilitada" if settings.linkedin_api_enabled else "desabilitada",
-        "pii_encryption": "habilitada" if settings.enable_pii_encryption else "desabilitada",
-        "multi_tenant": "habilitado" if settings.multi_tenant_enabled else "desabilitado",
+        "openai_configured": bool(settings.openai_api_key),
+        "linkedin_enabled": settings.linkedin_api_enabled,
+        "pii_encryption": settings.enable_pii_encryption,
+        "multi_tenant": settings.multi_tenant_enabled,
         "max_upload_size_mb": settings.max_upload_size_mb,
-        "storage_backend": settings.storage_backend,
-        "cors_origins": settings.cors_origins,
     }
 
     config_warnings = []
@@ -735,8 +733,19 @@ def get_recent_logs(
 
     lines = min(lines, 500)
 
+    # Whitelist de niveis validos (prevenir path traversal)
+    allowed_levels = {"all", "error", "warning", "info"}
+    if level not in allowed_levels:
+        level = "all"
+
     log_file = "error.log" if level == "error" else "app.log"
     log_path = Path("./logs") / log_file
+
+    # Garantir que o caminho resolvido esta dentro de ./logs
+    resolved = log_path.resolve()
+    logs_dir = Path("./logs").resolve()
+    if not str(resolved).startswith(str(logs_dir)):
+        return {"log_file": "", "lines": [], "message": "Caminho invalido"}
 
     if not log_path.exists():
         return {

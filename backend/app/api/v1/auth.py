@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ from app.schemas.auth import (
     RoleUpdate
 )
 from app.services.auth_service import AuthService
-from app.core.security import decode_access_token, create_access_token, create_refresh_token
+from app.core.security import decode_access_token, decode_refresh_token, create_access_token, create_refresh_token
 from app.core.dependencies import (
     get_current_user,
     get_current_superuser,
@@ -51,6 +51,7 @@ def _build_user_response(user: User) -> UserResponse:
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(
     user_data: UserCreate,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """
@@ -70,6 +71,9 @@ def register(
     Se `company_name` for informado, o usuario recebe role 'admin' da empresa.
     Caso contrario, recebe role 'viewer' por padrao.
     """
+    from app.core.rate_limit import check_rate_limit
+    check_rate_limit(request, key_prefix="register", max_requests=5, window_seconds=300)
+
     try:
         user = AuthService.create_user(db, user_data)
 
@@ -84,21 +88,25 @@ def register(
 
 @router.post("/login", response_model=LoginResponse)
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
     """
-    Faz login e retorna tokens de acesso + dados do usuário
+    Faz login e retorna tokens de acesso + dados do usuario
 
     Aceita form data (OAuth2) com campos:
-    - **username**: Email do usuário
+    - **username**: Email do usuario
     - **password**: Senha
 
     Retorna:
-    - **access_token**: Token JWT de acesso (válido por 30 minutos)
-    - **refresh_token**: Token de refresh (válido por 7 dias)
-    - **user**: Dados do usuário autenticado
+    - **access_token**: Token JWT de acesso (valido por 15 minutos)
+    - **refresh_token**: Token de refresh (valido por 7 dias)
+    - **user**: Dados do usuario autenticado
     """
+    from app.core.rate_limit import check_rate_limit
+    check_rate_limit(request, key_prefix="login", max_requests=10, window_seconds=60)
+
     try:
         credentials = UserLogin(email=form_data.username, password=form_data.password)
         user = AuthService.authenticate_user(db, credentials)
@@ -179,7 +187,7 @@ def refresh_token(
 
     Retorna novos tokens e dados do usuario.
     """
-    token_data = decode_access_token(payload.refresh_token)
+    token_data = decode_refresh_token(payload.refresh_token)
 
     if token_data is None:
         raise HTTPException(

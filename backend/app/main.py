@@ -130,10 +130,12 @@ def create_app() -> FastAPI:
     application.add_middleware(RequestLoggingMiddleware)
 
     # CORS middleware for frontend (configurable via CORS_ORIGINS env var)
+    # Seguranca: nao permitir credentials com wildcard origin
+    cors_allow_credentials = "*" not in settings.cors_origins
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        allow_credentials=cors_allow_credentials,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )

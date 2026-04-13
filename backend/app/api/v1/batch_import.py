@@ -126,8 +126,8 @@ class WatchFolderRequest(BaseModel):
 # ============================================
 
 def _resolve_and_validate_path(folder_path: str) -> Path:
-    """Resolve e valida o caminho da pasta"""
-    path = Path(folder_path)
+    """Resolve e valida o caminho da pasta (com protecao contra symlink traversal)"""
+    path = Path(folder_path).resolve()  # Resolve symlinks imediatamente
 
     if not path.exists():
         raise HTTPException(
@@ -148,6 +148,16 @@ def _resolve_and_validate_path(folder_path: str) -> Path:
             detail=f"Sem permissao de leitura na pasta: {folder_path}. "
                    f"Verifique permissoes do usuario do servidor.",
         )
+
+    # Bloquear acesso a diretorios sensiveis do sistema
+    sensitive_dirs = ["/etc", "/var", "/proc", "/sys", "/dev", "/root", "/boot"]
+    resolved_str = str(path)
+    for sd in sensitive_dirs:
+        if resolved_str.startswith(sd):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Acesso negado a diretorio do sistema: {folder_path}",
+            )
 
     return path
 

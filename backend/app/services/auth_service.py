@@ -35,10 +35,10 @@ class AuthService:
         Returns:
             Usuario criado
         """
-        # Verificar se email ja existe
+        # Verificar se email ja existe (mensagem generica para evitar enumeracao)
         existing_user = db.query(User).filter(User.email == user_data.email).first()
         if existing_user:
-            raise ValueError("Email já cadastrado")
+            raise ValueError("Nao foi possivel criar a conta. Verifique os dados e tente novamente.")
 
         company_id = None
 
@@ -149,25 +149,31 @@ class AuthService:
     @staticmethod
     def authenticate_user(db: Session, credentials: UserLogin) -> Optional[User]:
         """
-        Autentica um usuário
+        Autentica um usuario
+
+        Prevencao contra timing attacks: sempre executa verify_password
+        mesmo que usuario nao exista, para evitar enumeration.
 
         Args:
-            db: Sessão do banco de dados
+            db: Sessao do banco de dados
             credentials: Credenciais de login
 
         Returns:
-            Usuário autenticado ou None se credenciais inválidas
+            Usuario autenticado ou None se credenciais invalidas
         """
         user = db.query(User).filter(User.email == credentials.email).first()
 
-        if not user:
-            return None
+        # Dummy hash para manter tempo constante quando usuario nao existe
+        _dummy_hash = "$2b$12$LJ3m4ys3Lz0rNqV956Fx7etXMWxGMuaL2b0HOrdFVMpMYP7QmFi2C"
+        stored_hash = user.password_hash if user else _dummy_hash
 
-        if not verify_password(credentials.password, user.password_hash):
+        password_valid = verify_password(credentials.password, stored_hash)
+
+        if not user or not password_valid:
             return None
 
         if user.status != "active":
-            raise ValueError("Usuário inativo ou suspenso")
+            raise ValueError("Conta inativa ou suspensa")
 
         # Atualizar último login
         user.last_login = datetime.now(timezone.utc)
@@ -246,7 +252,11 @@ class AuthService:
         """
         # Verificar senha antiga
         if not verify_password(old_password, user.password_hash):
-            raise ValueError("Senha antiga incorreta")
+            raise ValueError("Senha atual incorreta")
+
+        # Nao permitir reusar a mesma senha
+        if old_password == new_password:
+            raise ValueError("A nova senha deve ser diferente da senha atual")
 
         # Atualizar senha
         user.password_hash = get_password_hash(new_password)
