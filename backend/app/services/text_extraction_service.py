@@ -18,6 +18,7 @@ Melhorias de OCR:
 - Suporte multi-idioma com deteccao automatica
 - Pipeline de multi-tentativa com diferentes configuracoes PSM
 - Extracao de imagens embutidas em DOCX para OCR
+- Extracao de imagens embutidas em PDFs via fitz/PyMuPDF
 """
 import io
 import re
@@ -32,6 +33,13 @@ try:
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
+
+# PyMuPDF for extracting embedded images from PDFs
+try:
+    import fitz as pymupdf
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    PYMUPDF_AVAILABLE = False
 
 # DOCX
 try:
@@ -229,7 +237,8 @@ class TextExtractionService:
         Para cada pagina:
         1. Tenta extracao direta de texto
         2. Se texto insuficiente, aplica OCR com preprocessamento
-        3. Combina resultados de ambos os metodos
+        3. Extrai imagens embutidas no PDF e faz OCR nelas
+        4. Combina resultados de todos os metodos
         """
         if not PDF_AVAILABLE:
             raise ValueError("pdfplumber nao esta instalado")
@@ -248,10 +257,31 @@ class TextExtractionService:
                 for page_num, page in enumerate(pdf.pages):
                     page_text = ""
 
-                    # Tentar extracao direta de texto
+                    # Tentar extracao direta de texto com multiplas estrategias
                     try:
                         direct_text = page.extract_text() or ""
                         direct_text = direct_text.strip()
+
+                        # Se extract_text falhou, tentar extract_text_simple
+                        if len(direct_text) < TextExtractionService._min_text_chars():
+                            try:
+                                alt_text = page.extract_text_simple() or ""
+                                if len(alt_text.strip()) > len(direct_text):
+                                    direct_text = alt_text.strip()
+                            except Exception:
+                                pass
+
+                        # Tambem tentar extrair palavras individualmente e reconstruir
+                        if len(direct_text) < TextExtractionService._min_text_chars():
+                            try:
+                                words = page.extract_words()
+                                if words:
+                                    word_text = " ".join(w.get("text", "") for w in words)
+                                    if len(word_text.strip()) > len(direct_text):
+                                        direct_text = word_text.strip()
+                            except Exception:
+                                pass
+
                     except Exception as e:
                         direct_text = ""
                         warnings.append(f"Erro texto direto pagina {page_num + 1}: {str(e)}")
@@ -319,8 +349,28 @@ class TextExtractionService:
                         "chars": len(combined)
                     })
 
+            # Extrair imagens embutidas do PDF e fazer OCR nelas
+            embedded_image_texts = []
+            if OCR_AVAILABLE:
+                embedded_image_texts = TextExtractionService._extract_images_from_pdf(
+                    file_path
+                )
+                if embedded_image_texts:
+                    all_text.append("\n[TEXTO EXTRAIDO DE IMAGENS EMBUTIDAS NO PDF]")
+                    all_text.extend(embedded_image_texts)
+
             final_text = "\n\n".join(all_text).strip()
             avg_confidence = total_confidence / max(total_pages, 1)
+
+            # Se nenhum texto foi extraido, tentar OCR completo do PDF como imagem
+            if not final_text.strip() and OCR_AVAILABLE:
+                logger.info(f"Nenhum texto extraido do PDF, tentando OCR completo: {file_path}")
+                final_text, avg_confidence = TextExtractionService._ocr_entire_pdf_as_images(
+                    file_path
+                )
+                if final_text.strip():
+                    pages_with_ocr = total_pages
+                    avg_confidence = avg_confidence / 100.0
 
             # Detectar idioma
             language = TextExtractionService.detect_language(final_text)
@@ -336,12 +386,210 @@ class TextExtractionService:
                 metadata={
                     "file": str(file_path),
                     "page_results": page_results,
+                    "embedded_images_ocr": len(embedded_image_texts),
                     "extraction_method": "hybrid" if pages_with_ocr > 0 else "direct"
                 }
             )
 
         except Exception as e:
             raise ValueError(f"Erro ao extrair texto do PDF: {str(e)}")
+
+    @staticmethod
+    def _extract_images_from_pdf(file_path: Path) -> List[str]:
+        """
+        Extrai imagens embutidas dentro de um PDF e faz OCR nelas.
+        Usa PyMuPDF (fitz) para extrair as imagens, com fallback para pdfplumber.
+        """
+        image_texts = []
+        max_images = TextExtractionService._ocr_max_images()
+
+        if PYMUPDF_AVAILABLE:
+            try:
+                doc = pymupdf.open(str(file_path))
+                image_count = 0
+
+                for page_num in range(len(doc)):
+                    if image_count >= max_images:
+                        break
+
+                    page = doc[page_num]
+                    image_list = page.get_images(full=True)
+
+                    for img_info in image_list:
+                        if image_count >= max_images:
+                            break
+
+                        try:
+                            xref = img_info[0]
+                            base_image = doc.extract_image(xref)
+                            if not base_image:
+                                continue
+
+                            image_bytes = base_image["image"]
+                            image = Image.open(io.BytesIO(image_bytes))
+
+                            # Ignorar imagens muito pequenas (logos, icones)
+                            if image.size[0] < 100 or image.size[1] < 80:
+                                continue
+
+                            # Converter para RGB se necessario
+                            if image.mode not in ('RGB', 'L'):
+                                image = image.convert('RGB')
+
+                            processed = TextExtractionService._preprocess_image(image)
+                            ocr_text = pytesseract.image_to_string(
+                                processed,
+                                lang=TextExtractionService._ocr_languages(),
+                                config='--oem 3 --psm 6'
+                            ).strip()
+
+                            if len(ocr_text) > 15:
+                                image_texts.append(ocr_text)
+                                image_count += 1
+
+                        except Exception as e:
+                            logger.debug(
+                                f"Erro OCR em imagem embutida do PDF pag {page_num + 1}: {e}"
+                            )
+                            continue
+
+                doc.close()
+
+            except Exception as e:
+                logger.debug(f"Erro ao extrair imagens do PDF com PyMuPDF: {e}")
+
+        elif PDF_AVAILABLE:
+            # Fallback: usar pdfplumber para extrair imagens
+            try:
+                with pdfplumber.open(file_path) as pdf:
+                    image_count = 0
+                    for page_num, page in enumerate(pdf.pages):
+                        if image_count >= max_images:
+                            break
+
+                        images = page.images
+                        for img in images:
+                            if image_count >= max_images:
+                                break
+
+                            try:
+                                # Tentar extrair regiao da imagem como crop da pagina
+                                x0 = img.get("x0", 0)
+                                y0 = img.get("top", 0)
+                                x1 = img.get("x1", page.width)
+                                y1 = img.get("bottom", page.height)
+
+                                # Ignorar imagens muito pequenas
+                                if (x1 - x0) < 50 or (y1 - y0) < 40:
+                                    continue
+
+                                cropped = page.crop((x0, y0, x1, y1))
+                                page_img = cropped.to_image(resolution=300).original
+
+                                processed = TextExtractionService._preprocess_image(page_img)
+                                ocr_text = pytesseract.image_to_string(
+                                    processed,
+                                    lang=TextExtractionService._ocr_languages(),
+                                    config='--oem 3 --psm 6'
+                                ).strip()
+
+                                if len(ocr_text) > 15:
+                                    image_texts.append(ocr_text)
+                                    image_count += 1
+
+                            except Exception as e:
+                                logger.debug(
+                                    f"Erro OCR em imagem do PDF pag {page_num + 1}: {e}"
+                                )
+                                continue
+
+            except Exception as e:
+                logger.debug(f"Erro ao extrair imagens do PDF com pdfplumber: {e}")
+
+        return image_texts
+
+    @staticmethod
+    def _ocr_entire_pdf_as_images(file_path: Path) -> Tuple[str, float]:
+        """
+        Ultimo recurso: converte cada pagina do PDF em imagem e faz OCR.
+        Usado quando nenhuma outra estrategia conseguiu extrair texto.
+        """
+        all_text = []
+        total_confidence = 0.0
+
+        try:
+            if PYMUPDF_AVAILABLE:
+                doc = pymupdf.open(str(file_path))
+                for page_num in range(len(doc)):
+                    try:
+                        page = doc[page_num]
+                        # Renderizar pagina como imagem em alta resolucao
+                        mat = pymupdf.Matrix(300 / 72, 300 / 72)  # 300 DPI
+                        pix = page.get_pixmap(matrix=mat)
+                        img_data = pix.tobytes("png")
+                        image = Image.open(io.BytesIO(img_data))
+
+                        processed = TextExtractionService._preprocess_image(image)
+                        ocr_data = pytesseract.image_to_data(
+                            processed,
+                            lang=TextExtractionService._ocr_languages(),
+                            output_type=pytesseract.Output.DICT,
+                            config='--oem 3 --psm 6'
+                        )
+
+                        text = TextExtractionService._reconstruct_text_from_ocr_data(ocr_data)
+                        confidences = [
+                            float(c) for i, c in enumerate(ocr_data['conf'])
+                            if c != -1 and ocr_data['text'][i].strip()
+                        ]
+                        avg_conf = sum(confidences) / len(confidences) if confidences else 0
+
+                        if text.strip():
+                            all_text.append(text.strip())
+                            total_confidence += avg_conf
+
+                    except Exception as e:
+                        logger.debug(f"OCR completo falhou na pagina {page_num + 1}: {e}")
+                        continue
+
+                doc.close()
+
+            elif PDF_AVAILABLE:
+                with pdfplumber.open(file_path) as pdf:
+                    for page_num, page in enumerate(pdf.pages):
+                        try:
+                            page_img = page.to_image(resolution=300).original
+                            processed = TextExtractionService._preprocess_image(page_img)
+                            ocr_data = pytesseract.image_to_data(
+                                processed,
+                                lang=TextExtractionService._ocr_languages(),
+                                output_type=pytesseract.Output.DICT,
+                                config='--oem 3 --psm 6'
+                            )
+
+                            text = TextExtractionService._reconstruct_text_from_ocr_data(ocr_data)
+                            confidences = [
+                                float(c) for i, c in enumerate(ocr_data['conf'])
+                                if c != -1 and ocr_data['text'][i].strip()
+                            ]
+                            avg_conf = sum(confidences) / len(confidences) if confidences else 0
+
+                            if text.strip():
+                                all_text.append(text.strip())
+                                total_confidence += avg_conf
+
+                        except Exception as e:
+                            logger.debug(f"OCR completo falhou na pagina {page_num + 1}: {e}")
+                            continue
+
+        except Exception as e:
+            logger.error(f"Erro no OCR completo do PDF: {e}")
+
+        final_text = "\n\n".join(all_text)
+        page_count = len(all_text) if all_text else 1
+        avg_confidence = total_confidence / page_count if all_text else 0
+
+        return final_text, avg_confidence
 
     @staticmethod
     def _ocr_pdf_page(page, page_num: int) -> Tuple[str, float]:

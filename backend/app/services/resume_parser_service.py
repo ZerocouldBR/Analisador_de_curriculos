@@ -75,17 +75,23 @@ class ResumeParserService:
         if email_match:
             info["email"] = email_match.group()
 
-        # Telefone (formatos brasileiros)
+        # Telefone (formatos brasileiros - mais abrangente)
         phone_patterns = [
-            r'\+55\s*\(?\d{2}\)?\s*\d{4,5}[\s-]?\d{4}',
-            r'\(?\d{2}\)?\s*\d{4,5}[\s-]?\d{4}',
-            r'\d{2}\s*\d{4,5}[\s-]?\d{4}',
+            r'\+55\s*\(?\d{2}\)?\s*\d{4,5}[\s.-]?\d{4}',
+            r'\(?\d{2}\)?\s*9?\s*\d{4}[\s.-]?\d{4}',
+            r'\d{2}\s*9?\s*\d{4}[\s.-]?\d{4}',
+            r'(?:tel|fone|celular|whatsapp|whats|contato)[\s.:]+\+?55?\s*\(?\d{2}\)?\s*9?\s*\d{4,5}[\s.-]?\d{4}',
         ]
 
         for pattern in phone_patterns:
-            phone_match = re.search(pattern, text)
+            phone_match = re.search(pattern, text, re.IGNORECASE)
             if phone_match:
                 info["phone"] = phone_match.group().strip()
+                # Limpar prefixo de label
+                info["phone"] = re.sub(
+                    r'^(?:tel|fone|celular|whatsapp|whats|contato)[\s.:]+',
+                    '', info["phone"], flags=re.IGNORECASE
+                ).strip()
                 break
 
         # LinkedIn
@@ -108,8 +114,9 @@ class ResumeParserService:
 
         # Data de nascimento
         birth_patterns = [
-            r'(?:nascimento|data\s+de\s+nascimento|born|nasc\.?)[\s:]+(\d{2}[/.-]\d{2}[/.-]\d{4})',
+            r'(?:nascimento|data\s+de\s+nascimento|born|nasc\.?|dt\.?\s*nasc\.?)[\s:]+(\d{2}[/.-]\d{2}[/.-]\d{4})',
             r'(\d{2}[/.-]\d{2}[/.-]\d{4})\s*(?:\(?\s*\d+\s*anos\s*\)?)',
+            r'(?:idade|age)[\s:]+(\d{1,2})\s*anos',
         ]
         for pattern in birth_patterns:
             birth_match = re.search(pattern, text, re.IGNORECASE)
@@ -117,36 +124,145 @@ class ResumeParserService:
                 info["birth_date"] = birth_match.group(1).strip()
                 break
 
-        # Nome (primeira linha nao vazia geralmente e o nome)
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
-        if lines:
-            for line in lines[:5]:
-                if len(line) > 5 and len(line) < 60:
-                    if not re.search(r'\d', line) and not re.search(r'[!@#$%^&*()]', line):
-                        # Verificar se nao e um cabecalho de secao
-                        section_headers = [
-                            'experiencia', 'formacao', 'habilidades', 'objetivo',
-                            'resumo', 'certificacao', 'idioma', 'dados pessoais',
-                            'curriculo', 'curriculum'
-                        ]
-                        if not any(h in line.lower() for h in section_headers):
-                            info["name"] = line
-                            break
+        # Nome - estrategia melhorada com multiplas abordagens
+        info["name"] = ResumeParserService._extract_name(text)
 
-        # Localizacao
+        # Localizacao - mais padroes
         location_patterns = [
-            r'([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+),\s*([A-Z]{2})',
-            r'([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+)\s+-\s+([A-Z]{2})',
-            r'(?:cidade|city|local)[\s:]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+)',
+            # "Cidade, UF" ou "Cidade - UF"
+            r'([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+),\s*([A-Z]{2})\b',
+            r'([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+)\s*[-–]\s*([A-Z]{2})\b',
+            # Com label
+            r'(?:cidade|city|local|endereco|endereço|residencia|residência)[\s:]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s,]+(?:[A-Z]{2})?)',
+            # "Reside em Cidade/UF"
+            r'(?:reside|mora|morador)\s+(?:em|na|no)\s+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+(?:[/-]\s*[A-Z]{2})?)',
         ]
 
         for pattern in location_patterns:
             location_match = re.search(pattern, text)
             if location_match:
                 info["location"] = location_match.group().strip()
+                # Limpar label
+                info["location"] = re.sub(
+                    r'^(?:cidade|city|local|endereco|endereço|residencia|residência|reside|mora|morador)\s*(?:em|na|no)?\s*[:]\s*',
+                    '', info["location"], flags=re.IGNORECASE
+                ).strip()
                 break
 
         return info
+
+    @staticmethod
+    def _extract_name(text: str) -> Optional[str]:
+        """
+        Estrategia robusta para extrair nome do candidato.
+        Tenta multiplas abordagens em ordem de prioridade.
+        """
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        if not lines:
+            return None
+
+        # Abordagem 1: Buscar "Nome:" ou "Nome completo:" explicito
+        name_label_patterns = [
+            r'(?:nome\s*(?:completo)?|name|candidato)[\s:]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõçA-ZÁÉÍÓÚÂÊÔÃÕÇ\s]{4,50})',
+        ]
+        for pattern in name_label_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                name = match.group(1).strip()
+                # Limpar ruido apos o nome (telefone, email, etc)
+                name = re.split(r'[,\-|•\d@(]', name)[0].strip()
+                if len(name) > 3 and ' ' in name:
+                    return name
+
+        # Secoes comuns que NAO sao nomes
+        section_headers = [
+            'experiencia', 'formacao', 'habilidades', 'objetivo',
+            'resumo', 'certificacao', 'idioma', 'dados pessoais',
+            'curriculo', 'curriculum', 'vitae', 'sobre', 'perfil',
+            'informacoes', 'informações', 'contato', 'competencia',
+            'competências', 'qualificacao', 'qualificações',
+            'educacao', 'educação', 'profissional', 'historico',
+            'histórico', 'endereco', 'endereço', 'dados', 'pessoais',
+            'page', 'pagina', 'página',
+        ]
+
+        # Abordagem 2: Primeira linha que parece um nome
+        for line in lines[:8]:
+            # Pular linhas com numeros (exceto se for parte de endereco com nome antes)
+            # Pular linhas com caracteres especiais
+            # Pular linhas muito curtas ou longas
+            if len(line) < 3 or len(line) > 60:
+                continue
+
+            # Pular se parece com header de secao
+            line_lower = line.lower().strip()
+            if any(h in line_lower for h in section_headers):
+                continue
+
+            # Pular se tem email, telefone, URL
+            if '@' in line or 'http' in line.lower() or 'www.' in line.lower():
+                continue
+            if re.search(r'\(\d{2}\)', line) or re.search(r'\d{4,}', line):
+                continue
+
+            # Pular se tem caracteres especiais excessivos
+            if re.search(r'[!#$%^&*()=+{}\[\]|\\/<>]', line):
+                continue
+
+            # Verificar se parece um nome (palavras capitalizadas, 2-5 palavras)
+            words = line.split()
+            if len(words) < 1 or len(words) > 6:
+                continue
+
+            # Cada palavra deve comecar com maiuscula ou ser preposicao
+            prepositions = {'de', 'da', 'do', 'dos', 'das', 'e', 'di', 'del', 'van', 'von'}
+            is_name_like = True
+            for word in words:
+                word_clean = word.strip('.,;:-')
+                if not word_clean:
+                    continue
+                if word_clean.lower() in prepositions:
+                    continue
+                # Aceitar palavras que comecam com maiuscula OU sao todas maiusculas
+                if not (word_clean[0].isupper() or word_clean.isupper()):
+                    is_name_like = False
+                    break
+
+            if is_name_like and len(words) >= 2:
+                # Limpar pontuacao
+                name = re.sub(r'[,;:.]$', '', line).strip()
+                return name
+
+        # Abordagem 3: Se nada funcionou, tentar primeira linha nao-vazia que tenha
+        # pelo menos 2 palavras e comece com maiuscula
+        for line in lines[:5]:
+            if len(line) >= 5 and len(line) <= 50 and not any(c.isdigit() for c in line):
+                if line[0].isupper() and ' ' in line:
+                    return line.strip()
+
+        return None
+
+    @staticmethod
+    def _find_section(text: str, keywords: list, start_after: int = 0) -> int:
+        """
+        Busca inicio de uma secao no texto usando palavras-chave.
+        Mais robusto: aceita secoes com ou sem separador de linha,
+        com caracteres especiais de formatacao, e secoes em caixa alta.
+        """
+        for keyword in keywords:
+            # Tentar com quebra de linha antes e depois
+            patterns = [
+                rf'\n\s*{re.escape(keyword)}\s*\n',
+                rf'\n\s*{re.escape(keyword)}\s*[:]\s*\n',
+                rf'\n\s*{re.escape(keyword.upper())}\s*\n',
+                rf'\n\s*[-=_*]+\s*{re.escape(keyword)}\s*[-=_*]*\s*\n',
+                rf'\n\s*{re.escape(keyword)}\s*[-=_*]+\s*\n',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text[start_after:], re.IGNORECASE)
+                if match:
+                    return start_after + match.end()
+        return -1
 
     @staticmethod
     def extract_experiences(text: str) -> list[Dict[str, Any]]:
@@ -156,6 +272,8 @@ class ResumeParserService:
         experience_keywords = [
             'experiência profissional',
             'experiencia profissional',
+            'experiências profissionais',
+            'experiencias profissionais',
             'experiência',
             'experiencia',
             'histórico profissional',
@@ -163,15 +281,10 @@ class ResumeParserService:
             'experience',
             'work experience',
             'employment',
+            'atividades profissionais',
         ]
 
-        section_start = -1
-        for keyword in experience_keywords:
-            pattern = rf'\n\s*{re.escape(keyword)}\s*\n'
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                section_start = match.end()
-                break
+        section_start = ResumeParserService._find_section(text, experience_keywords)
 
         if section_start == -1:
             return experiences
@@ -181,22 +294,34 @@ class ResumeParserService:
             'habilidades', 'skills', 'idiomas', 'languages',
             'certificações', 'certificacoes', 'cursos',
             'dados pessoais', 'habilitações', 'habilitacoes',
+            'qualificações', 'qualificacoes', 'competências', 'competencias',
         ]
 
         section_end = len(text)
-        for keyword in next_section_keywords:
-            pattern = rf'\n\s*{re.escape(keyword)}\s*\n'
-            match = re.search(pattern, text[section_start:], re.IGNORECASE)
-            if match:
-                section_end = section_start + match.start()
-                break
+        next_start = ResumeParserService._find_section(text, next_section_keywords, section_start)
+        if next_start != -1:
+            # _find_section returns end of match; we need start of match
+            for keyword in next_section_keywords:
+                patterns = [
+                    rf'\n\s*{re.escape(keyword)}\s*\n',
+                    rf'\n\s*{re.escape(keyword)}\s*[:]\s*\n',
+                    rf'\n\s*{re.escape(keyword.upper())}\s*\n',
+                ]
+                for pattern in patterns:
+                    match = re.search(pattern, text[section_start:], re.IGNORECASE)
+                    if match:
+                        section_end = section_start + match.start()
+                        break
+                if section_end != len(text):
+                    break
 
         experience_text = text[section_start:section_end]
 
         date_patterns = [
-            r'(\d{2}/\d{4})\s*[-–a]\s*(\d{2}/\d{4}|atual|presente|current)',
-            r'(\d{4})\s*[-–a]\s*(\d{4}|atual|presente|current)',
-            r'(\w+\s+\d{4})\s*[-–a]\s*(\w+\s+\d{4}|atual|presente|current)',
+            r'(\d{2}/\d{4})\s*[-–aà]\s*(\d{2}/\d{4}|atual|presente|current|o\s+momento)',
+            r'(\d{4})\s*[-–aà]\s*(\d{4}|atual|presente|current|o\s+momento)',
+            r'(\w+[./]\s*\d{4})\s*[-–aà]\s*(\w+[./]\s*\d{4}|atual|presente|current|o\s+momento)',
+            r'(?:desde|from)\s+(\d{2}/\d{4}|\d{4})',
         ]
 
         lines = experience_text.split('\n')

@@ -54,6 +54,8 @@ import {
   Visibility,
   VisibilityOff,
   Info,
+  DeleteForever,
+  CleaningServices,
 } from '@mui/icons-material';
 import { apiService } from '../services/api';
 import {
@@ -391,8 +393,63 @@ const SettingsPage: React.FC = () => {
   if (loading) return <TableSkeleton />;
 
   const categories = config?.categories || [];
-  // Last tab index is health
+  // Tab indices
   const healthTabIndex = categories.length;
+  const databaseTabIndex = categories.length + 1;
+
+  // Database management state
+  const [dbStats, setDbStats] = useState<any>(null);
+  const [dbLoading, setDbLoading] = useState(false);
+  const [clearOptions, setClearOptions] = useState({
+    clear_candidates: true,
+    clear_documents: true,
+    clear_conversations: false,
+    clear_audit_logs: false,
+    clear_ai_usage: false,
+    reset_sequences: true,
+  });
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearResult, setClearResult] = useState<any>(null);
+
+  const fetchDbStats = useCallback(async () => {
+    setDbLoading(true);
+    try {
+      const stats = await apiService.getDatabaseStats();
+      setDbStats(stats);
+    } catch (error) {
+      console.error('Failed to fetch DB stats:', error);
+    } finally {
+      setDbLoading(false);
+    }
+  }, []);
+
+  const handleClearDatabase = async () => {
+    setClearing(true);
+    try {
+      const result = await apiService.clearDatabase({
+        confirm: true,
+        ...clearOptions,
+      });
+      setClearResult(result);
+      setClearDialogOpen(false);
+      showSuccess(result.message);
+      await fetchDbStats();
+    } catch (error: any) {
+      showError(error.response?.data?.detail || 'Erro ao limpar banco de dados');
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const handleResetSequences = async () => {
+    try {
+      const result = await apiService.resetDatabaseSequences();
+      showSuccess(`${result.sequences_reset.length} sequences resetadas`);
+    } catch (error: any) {
+      showError(error.response?.data?.detail || 'Erro ao resetar sequences');
+    }
+  };
 
   return (
     <Box className="fade-in">
@@ -468,6 +525,13 @@ const SettingsPage: React.FC = () => {
           icon={<Memory />}
           iconPosition="start"
           sx={{ minHeight: 48 }}
+        />
+        <Tab
+          label="Banco de Dados"
+          icon={<Storage />}
+          iconPosition="start"
+          sx={{ minHeight: 48 }}
+          onClick={() => { if (!dbStats) fetchDbStats(); }}
         />
       </Tabs>
 
@@ -628,6 +692,315 @@ const SettingsPage: React.FC = () => {
           </Grid>
         </Grid>
       )}
+
+      {/* Database Management Tab */}
+      {tab === databaseTabIndex && (
+        <Box>
+          <Grid container spacing={3}>
+            {/* Stats Card */}
+            <Grid item xs={12} md={6}>
+              <Card>
+                <CardContent>
+                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                    <Typography variant="h6" fontWeight={600}>
+                      Estatisticas do Banco
+                    </Typography>
+                    <IconButton onClick={fetchDbStats} disabled={dbLoading}>
+                      <Refresh />
+                    </IconButton>
+                  </Box>
+                  {dbLoading ? (
+                    <Box display="flex" justifyContent="center" py={4}>
+                      <CircularProgress />
+                    </Box>
+                  ) : dbStats ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                      {[
+                        { label: 'Candidatos', value: dbStats.candidates, color: 'primary.main' },
+                        { label: 'Documentos', value: dbStats.documents, color: 'info.main' },
+                        { label: 'Chunks', value: dbStats.chunks, color: 'secondary.main' },
+                        { label: 'Embeddings', value: dbStats.embeddings, color: 'success.main' },
+                        { label: 'Experiencias', value: dbStats.experiences, color: 'warning.main' },
+                        { label: 'Perfis', value: dbStats.profiles, color: 'error.main' },
+                        { label: 'Conversas', value: dbStats.conversations, color: 'info.dark' },
+                        { label: 'Mensagens', value: dbStats.messages, color: 'secondary.dark' },
+                        { label: 'Logs de Auditoria', value: dbStats.audit_logs, color: 'text.secondary' },
+                        { label: 'Logs de IA', value: dbStats.ai_usage_logs, color: 'text.secondary' },
+                      ].map((item) => (
+                        <Box key={item.label} display="flex" justifyContent="space-between" alignItems="center">
+                          <Typography variant="body2">{item.label}</Typography>
+                          <Chip
+                            label={item.value.toLocaleString()}
+                            size="small"
+                            sx={{ fontWeight: 700 }}
+                          />
+                        </Box>
+                      ))}
+                      <Divider sx={{ my: 1 }} />
+                      <Box display="flex" justifyContent="space-between" alignItems="center">
+                        <Typography variant="body2" fontWeight={700}>Total</Typography>
+                        <Chip
+                          label={dbStats.total_records.toLocaleString()}
+                          size="small"
+                          color="primary"
+                          sx={{ fontWeight: 700 }}
+                        />
+                      </Box>
+                    </Box>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      Clique em atualizar para carregar estatisticas
+                    </Typography>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+
+            {/* Actions Card */}
+            <Grid item xs={12} md={6}>
+              <Card sx={{ mb: 3 }}>
+                <CardContent>
+                  <Typography variant="h6" fontWeight={600} gutterBottom>
+                    Gerenciamento de Dados
+                  </Typography>
+
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    As operacoes abaixo sao <strong>IRREVERSIVEIS</strong>.
+                    Certifique-se de ter backup antes de prosseguir.
+                  </Alert>
+
+                  <Box display="flex" flexDirection="column" gap={2}>
+                    <Box>
+                      <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                        Opcoes de Limpeza
+                      </Typography>
+
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={clearOptions.clear_candidates}
+                            onChange={(e) =>
+                              setClearOptions((prev) => ({
+                                ...prev,
+                                clear_candidates: e.target.checked,
+                                clear_documents: e.target.checked || prev.clear_documents,
+                              }))
+                            }
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2">Candidatos e Curriculos</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Apaga candidatos, documentos, chunks, embeddings, experiencias, perfis
+                            </Typography>
+                          </Box>
+                        }
+                        sx={{ ml: 0, width: '100%', mb: 1 }}
+                      />
+
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={clearOptions.clear_conversations}
+                            onChange={(e) =>
+                              setClearOptions((prev) => ({
+                                ...prev,
+                                clear_conversations: e.target.checked,
+                              }))
+                            }
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2">Conversas do Chat</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Apaga todas as conversas e mensagens
+                            </Typography>
+                          </Box>
+                        }
+                        sx={{ ml: 0, width: '100%', mb: 1 }}
+                      />
+
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={clearOptions.clear_audit_logs}
+                            onChange={(e) =>
+                              setClearOptions((prev) => ({
+                                ...prev,
+                                clear_audit_logs: e.target.checked,
+                              }))
+                            }
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2">Logs de Auditoria</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Apaga historico de acoes
+                            </Typography>
+                          </Box>
+                        }
+                        sx={{ ml: 0, width: '100%', mb: 1 }}
+                      />
+
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={clearOptions.clear_ai_usage}
+                            onChange={(e) =>
+                              setClearOptions((prev) => ({
+                                ...prev,
+                                clear_ai_usage: e.target.checked,
+                              }))
+                            }
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2">Logs de Uso de IA</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Apaga registros de consumo de tokens e custos
+                            </Typography>
+                          </Box>
+                        }
+                        sx={{ ml: 0, width: '100%', mb: 1 }}
+                      />
+
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={clearOptions.reset_sequences}
+                            onChange={(e) =>
+                              setClearOptions((prev) => ({
+                                ...prev,
+                                reset_sequences: e.target.checked,
+                              }))
+                            }
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2">Resetar Contadores (IDs)</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Recomecar contagem de IDs do 1 nas tabelas limpas
+                            </Typography>
+                          </Box>
+                        }
+                        sx={{ ml: 0, width: '100%', mb: 2 }}
+                      />
+                    </Box>
+
+                    <Divider />
+
+                    <Box display="flex" gap={2} flexWrap="wrap">
+                      <Button
+                        variant="contained"
+                        color="error"
+                        startIcon={<DeleteForever />}
+                        onClick={() => setClearDialogOpen(true)}
+                        disabled={
+                          !clearOptions.clear_candidates &&
+                          !clearOptions.clear_conversations &&
+                          !clearOptions.clear_audit_logs &&
+                          !clearOptions.clear_ai_usage
+                        }
+                      >
+                        Limpar Dados Selecionados
+                      </Button>
+
+                      <Button
+                        variant="outlined"
+                        startIcon={<CleaningServices />}
+                        onClick={handleResetSequences}
+                      >
+                        Resetar Sequences
+                      </Button>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+
+              {/* Clear Result */}
+              {clearResult && (
+                <Card>
+                  <CardContent>
+                    <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                      Ultimo resultado da limpeza
+                    </Typography>
+                    <Alert severity="success" sx={{ mb: 2 }}>
+                      {clearResult.message}
+                    </Alert>
+                    <Box display="flex" gap={1} flexWrap="wrap">
+                      {Object.entries(clearResult.deleted || {}).map(([key, value]) => (
+                        <Chip
+                          key={key}
+                          label={`${key}: ${value}`}
+                          size="small"
+                          variant="outlined"
+                        />
+                      ))}
+                    </Box>
+                    {clearResult.sequences_reset?.length > 0 && (
+                      <Box mt={1}>
+                        <Typography variant="caption" color="text.secondary">
+                          Sequences resetadas: {clearResult.sequences_reset.join(', ')}
+                        </Typography>
+                      </Box>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </Grid>
+          </Grid>
+        </Box>
+      )}
+
+      {/* Clear Database Confirmation Dialog */}
+      <Dialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)}>
+        <DialogTitle fontWeight={600} color="error.main">
+          Confirmar Limpeza do Banco de Dados
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            Esta operacao e <strong>IRREVERSIVEL</strong>! Todos os dados selecionados serao
+            permanentemente apagados.
+          </Alert>
+          <Typography variant="body2" gutterBottom>
+            Serao apagados:
+          </Typography>
+          <Box sx={{ ml: 2, mb: 2 }}>
+            {clearOptions.clear_candidates && (
+              <Typography variant="body2">- Todos os candidatos, documentos, chunks, embeddings</Typography>
+            )}
+            {clearOptions.clear_conversations && (
+              <Typography variant="body2">- Todas as conversas do chat</Typography>
+            )}
+            {clearOptions.clear_audit_logs && (
+              <Typography variant="body2">- Todos os logs de auditoria</Typography>
+            )}
+            {clearOptions.clear_ai_usage && (
+              <Typography variant="body2">- Todos os logs de uso de IA</Typography>
+            )}
+            {clearOptions.reset_sequences && (
+              <Typography variant="body2">- Contadores de ID serao resetados para 1</Typography>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setClearDialogOpen(false)}>Cancelar</Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleClearDatabase}
+            disabled={clearing}
+            startIcon={clearing ? <CircularProgress size={18} color="inherit" /> : <DeleteForever />}
+          >
+            {clearing ? 'Limpando...' : 'Confirmar Limpeza'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Restart Warning Dialog */}
       <Dialog

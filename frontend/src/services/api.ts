@@ -414,6 +414,79 @@ class ApiService {
     return response.data;
   }
 
+  // ==================== Batch Import ====================
+  async batchImportScan(folderPath: string, recursive: boolean = true, extensions?: string[]): Promise<any> {
+    const response = await this.api.post('/v1/batch-import/scan', {
+      folder_path: folderPath,
+      recursive,
+      extensions,
+    }, { timeout: 120000 });
+    return response.data;
+  }
+
+  async batchImportExecute(
+    folderPath: string,
+    recursive: boolean = true,
+    skipDuplicates: boolean = true,
+    extensions?: string[],
+    candidateId?: number
+  ): Promise<any> {
+    const response = await this.api.post('/v1/batch-import/import', {
+      folder_path: folderPath,
+      recursive,
+      skip_duplicates: skipDuplicates,
+      extensions,
+      candidate_id: candidateId,
+    }, { timeout: 600000 });
+    return response.data;
+  }
+
+  async batchImportValidatePath(folderPath: string): Promise<any> {
+    const response = await this.api.post('/v1/batch-import/validate-path', {
+      folder_path: folderPath,
+    });
+    return response.data;
+  }
+
+  async batchImportHistory(limit: number = 20): Promise<any> {
+    const response = await this.api.get('/v1/batch-import/history', {
+      params: { limit },
+    });
+    return response.data;
+  }
+
+  // ==================== Database Management ====================
+  async getDatabaseStats(): Promise<any> {
+    const response = await this.api.get('/v1/database/stats');
+    return response.data;
+  }
+
+  async clearDatabase(options: {
+    confirm: boolean;
+    clear_candidates?: boolean;
+    clear_documents?: boolean;
+    clear_conversations?: boolean;
+    clear_audit_logs?: boolean;
+    clear_ai_usage?: boolean;
+    reset_sequences?: boolean;
+  }): Promise<any> {
+    const response = await this.api.post('/v1/database/clear', options, { timeout: 120000 });
+    return response.data;
+  }
+
+  async deleteCandidatesBatch(candidateIds: number[]): Promise<any> {
+    const response = await this.api.post('/v1/database/delete-candidates', {
+      candidate_ids: candidateIds,
+      confirm: true,
+    });
+    return response.data;
+  }
+
+  async resetDatabaseSequences(): Promise<any> {
+    const response = await this.api.post('/v1/database/reset-sequences');
+    return response.data;
+  }
+
   // ==================== Health ====================
   async healthCheck(): Promise<HealthCheck> {
     const response = await this.api.get<HealthCheck>('/health');
