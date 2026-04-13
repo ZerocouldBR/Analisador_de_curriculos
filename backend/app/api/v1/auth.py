@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -7,6 +8,7 @@ from app.schemas.auth import (
     UserLogin,
     UserResponse,
     Token,
+    LoginResponse,
     PasswordChange,
     RoleCreate,
     RoleResponse,
@@ -59,22 +61,25 @@ def register(
         )
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=LoginResponse)
 def login(
-    credentials: UserLogin,
+    form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
     """
-    Faz login e retorna tokens de acesso
+    Faz login e retorna tokens de acesso + dados do usuário
 
-    - **email**: Email do usuário
+    Aceita form data (OAuth2) com campos:
+    - **username**: Email do usuário
     - **password**: Senha
 
     Retorna:
     - **access_token**: Token JWT de acesso (válido por 30 minutos)
     - **refresh_token**: Token de refresh (válido por 7 dias)
+    - **user**: Dados do usuário autenticado
     """
     try:
+        credentials = UserLogin(email=form_data.username, password=form_data.password)
         user = AuthService.authenticate_user(db, credentials)
 
         if user is None:
@@ -85,7 +90,24 @@ def login(
             )
 
         tokens = AuthService.create_tokens(user)
-        return Token(**tokens)
+
+        user_response = UserResponse(
+            id=user.id,
+            email=user.email,
+            name=user.name,
+            status=user.status,
+            is_superuser=user.is_superuser,
+            roles=[role.name for role in user.roles],
+            created_at=user.created_at,
+            last_login=user.last_login
+        )
+
+        return LoginResponse(
+            access_token=tokens["access_token"],
+            refresh_token=tokens["refresh_token"],
+            token_type=tokens["token_type"],
+            user=user_response
+        )
 
     except ValueError as e:
         raise HTTPException(

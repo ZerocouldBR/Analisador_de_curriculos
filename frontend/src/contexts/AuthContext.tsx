@@ -54,7 +54,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = useCallback(async (credentials: LoginRequest) => {
     const response = await apiService.login(credentials);
-    setUser(response.user);
+    if (response.user) {
+      setUser(response.user);
+    } else {
+      const currentUser = await apiService.getCurrentUser();
+      setUser(currentUser);
+    }
     websocketService.connect(response.access_token);
   }, []);
 
