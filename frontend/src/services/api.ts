@@ -182,34 +182,34 @@ class ApiService {
   }
 
   // ==================== Search ====================
-  async semanticSearch(query: string, topK: number = 10): Promise<SearchResult[]> {
+  async semanticSearch(query: string, limit: number = 10): Promise<SearchResult[]> {
     const response = await this.api.post<SearchResult[]>('/v1/search/semantic', {
       query,
-      top_k: topK,
-    });
-    return response.data;
-  }
-
-  async hybridSearch(query: string, filters?: SearchFilters, topK: number = 10): Promise<SearchResult[]> {
-    const response = await this.api.post<SearchResult[]>('/v1/search/hybrid', {
-      query,
-      filters,
-      top_k: topK,
-    });
-    return response.data;
-  }
-
-  async jobAnalysisSearch(jobDescription: string, jobTitle?: string, limit: number = 10): Promise<SearchResult[]> {
-    const response = await this.api.post<SearchResult[]>('/v1/search/job-analysis', {
-      job_description: jobDescription,
-      job_title: jobTitle,
       limit,
     });
     return response.data;
   }
 
-  async getKeywords(query: string): Promise<{ keyword: string; score: number }[]> {
-    const response = await this.api.get('/v1/search/keywords', { params: { query } });
+  async hybridSearch(query: string, filters?: SearchFilters, limit: number = 10): Promise<SearchResult[]> {
+    const response = await this.api.post<SearchResult[]>('/v1/search/hybrid', {
+      query,
+      filters,
+      limit,
+    });
+    return response.data;
+  }
+
+  async jobAnalysisSearch(jobDescription: string, jobTitle?: string, limit: number = 10): Promise<SearchResult[]> {
+    const response = await this.api.post<SearchResult[]>('/v1/chat/quick-analyze', {
+      job_description: jobDescription,
+      job_title: jobTitle,
+      limit,
+    }, { timeout: 120000 });
+    return response.data;
+  }
+
+  async getKeywords(text: string): Promise<any> {
+    const response = await this.api.post('/v1/search/keywords/extract', { text });
     return response.data;
   }
 
@@ -405,12 +405,12 @@ class ApiService {
 
   // ==================== VectorDB ====================
   async refreshEmbeddings(): Promise<any> {
-    const response = await this.api.post('/v1/vectordb/embeddings/refresh', {}, { timeout: 300000 });
+    const response = await this.api.post('/v1/vectordb/initialize', {}, { timeout: 300000 });
     return response.data;
   }
 
   async getVectorDBStatus(): Promise<any> {
-    const response = await this.api.get('/v1/vectordb/status');
+    const response = await this.api.get('/v1/vectordb/health');
     return response.data;
   }
 

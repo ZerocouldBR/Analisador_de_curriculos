@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Any
+from pydantic import BaseModel
 
 from app.db.database import get_db
 from app.schemas.candidate import (
@@ -12,7 +13,33 @@ from app.schemas.candidate import (
 from app.services.candidate_service import CandidateService
 from app.core.config import settings
 from app.core.dependencies import get_current_user, require_permission
-from app.db.models import User, Candidate
+from app.db.models import User, Candidate, Experience, CandidateProfile
+
+
+class ExperienceResponse(BaseModel):
+    id: int
+    candidate_id: int
+    company_name: Optional[str] = None
+    role_title: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    description: Optional[str] = None
+    location: Optional[str] = None
+    is_current: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class CandidateProfileResponse(BaseModel):
+    id: int
+    candidate_id: int
+    snapshot_data: dict = {}
+    version: int = 1
+    created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -177,3 +204,80 @@ def delete_document(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Documento {document_id} não encontrado"
         )
+    return
+
+
+# Endpoints para experiencias profissionais
+
+@router.get("/{candidate_id}/experiences", response_model=List[ExperienceResponse])
+def list_candidate_experiences(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("candidates.read"))
+):
+    """
+    Lista experiencias profissionais de um candidato
+
+    **Requer permissao:** candidates.read
+    """
+    candidate = CandidateService.get_candidate(db, candidate_id)
+    if not candidate:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Candidato {candidate_id} nao encontrado"
+        )
+
+    experiences = db.query(Experience).filter(
+        Experience.candidate_id == candidate_id
+    ).order_by(Experience.start_date.desc()).all()
+
+    return [
+        ExperienceResponse(
+            id=exp.id,
+            candidate_id=exp.candidate_id,
+            company_name=exp.company_name,
+            role_title=exp.title,
+            start_date=str(exp.start_date) if exp.start_date else None,
+            end_date=str(exp.end_date) if exp.end_date else None,
+            description=exp.description,
+            location=exp.industry,
+            is_current=exp.end_date is None
+        )
+        for exp in experiences
+    ]
+
+
+# Endpoints para perfis/snapshots de candidatos
+
+@router.get("/{candidate_id}/profiles", response_model=List[CandidateProfileResponse])
+def list_candidate_profiles(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("candidates.read"))
+):
+    """
+    Lista perfis/snapshots de um candidato (versionados)
+
+    **Requer permissao:** candidates.read
+    """
+    candidate = CandidateService.get_candidate(db, candidate_id)
+    if not candidate:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Candidato {candidate_id} nao encontrado"
+        )
+
+    profiles = db.query(CandidateProfile).filter(
+        CandidateProfile.candidate_id == candidate_id
+    ).order_by(CandidateProfile.version.desc()).all()
+
+    return [
+        CandidateProfileResponse(
+            id=prof.id,
+            candidate_id=prof.candidate_id,
+            snapshot_data=prof.profile_json or {},
+            version=prof.version,
+            created_at=str(prof.created_at) if prof.created_at else None
+        )
+        for prof in profiles
+    ]

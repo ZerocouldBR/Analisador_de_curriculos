@@ -8,6 +8,7 @@ export interface User {
   company_id?: number;
   roles?: string[];
   created_at: string;
+  last_login?: string;
 }
 
 export interface LoginRequest {

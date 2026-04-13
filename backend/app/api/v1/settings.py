@@ -184,6 +184,7 @@ def delete_setting(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Configuração '{key}' não encontrada"
         )
+    return
 
 
 # Endpoints específicos para prompts do chat LLM

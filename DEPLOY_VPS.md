@@ -22,6 +22,8 @@ Guia passo a passo para instalar e configurar o sistema completo em uma VPS (Ubu
 14. [Atualizacoes e Manutencao](#14-atualizacoes-e-manutencao)
 15. [Troubleshooting](#15-troubleshooting)
 16. [Deploy Automatico (Script)](#16-deploy-automatico)
+17. [Referencia de API](#17-referencia-de-api)
+18. [Historico de Melhorias e Correcoes](#18-historico-de-melhorias-e-correcoes)
 
 ---
 
@@ -996,3 +998,170 @@ docker compose -f docker-compose.prod.yml up -d frontend
 crontab -e
 # 0 3 * * * /opt/analisador-curriculos/scripts/backup.sh >> /opt/backups/postgres/backup.log 2>&1
 ```
+
+---
+
+## 17. Referencia de API
+
+### 17.1. Autenticacao
+
+| Metodo | Endpoint | Descricao |
+|--------|----------|-----------|
+| POST | `/api/v1/auth/login` | Login (form data: username + password). Retorna tokens + dados do usuario |
+| POST | `/api/v1/auth/register` | Registrar novo usuario (JSON: email, name, password) |
+| POST | `/api/v1/auth/refresh` | Renovar access token usando refresh token |
+| GET | `/api/v1/auth/me` | Dados do usuario autenticado |
+| POST | `/api/v1/auth/change-password` | Alterar senha |
+
+**Login:** O endpoint `/auth/login` aceita `application/x-www-form-urlencoded` (padrao OAuth2) com campos `username` (email) e `password`. Retorna:
+```json
+{
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "token_type": "bearer",
+  "user": {
+    "id": 1,
+    "email": "admin@analisador.com",
+    "name": "Admin",
+    "status": "active",
+    "is_superuser": true,
+    "roles": ["admin"]
+  }
+}
+```
+
+**Refresh Token:** Quando o `access_token` expira (15min), use o `refresh_token` (7 dias) para obter novos tokens:
+```bash
+curl -X POST https://SEU_DOMINIO/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token": "eyJ..."}'
+```
+
+### 17.2. Candidatos
+
+| Metodo | Endpoint | Descricao |
+|--------|----------|-----------|
+| GET | `/api/v1/candidates/` | Listar candidatos (filtros: city, state) |
+| GET | `/api/v1/candidates/{id}` | Detalhes do candidato |
+| POST | `/api/v1/candidates/` | Criar candidato |
+| PUT | `/api/v1/candidates/{id}` | Atualizar candidato |
+| DELETE | `/api/v1/candidates/{id}` | Remover candidato (LGPD) |
+| GET | `/api/v1/candidates/{id}/documents` | Documentos do candidato |
+| GET | `/api/v1/candidates/{id}/experiences` | Experiencias profissionais |
+| GET | `/api/v1/candidates/{id}/profiles` | Snapshots/perfis versionados |
+
+### 17.3. Busca
+
+| Metodo | Endpoint | Descricao |
+|--------|----------|-----------|
+| POST | `/api/v1/search/semantic` | Busca semantica (query + limit) |
+| POST | `/api/v1/search/hybrid` | Busca hibrida (query + filters + limit) |
+| POST | `/api/v1/search/keywords/extract` | Extrair keywords de texto |
+| GET | `/api/v1/search/keywords/candidate/{id}` | Keywords de um candidato |
+| POST | `/api/v1/search/job-match` | Matching candidato x vaga |
+| GET | `/api/v1/search/job-profiles` | Perfis de vagas disponiveis |
+
+**Importante:** Os endpoints de busca usam o campo `limit` (nao `top_k`) para controlar o numero de resultados.
+
+### 17.4. VectorDB
+
+| Metodo | Endpoint | Descricao |
+|--------|----------|-----------|
+| GET | `/api/v1/vectordb/config` | Configuracao do vector DB |
+| GET | `/api/v1/vectordb/health` | Saude do vector store |
+| GET | `/api/v1/vectordb/info` | Informacoes detalhadas |
+| GET | `/api/v1/vectordb/count` | Contagem de vetores |
+| POST | `/api/v1/vectordb/initialize` | Inicializar/reinicializar vector store |
+| GET | `/api/v1/vectordb/providers` | Provedores disponiveis |
+
+### 17.5. Configuracoes
+
+| Metodo | Endpoint | Descricao |
+|--------|----------|-----------|
+| GET | `/api/v1/settings/system/config` | Todas as configuracoes do sistema |
+| PUT | `/api/v1/settings/system/config` | Atualizar configuracoes |
+| POST | `/api/v1/settings/system/config/reset` | Restaurar padroes |
+
+### 17.6. Documentacao Interativa
+
+A API possui documentacao interativa (Swagger UI) acessivel em:
+- **Swagger:** `https://SEU_DOMINIO/api/docs`
+- **ReDoc:** `https://SEU_DOMINIO/api/redoc`
+
+---
+
+## 18. Historico de Melhorias e Correcoes
+
+### v0.3.1 - Correcoes Criticas do Portal
+
+#### Problema: Erro "Algo deu errado" ao fazer login
+**Causa raiz:** Tres problemas encadeados no fluxo de autenticacao:
+
+1. **Incompatibilidade de formato:** O frontend enviava `FormData` (OAuth2) mas o backend esperava JSON puro (`UserLogin` Pydantic model). Isso gerava erro 422.
+2. **Crash na renderizacao:** O erro 422 retorna `detail` como array de objetos. O React tentava renderizar o array diretamente, causando "Objects are not valid as a React child" que era capturado pelo ErrorBoundary.
+3. **Resposta sem dados do usuario:** O backend retornava apenas tokens, mas o frontend esperava um campo `user` na resposta.
+
+**Correcoes aplicadas:**
+- Backend: Endpoint `/auth/login` agora usa `OAuth2PasswordRequestForm` para aceitar form data
+- Backend: Novo schema `LoginResponse` retorna tokens + dados do usuario
+- Frontend: Tratamento seguro de erros da API (converte arrays para string)
+- Frontend: Fallback para `/auth/me` se resposta nao incluir usuario
+
+#### Novos Endpoints Adicionados
+
+| Endpoint | Descricao |
+|----------|-----------|
+| `POST /v1/auth/refresh` | Renovacao de tokens (refresh token) |
+| `GET /v1/candidates/{id}/experiences` | Experiencias profissionais do candidato |
+| `GET /v1/candidates/{id}/profiles` | Perfis/snapshots versionados do candidato |
+
+#### Correcoes de Consistencia Frontend-Backend
+
+| Problema | Correcao |
+|----------|----------|
+| Frontend enviava `top_k`, backend esperava `limit` | Parametro corrigido para `limit` em todas as buscas |
+| Frontend chamava `GET /v1/search/keywords`, backend esperava `POST /v1/search/keywords/extract` | Frontend corrigido para usar POST |
+| Frontend chamava `/v1/vectordb/embeddings/refresh`, nao existia | Corrigido para `/v1/vectordb/initialize` |
+| Frontend chamava `/v1/vectordb/status`, nao existia | Corrigido para `/v1/vectordb/health` |
+| WebSocket usava `payload.get("sub")` em vez de `token_data.user_id` | Corrigido para usar `TokenData` corretamente |
+| WebSocket usava `print()` para logs | Substituido por `logging.getLogger()` |
+| Tipo `User` no frontend sem campo `last_login` | Campo adicionado ao TypeScript |
+| Endpoints DELETE sem `return` explicito (204 No Content) | `return` adicionado para consistencia |
+
+#### Stack Tecnologica na VPS
+
+Componentes instalados e configurados na VPS de producao:
+
+| Componente | Versao | Funcao |
+|------------|--------|--------|
+| Ubuntu Server | 22.04+ LTS | Sistema operacional |
+| Docker Engine | 27.x | Containerizacao |
+| Docker Compose | v2.x (plugin) | Orquestracao de containers |
+| Nginx | 1.18+ | Reverse proxy + SSL termination |
+| Certbot | 2.x | Certificados SSL Let's Encrypt |
+| PostgreSQL | 16 + pgvector | Banco relacional + vetorial |
+| Redis | 7 Alpine | Cache + message broker |
+| Python | 3.11 (container) | Runtime do backend |
+| Node.js | 18 (build) | Build do frontend |
+| Tesseract OCR | 5.x (container) | Processamento de imagens/PDFs |
+| Celery | 5.x (container) | Processamento assincrono |
+| Flower | 2.x (container) | Monitoramento de tasks |
+| Prometheus | latest (container) | Coleta de metricas |
+| Grafana | latest (container) | Dashboards de monitoramento |
+| UFW | - | Firewall |
+| Fail2Ban | - | Protecao anti brute-force |
+
+#### Limites de Recursos (Producao)
+
+| Container | Memoria Max | Porta |
+|-----------|-------------|-------|
+| API (FastAPI) | 2 GB | 127.0.0.1:8000 |
+| Celery Worker | 2 GB | - |
+| PostgreSQL | 1 GB | 127.0.0.1:5432 |
+| Redis | 512 MB | 127.0.0.1:6379 |
+| Frontend (Nginx) | - | 127.0.0.1:3000 |
+| Prometheus | - | 127.0.0.1:9090 |
+| Grafana | - | 127.0.0.1:3001 |
+| Flower | - | 127.0.0.1:5555 |
+
+> **Nota:** Todas as portas estao expostas apenas em 127.0.0.1 (localhost). O acesso externo e feito exclusivamente via Nginx (portas 80/443).

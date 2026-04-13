@@ -1,6 +1,7 @@
 """
 WebSocket endpoints for real-time updates
 """
+import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from typing import Optional
 import json
@@ -8,6 +9,8 @@ import json
 from app.core.websocket_manager import websocket_manager
 from app.core.dependencies import get_current_user_ws
 from app.db.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -35,19 +38,26 @@ async def websocket_endpoint(
         from app.core.security import decode_access_token
         from app.db.database import SessionLocal
 
-        payload = decode_access_token(token)
-        user_id = int(payload.get("sub"))
+        token_data = decode_access_token(token)
+        if token_data is None:
+            await websocket.close(code=1008, reason="Invalid or expired token")
+            return
+
+        user_id = token_data.user_id
 
         db = SessionLocal()
-        user = db.query(User).filter(User.id == user_id).first()
-        db.close()
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+        finally:
+            db.close()
 
         if not user:
-            await websocket.close(code=1008, reason="Invalid token")
+            await websocket.close(code=1008, reason="User not found")
             return
 
     except Exception as e:
-        await websocket.close(code=1008, reason=f"Authentication failed: {str(e)}")
+        logger.error(f"WebSocket authentication failed: {e}")
+        await websocket.close(code=1008, reason="Authentication failed")
         return
 
     # Connect WebSocket
@@ -94,7 +104,7 @@ async def websocket_endpoint(
     except WebSocketDisconnect:
         websocket_manager.disconnect(websocket, user_id)
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error for user {user_id}: {e}")
         websocket_manager.disconnect(websocket, user_id)
 
 
