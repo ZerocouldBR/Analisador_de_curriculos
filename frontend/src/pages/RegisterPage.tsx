@@ -53,6 +53,22 @@ const RegisterPage: React.FC = () => {
       setError('A senha deve ter pelo menos 8 caracteres');
       return;
     }
+    if (!/[A-Z]/.test(password)) {
+      setError('A senha deve conter pelo menos uma letra maiuscula');
+      return;
+    }
+    if (!/[a-z]/.test(password)) {
+      setError('A senha deve conter pelo menos uma letra minuscula');
+      return;
+    }
+    if (!/\d/.test(password)) {
+      setError('A senha deve conter pelo menos um numero');
+      return;
+    }
+    if (!/[!@#$%^&*(),.?":{}|<>_\-+=[\]\\;/~`]/.test(password)) {
+      setError('A senha deve conter pelo menos um caractere especial');
+      return;
+    }
 
     if (password !== confirmPassword) {
       setError('As senhas nao coincidem');

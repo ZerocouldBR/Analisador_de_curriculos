@@ -174,7 +174,7 @@ def search_by_skill(
     from app.db.models import Chunk, Candidate
     from sqlalchemy import func
 
-    results = db.query(
+    query = db.query(
         Candidate.id,
         Candidate.full_name,
         Candidate.email,
@@ -185,7 +185,13 @@ def search_by_skill(
     ).filter(
         Chunk.section == "skills",
         func.lower(Chunk.content).contains(skill.lower())
-    ).limit(limit).all()
+    )
+
+    # Multi-tenant: filtrar por empresa
+    if settings.multi_tenant_enabled and not current_user.is_superuser and current_user.company_id:
+        query = query.filter(Candidate.company_id == current_user.company_id)
+
+    results = query.limit(limit).all()
 
     return [
         {
@@ -262,6 +268,9 @@ async def llm_query(
         filters = request.filters or {}
         if request.candidate_id:
             filters["candidate_id"] = request.candidate_id
+        # Multi-tenant: adicionar filtro de empresa
+        if settings.multi_tenant_enabled and not current_user.is_superuser and current_user.company_id:
+            filters["company_id"] = current_user.company_id
 
         result = await llm_query_service.query(
             db=db,
@@ -306,6 +315,9 @@ async def llm_query_refined(
         filters = request.filters or {}
         if request.candidate_id:
             filters["candidate_id"] = request.candidate_id
+        # Multi-tenant
+        if settings.multi_tenant_enabled and not current_user.is_superuser and current_user.company_id:
+            filters["company_id"] = current_user.company_id
 
         result = await llm_query_service.query_with_refinement(
             db=db,
@@ -354,6 +366,18 @@ async def analyze_candidate_job_fit(
     **Requer permissao:** search.advanced
     """
     try:
+        # Multi-tenant: verificar que candidato pertence a empresa
+        if settings.multi_tenant_enabled and not current_user.is_superuser and current_user.company_id:
+            from app.db.models import Candidate
+            candidate = db.query(Candidate).filter(
+                Candidate.id == request.candidate_id
+            ).first()
+            if candidate and candidate.company_id != current_user.company_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Candidato nao pertence a sua empresa"
+                )
+
         result = await llm_query_service.analyze_candidate_for_job(
             db=db,
             candidate_id=request.candidate_id,
@@ -477,12 +501,16 @@ async def match_candidates_to_job(
                 detail="Informe profile_key ou custom_profile"
             )
 
+        # Multi-tenant: filtrar por empresa
+        company_id = current_user.company_id if settings.multi_tenant_enabled and not current_user.is_superuser else None
+
         # Executar matching
         matches = JobMatchingService.match_candidates(
             db=db,
             job_profile=profile,
             limit=request.limit,
-            min_score=request.min_score
+            min_score=request.min_score,
+            company_id=company_id,
         )
 
         return [
@@ -525,6 +553,16 @@ async def suggest_jobs_for_candidate(
     **Requer:** Autenticacao
     """
     try:
+        # Multi-tenant: verificar que candidato pertence a empresa
+        if settings.multi_tenant_enabled and not current_user.is_superuser and current_user.company_id:
+            from app.db.models import Candidate
+            candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+            if candidate and candidate.company_id != current_user.company_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Candidato nao pertence a sua empresa"
+                )
+
         suggestions = JobMatchingService.suggest_jobs_for_candidate(db, candidate_id)
 
         if not suggestions:
@@ -595,6 +633,16 @@ async def get_candidate_keywords(
     **Requer:** Autenticacao
     """
     try:
+        # Multi-tenant: verificar que candidato pertence a empresa
+        if settings.multi_tenant_enabled and not current_user.is_superuser and current_user.company_id:
+            from app.db.models import Candidate
+            candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+            if candidate and candidate.company_id != current_user.company_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Candidato nao pertence a sua empresa"
+                )
+
         keyword_chunk = db.query(Chunk).filter(
             Chunk.candidate_id == candidate_id,
             Chunk.section == "keyword_index"

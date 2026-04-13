@@ -690,7 +690,8 @@ class JobMatchingService:
         db: Session,
         job_profile: JobProfile,
         limit: int = 20,
-        min_score: float = 30.0
+        min_score: float = 30.0,
+        company_id: Optional[int] = None,
     ) -> List[CandidateMatch]:
         """
         Busca e ranqueia candidatos para uma vaga
@@ -700,14 +701,18 @@ class JobMatchingService:
             job_profile: Perfil da vaga
             limit: Numero maximo de resultados
             min_score: Score minimo para inclusao (0-100)
+            company_id: Filtrar por empresa (multi-tenant)
 
         Returns:
             Lista de CandidateMatch ordenada por score
         """
-        # Buscar todos os candidatos com chunks
-        candidates = db.query(Candidate).join(
+        # Buscar candidatos com chunks (filtrado por empresa se necessario)
+        query = db.query(Candidate).join(
             Chunk, Chunk.candidate_id == Candidate.id
-        ).distinct().all()
+        )
+        if company_id:
+            query = query.filter(Candidate.company_id == company_id)
+        candidates = query.distinct().all()
 
         matches = []
 
