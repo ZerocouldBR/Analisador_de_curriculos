@@ -10,6 +10,7 @@ import uuid
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
@@ -518,6 +519,44 @@ def delete_company_logo(
 
     company.logo_url = None
     db.commit()
+
+
+@router.get("/{company_id}/logo")
+def get_company_logo(
+    company_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Retorna o arquivo do logo da empresa
+
+    **Acesso:** Publico (logos nao sao dados sensiveis)
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Empresa {company_id} nao encontrada"
+        )
+
+    if not company.logo_url or not os.path.exists(company.logo_url):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Logo nao encontrado"
+        )
+
+    ext = company.logo_url.rsplit(".", 1)[-1].lower()
+    media_types = {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "svg": "image/svg+xml",
+        "webp": "image/webp",
+    }
+
+    return FileResponse(
+        company.logo_url,
+        media_type=media_types.get(ext, "application/octet-stream"),
+    )
 
 
 # ============================================

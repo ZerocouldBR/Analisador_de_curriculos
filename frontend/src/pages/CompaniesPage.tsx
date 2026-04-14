@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -19,6 +19,8 @@ import {
   MenuItem,
   useTheme,
   alpha,
+  Avatar,
+  CircularProgress,
 } from '@mui/material';
 import {
   Add,
@@ -34,6 +36,8 @@ import {
   Phone,
   LocationOn,
   Language,
+  CloudUpload,
+  DeleteOutline,
 } from '@mui/icons-material';
 import { apiService } from '../services/api';
 import { Company } from '../types';
@@ -85,6 +89,8 @@ const CompaniesPage: React.FC = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
   const [formData, setFormData] = useState<CompanyFormData>({ ...emptyForm });
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchCompanies();
@@ -160,6 +166,34 @@ const CompaniesPage: React.FC = () => {
     setFormData({ ...formData, [field]: value });
   };
 
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingCompany) return;
+
+    setUploadingLogo(true);
+    try {
+      await apiService.uploadCompanyLogo(editingCompany.id, file);
+      showSuccess('Logo atualizado com sucesso');
+      fetchCompanies();
+    } catch (error: any) {
+      showError(error.response?.data?.detail || 'Erro ao enviar logo');
+    } finally {
+      setUploadingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleLogoDelete = async () => {
+    if (!editingCompany) return;
+    try {
+      await apiService.deleteCompanyLogo(editingCompany.id);
+      showSuccess('Logo removido');
+      fetchCompanies();
+    } catch (error: any) {
+      showError(error.response?.data?.detail || 'Erro ao remover logo');
+    }
+  };
+
   if (loading) return <TableSkeleton />;
 
   return (
@@ -199,15 +233,25 @@ const CompaniesPage: React.FC = () => {
                 <CardContent>
                   <Box display="flex" justifyContent="space-between" alignItems="start">
                     <Box display="flex" alignItems="center" gap={1.5}>
-                      <Box
-                        sx={{
-                          p: 1.5,
-                          borderRadius: 2,
-                          bgcolor: alpha(theme.palette.primary.main, 0.1),
-                        }}
-                      >
-                        <Business color="primary" />
-                      </Box>
+                      {company.logo_url ? (
+                        <Avatar
+                          src={apiService.getCompanyLogoUrl(company.id)}
+                          variant="rounded"
+                          sx={{ width: 44, height: 44 }}
+                        >
+                          <Business />
+                        </Avatar>
+                      ) : (
+                        <Box
+                          sx={{
+                            p: 1.5,
+                            borderRadius: 2,
+                            bgcolor: alpha(theme.palette.primary.main, 0.1),
+                          }}
+                        >
+                          <Business color="primary" />
+                        </Box>
+                      )}
                       <Box>
                         <Typography variant="subtitle1" fontWeight={600}>
                           {company.name}
@@ -334,6 +378,69 @@ const CompaniesPage: React.FC = () => {
         </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {/* Logo */}
+            {editingCompany && (
+              <>
+                <Typography variant="subtitle2" color="primary" fontWeight={600}>
+                  Logo da Empresa
+                </Typography>
+                <Box display="flex" alignItems="center" gap={2}>
+                  {editingCompany.logo_url ? (
+                    <Avatar
+                      src={apiService.getCompanyLogoUrl(editingCompany.id)}
+                      variant="rounded"
+                      sx={{ width: 64, height: 64 }}
+                    >
+                      <Business />
+                    </Avatar>
+                  ) : (
+                    <Avatar
+                      variant="rounded"
+                      sx={{
+                        width: 64,
+                        height: 64,
+                        bgcolor: alpha(theme.palette.primary.main, 0.1),
+                      }}
+                    >
+                      <Business color="primary" />
+                    </Avatar>
+                  )}
+                  <Box>
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept=".png,.jpg,.jpeg,.svg,.webp"
+                      style={{ display: 'none' }}
+                      onChange={handleLogoUpload}
+                    />
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={uploadingLogo ? <CircularProgress size={16} /> : <CloudUpload />}
+                      onClick={() => logoInputRef.current?.click()}
+                      disabled={uploadingLogo}
+                      sx={{ mr: 1 }}
+                    >
+                      {uploadingLogo ? 'Enviando...' : 'Enviar Logo'}
+                    </Button>
+                    {editingCompany.logo_url && (
+                      <Button
+                        size="small"
+                        color="error"
+                        startIcon={<DeleteOutline />}
+                        onClick={handleLogoDelete}
+                      >
+                        Remover
+                      </Button>
+                    )}
+                    <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                      PNG, JPG, SVG ou WEBP (max 500KB)
+                    </Typography>
+                  </Box>
+                </Box>
+              </>
+            )}
+
             {/* Dados basicos */}
             <Typography variant="subtitle2" color="primary" fontWeight={600}>
               Dados da Empresa

@@ -311,6 +311,28 @@ def sync_candidate_from_linkedin(
 
 
 # ================================================================
+# Configuration Status
+# ================================================================
+
+@router.get("/config-status")
+def get_linkedin_config_status(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retorna o status atual da configuracao da API LinkedIn
+
+    Verifica:
+    - Se a integracao esta habilitada
+    - Qual provider esta configurado (proxycurl, official, rapidapi, none)
+    - Se as credenciais estao preenchidas
+    - Se a integracao esta pronta para uso
+
+    **Requer:** Autenticacao
+    """
+    return LinkedInService.get_config_status()
+
+
+# ================================================================
 # LinkedIn Integration Guide
 # ================================================================
 
