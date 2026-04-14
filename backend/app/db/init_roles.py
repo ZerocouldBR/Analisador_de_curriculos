@@ -38,6 +38,33 @@ def create_default_roles(db: Session):
                 "linkedin.enrich": True,
                 "search.advanced": True,
                 "users.manage": True,
+                "companies.manage_own": True,
+                "analytics.view": True,
+                "costs.view": True,
+            }
+        },
+        {
+            "name": "company_admin",
+            "description": "Administrador de empresa - gerencia usuarios, custos e configuracoes da propria empresa",
+            "permissions": {
+                "candidates.create": True,
+                "candidates.read": True,
+                "candidates.update": True,
+                "candidates.delete": True,
+                "documents.create": True,
+                "documents.read": True,
+                "documents.update": True,
+                "documents.delete": True,
+                "settings.read": True,
+                "settings.create": False,
+                "settings.update": True,
+                "settings.delete": False,
+                "linkedin.enrich": True,
+                "search.advanced": True,
+                "users.manage": True,
+                "companies.manage_own": True,
+                "analytics.view": True,
+                "costs.view": True,
             }
         },
         {

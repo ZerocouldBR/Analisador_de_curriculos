@@ -20,6 +20,7 @@ from sqlalchemy import text
 from app.db.models import Chunk, Candidate, Embedding
 from app.core.config import settings
 from app.services.keyword_extraction_service import KeywordExtractionService
+from app.services.prompt_service import PromptService
 
 
 class QueryStatus(Enum):
@@ -65,114 +66,8 @@ class LLMQueryService:
     - Pesos de scoring
     """
 
-    # Sistema de prompts especializados
-    SYSTEM_PROMPTS = {
-        "general": """Voce e um assistente especializado em analise de curriculos para RH.
-
-Suas responsabilidades:
-1. Analisar curriculos e responder perguntas sobre candidatos
-2. Identificar habilidades, experiencias e qualificacoes relevantes
-3. Comparar candidatos quando solicitado
-4. Fornecer respostas objetivas e baseadas nos dados disponiveis
-
-Diretrizes:
-- Baseie suas respostas APENAS no contexto fornecido
-- Se a informacao nao estiver disponivel, informe claramente
-- Use os indices de palavras-chave para localizar informacoes rapidamente
-- Estruture respostas longas com topicos ou listas
-- Cite a fonte (nome do candidato, secao) quando relevante""",
-
-        "production": """Voce e um assistente especializado em recrutamento para PRODUCAO INDUSTRIAL.
-
-Voce ajuda empresas a encontrar candidatos para vagas de producao, manufatura e chao de fabrica.
-
-AREAS DE EXPERTISE:
-- Operadores de producao (linhas de montagem, maquinas, CNC)
-- Lideres e supervisores de producao
-- PCP (Planejamento e Controle de Producao)
-- Manutencao industrial (mecanica, eletrica, preventiva, corretiva)
-- Seguranca do trabalho (NRs, CIPA, EPI)
-- Qualidade industrial (ISO, CEP, FMEA, 5S, Lean)
-- Sistemas ERP (SAP, TOTVS/Protheus)
-
-CRITERIOS IMPORTANTES PARA AVALIAR CANDIDATOS DE PRODUCAO:
-1. Experiencia pratica em chao de fabrica
-2. NRs obrigatorias para a funcao (NR-12, NR-10, NR-11, NR-33, NR-35)
-3. Certificacoes de seguranca (CIPA, Brigadista, Primeiros Socorros)
-4. Habilitacoes (CNH, MOPP, Empilhadeira)
-5. Conhecimento em Lean Manufacturing (5S, Kaizen, TPM)
-6. Experiencia com equipamentos e maquinas especificas
-7. Disponibilidade de turnos (1o, 2o, 3o turno, escalas)
-8. Sistemas ERP utilizados (SAP PP/MM, TOTVS)
-
-Diretrizes:
-- Baseie suas respostas APENAS no contexto fornecido
-- Destaque NRs e certificacoes de seguranca relevantes
-- Mencione experiencia com maquinas e equipamentos
-- Indique disponibilidade de turno quando relevante
-- Classifique candidatos por aderencia ao perfil industrial
-- Use linguagem tecnica de producao quando apropriado""",
-
-        "logistics": """Voce e um assistente especializado em recrutamento para LOGISTICA e SUPPLY CHAIN.
-
-Voce ajuda empresas a encontrar candidatos para vagas de logistica, armazem e cadeia de suprimentos.
-
-AREAS DE EXPERTISE:
-- Operacoes de armazem (recebimento, expedicao, picking, packing)
-- Controle de estoque e inventario
-- Operacao de empilhadeira e equipamentos de movimentacao
-- Supply chain e gestao de suprimentos
-- Transporte e distribuicao (roteirizacao, frotas)
-- WMS e sistemas logisticos
-- Comercio exterior (importacao, exportacao)
-
-CRITERIOS IMPORTANTES PARA AVALIAR CANDIDATOS DE LOGISTICA:
-1. Experiencia em operacoes logisticas (armazem, CD, almoxarifado)
-2. Habilitacao para empilhadeira e NR-11
-3. CNH (categoria relevante para a funcao)
-4. Conhecimento em WMS e sistemas de gestao de estoque
-5. Experiencia com ERP (SAP WM/MM, TOTVS)
-6. Metodologias (FIFO, FEFO, Just-in-Time, Kanban)
-7. Gestao de KPIs logisticos (OTIF, acuracidade, lead time)
-8. Disponibilidade para turnos e escalas
-
-Diretrizes:
-- Baseie suas respostas APENAS no contexto fornecido
-- Destaque habilitacoes e NRs de logistica
-- Mencione experiencia com sistemas WMS/ERP
-- Indique CNH e certificacoes de empilhadeira
-- Avalie conhecimento de metodologias logisticas
-- Use linguagem tecnica de logistica quando apropriado""",
-
-        "quality": """Voce e um assistente especializado em recrutamento para QUALIDADE INDUSTRIAL.
-
-Voce ajuda empresas a encontrar candidatos para vagas de qualidade, metrologia e melhoria continua.
-
-AREAS DE EXPERTISE:
-- Controle de qualidade e inspecao
-- Metrologia e instrumentos de medicao
-- Normas ISO (9001, 14001, 45001, IATF 16949)
-- Ferramentas da qualidade (FMEA, APQP, PPAP, 8D, MASP)
-- CEP e controle estatistico de processo
-- Lean Six Sigma (Green Belt, Black Belt)
-- Auditoria interna e externa
-
-CRITERIOS IMPORTANTES:
-1. Experiencia com sistemas de gestao da qualidade
-2. Conhecimento de normas ISO e IATF
-3. Dominio de ferramentas da qualidade
-4. Experiencia com metrologia e instrumentos
-5. Certificacoes (auditor, Green Belt, Black Belt)
-6. CEP e analise estatistica
-7. Experiencia no setor industrial relevante
-
-Diretrizes:
-- Baseie suas respostas APENAS no contexto fornecido
-- Destaque certificacoes ISO e ferramentas da qualidade
-- Mencione experiencia com metrologia
-- Avalie certificacoes Lean/Six Sigma
-- Use linguagem tecnica de qualidade quando apropriado"""
-    }
+    # Prompts agora sao carregados dinamicamente via PromptService
+    # Os defaults estao em config.py e podem ser editados via DB/API
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.openai_api_key
@@ -182,36 +77,26 @@ Diretrizes:
         if self.api_key:
             openai.api_key = self.api_key
 
-    def _detect_query_domain(self, question: str) -> str:
-        """Detecta o dominio da pergunta para selecionar prompt adequado"""
+    def _detect_query_domain(self, question: str, db: Session = None) -> str:
+        """Detecta o dominio da pergunta para selecionar prompt adequado.
+
+        Keywords de dominio sao carregadas do DB/config via PromptService.
+        """
         question_lower = question.lower()
 
-        production_terms = [
-            "producao", "produção", "operador", "fabrica", "fábrica",
-            "montagem", "maquina", "máquina", "cnc", "torno", "solda",
-            "manutencao", "manutenção", "industrial", "chao de fabrica",
-            "lider de producao", "supervisor", "pcp", "planejamento",
-            "turno", "lean", "kaizen", "5s", "tpm"
-        ]
+        # Carregar keywords dinamicamente (DB override > config.py defaults)
+        if db:
+            keywords = PromptService.get_domain_keywords(db)
+        else:
+            keywords = {
+                "production": settings.domain_keywords_production,
+                "logistics": settings.domain_keywords_logistics,
+                "quality": settings.domain_keywords_quality,
+            }
 
-        logistics_terms = [
-            "logistica", "logística", "armazem", "armazém", "almoxarifado",
-            "estoque", "empilhadeira", "expedicao", "expedição", "supply chain",
-            "transporte", "distribuicao", "distribuição", "frete", "wms",
-            "picking", "packing", "cross docking", "conferente", "separador",
-            "inventario", "inventário"
-        ]
-
-        quality_terms = [
-            "qualidade", "inspetor", "inspecao", "inspeção", "metrologia",
-            "iso", "auditoria", "cep", "fmea", "six sigma", "seis sigma",
-            "green belt", "black belt", "nao conformidade", "calibracao",
-            "calibração"
-        ]
-
-        prod_score = sum(1 for t in production_terms if t in question_lower)
-        log_score = sum(1 for t in logistics_terms if t in question_lower)
-        qual_score = sum(1 for t in quality_terms if t in question_lower)
+        prod_score = sum(1 for t in keywords.get("production", []) if t in question_lower)
+        log_score = sum(1 for t in keywords.get("logistics", []) if t in question_lower)
+        qual_score = sum(1 for t in keywords.get("quality", []) if t in question_lower)
 
         max_score = max(prod_score, log_score, qual_score)
 
@@ -257,8 +142,8 @@ Diretrizes:
                 confidence_score=0.0
             )
 
-        # Detectar dominio da pergunta
-        query_domain = domain or self._detect_query_domain(question)
+        # Detectar dominio da pergunta (usa keywords do DB/config)
+        query_domain = domain or self._detect_query_domain(question, db)
 
         # Buscar chunks relevantes
         all_chunks = await self._search_relevant_chunks(db, question, filters)
@@ -295,7 +180,7 @@ Diretrizes:
                 context = self._build_context(selected_chunks, char_limit)
 
                 prompt = self._build_prompt(
-                    question, context, retries, accumulated_answer, query_domain
+                    question, context, retries, accumulated_answer, query_domain, db
                 )
 
                 response = await self._call_llm(prompt, retries)
@@ -561,10 +446,17 @@ Diretrizes:
         context: str,
         retry_number: int,
         accumulated_answer: str,
-        domain: str = "general"
+        domain: str = "general",
+        db: Session = None
     ) -> List[Dict[str, str]]:
-        """Constroi o prompt para o LLM com dominio especializado"""
-        system_prompt = self.SYSTEM_PROMPTS.get(domain, self.SYSTEM_PROMPTS["general"])
+        """Constroi o prompt para o LLM com dominio especializado.
+
+        Prompts sao carregados dinamicamente via PromptService (DB override > config.py).
+        """
+        if db:
+            system_prompt = PromptService.get_llm_prompt(db, domain)
+        else:
+            system_prompt = getattr(settings, f"prompt_llm_{domain}", settings.prompt_llm_general)
 
         user_prompt = f"""CONTEXTO DOS CURRICULOS:
 {context}

@@ -16,13 +16,15 @@ from sqlalchemy import text, func
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_permission
+from app.core.config import settings as app_settings
 from app.db.database import get_db
 from app.db.models import (
     User, Candidate, Document, Chunk, Embedding, Experience,
     CandidateProfile, AuditLog, Consent, ExternalEnrichment,
-    EncryptedPII, ChatConversation, ChatMessage,
+    EncryptedPII, ChatConversation, ChatMessage, Company,
 )
 from app.services.storage_service import storage_service
+from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
@@ -112,20 +114,48 @@ def get_database_stats(
     """
     Retorna estatisticas do banco de dados
 
+    Se o usuario e company_admin (nao superuser), filtra por empresa.
+    Superusers veem estatisticas globais.
+
     **Requer permissao:** settings.read
     """
-    stats = DatabaseStatsResponse(
-        total_candidates=db.query(func.count(Candidate.id)).scalar() or 0,
-        total_documents=db.query(func.count(Document.id)).scalar() or 0,
-        total_chunks=db.query(func.count(Chunk.id)).scalar() or 0,
-        total_embeddings=db.query(func.count(Embedding.id)).scalar() or 0,
-        total_experiences=db.query(func.count(Experience.id)).scalar() or 0,
-        total_profiles=db.query(func.count(CandidateProfile.id)).scalar() or 0,
-        total_users=db.query(func.count(User.id)).scalar() or 0,
-        total_audit_logs=db.query(func.count(AuditLog.id)).scalar() or 0,
-        total_conversations=db.query(func.count(ChatConversation.id)).scalar() or 0,
-        total_messages=db.query(func.count(ChatMessage.id)).scalar() or 0,
-    )
+    # company_admin ve apenas dados da propria empresa
+    company_filter = None
+    if not current_user.is_superuser and current_user.company_id and app_settings.multi_tenant_enabled:
+        company_filter = current_user.company_id
+
+    if company_filter:
+        stats = DatabaseStatsResponse(
+            total_candidates=db.query(func.count(Candidate.id)).filter(Candidate.company_id == company_filter).scalar() or 0,
+            total_documents=db.query(func.count(Document.id)).join(Candidate).filter(Candidate.company_id == company_filter).scalar() or 0,
+            total_chunks=db.query(func.count(Chunk.id)).join(Candidate).filter(Candidate.company_id == company_filter).scalar() or 0,
+            total_embeddings=db.query(func.count(Embedding.id)).join(Chunk).join(Candidate).filter(Candidate.company_id == company_filter).scalar() or 0,
+            total_experiences=db.query(func.count(Experience.id)).join(Candidate).filter(Candidate.company_id == company_filter).scalar() or 0,
+            total_profiles=db.query(func.count(CandidateProfile.id)).join(Candidate).filter(Candidate.company_id == company_filter).scalar() or 0,
+            total_users=db.query(func.count(User.id)).filter(User.company_id == company_filter).scalar() or 0,
+            total_audit_logs=db.query(func.count(AuditLog.id)).filter(AuditLog.user_id.in_(
+                db.query(User.id).filter(User.company_id == company_filter)
+            )).scalar() or 0,
+            total_conversations=db.query(func.count(ChatConversation.id)).filter(ChatConversation.user_id.in_(
+                db.query(User.id).filter(User.company_id == company_filter)
+            )).scalar() or 0,
+            total_messages=db.query(func.count(ChatMessage.id)).join(ChatConversation).filter(ChatConversation.user_id.in_(
+                db.query(User.id).filter(User.company_id == company_filter)
+            )).scalar() or 0,
+        )
+    else:
+        stats = DatabaseStatsResponse(
+            total_candidates=db.query(func.count(Candidate.id)).scalar() or 0,
+            total_documents=db.query(func.count(Document.id)).scalar() or 0,
+            total_chunks=db.query(func.count(Chunk.id)).scalar() or 0,
+            total_embeddings=db.query(func.count(Embedding.id)).scalar() or 0,
+            total_experiences=db.query(func.count(Experience.id)).scalar() or 0,
+            total_profiles=db.query(func.count(CandidateProfile.id)).scalar() or 0,
+            total_users=db.query(func.count(User.id)).scalar() or 0,
+            total_audit_logs=db.query(func.count(AuditLog.id)).scalar() or 0,
+            total_conversations=db.query(func.count(ChatConversation.id)).scalar() or 0,
+            total_messages=db.query(func.count(ChatMessage.id)).scalar() or 0,
+        )
 
     # Calcular tamanho do storage
     try:
@@ -340,6 +370,12 @@ def delete_candidates_batch(
             if not candidate:
                 errors.append(f"Candidato {cid} nao encontrado")
                 continue
+
+            # company_admin so pode deletar candidatos da propria empresa
+            if not current_user.is_superuser and current_user.company_id and app_settings.multi_tenant_enabled:
+                if candidate.company_id != current_user.company_id:
+                    errors.append(f"Candidato {cid} nao pertence a sua empresa")
+                    continue
 
             # Deletar arquivos fisicos dos documentos
             for doc in candidate.documents:

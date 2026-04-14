@@ -133,6 +133,56 @@ def require_role(role_name: str):
     return role_checker
 
 
+def require_company_admin():
+    """
+    Dependency factory que verifica se o usuario e company_admin (ou admin/superuser)
+    e pertence a uma empresa.
+
+    Retorna o usuario se autorizado.
+    """
+    async def checker(
+        current_user: User = Depends(get_current_user)
+    ) -> User:
+        if current_user.is_superuser:
+            return current_user
+        if not AuthService.has_role(current_user, "company_admin") and not AuthService.has_role(current_user, "admin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado: role 'company_admin' ou superior necessario"
+            )
+        if not current_user.company_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Usuario nao esta associado a nenhuma empresa"
+            )
+        return current_user
+
+    return checker
+
+
+def require_company_admin_same_company(company_id_param: str = "company_id"):
+    """
+    Dependency factory que verifica se o usuario e company_admin
+    e pertence a mesma empresa indicada pelo parametro de rota.
+
+    Superusers podem acessar qualquer empresa.
+    """
+    async def checker(
+        current_user: User = Depends(get_current_user),
+        **kwargs
+    ) -> User:
+        if current_user.is_superuser:
+            return current_user
+        if not AuthService.has_role(current_user, "company_admin") and not AuthService.has_role(current_user, "admin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado: role 'company_admin' ou superior necessario"
+            )
+        return current_user
+
+    return checker
+
+
 def get_company_id(current_user: User = Depends(get_current_user)) -> Optional[int]:
     """
     Dependency que retorna o company_id do usuario atual.

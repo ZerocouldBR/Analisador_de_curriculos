@@ -23,6 +23,7 @@ from app.db.models import (
 from app.core.config import settings
 from app.services.embedding_service import embedding_service
 from app.services.keyword_extraction_service import KeywordExtractionService
+from app.services.prompt_service import PromptService
 
 logger = logging.getLogger(__name__)
 
@@ -40,56 +41,8 @@ class ChatResponse:
     confidence: float = 0.0
 
 
-SYSTEM_PROMPT_CHAT = """Voce e um assistente de RH especializado em analise de curriculos e recrutamento.
-
-Seu papel e ajudar recrutadores a:
-1. Encontrar os melhores candidatos para vagas abertas
-2. Analisar curriculos em detalhe
-3. Comparar candidatos entre si
-4. Identificar gaps e pontos fortes
-5. Sugerir perguntas para entrevistas
-
-REGRAS IMPORTANTES:
-- Base suas respostas APENAS nos dados de curriculos fornecidos no contexto
-- Nunca invente informacoes sobre candidatos
-- Quando nao tiver dados suficientes, informe claramente
-- Sempre cite o nome do candidato ao referenciar informacoes
-- Use linguagem profissional e objetiva
-- Estruture respostas longas com topicos ou tabelas
-- Ao comparar candidatos, use criterios objetivos
-- Considere tanto hard skills quanto soft skills
-- Avalie certificacoes e habilitacoes relevantes para a vaga
-
-FORMATO DE RESPOSTA:
-- Para rankings: use tabela com nome, score, pontos fortes e gaps
-- Para analises: use topicos claros com icones ou bullets
-- Para comparacoes: use formato lado a lado
-- Sempre termine com sugestoes de proximos passos quando relevante"""
-
-SYSTEM_PROMPT_JOB_ANALYSIS = """Voce e um especialista em matching de candidatos com vagas.
-
-Voce recebera a descricao de uma vaga e dados de curriculos. Sua tarefa e:
-
-1. ANALISAR a vaga e identificar requisitos obrigatorios e desejaveis
-2. AVALIAR cada candidato contra os requisitos
-3. RANQUEAR candidatos por aderencia (0-100%)
-4. DETALHAR pontos fortes e gaps de cada candidato
-5. RECOMENDAR os melhores candidatos com justificativa
-
-Para cada candidato, avalie:
-- Experiencia relevante (anos, nivel, setor)
-- Hard skills tecnicas
-- Certificacoes e habilitacoes
-- Formacao academica
-- Disponibilidade (turno, viagem, mudanca)
-- Soft skills identificaveis
-- Fit cultural e senioridade
-
-REGRAS:
-- Base suas avaliacoes APENAS nos dados fornecidos
-- Seja objetivo e justo na avaliacao
-- Destaque riscos e pontos de atencao
-- Sugira perguntas para entrevista focadas nos gaps identificados"""
+# Prompts agora sao carregados dinamicamente via PromptService
+# Os defaults estao em config.py e podem ser editados via DB/API
 
 
 class ChatService:
@@ -249,8 +202,8 @@ class ChatService:
             # Obter historico da conversa
             history = self._get_conversation_history(db, conversation_id)
 
-            # Selecionar system prompt
-            system_prompt = self._select_system_prompt(conversation)
+            # Selecionar system prompt (carregado do DB/config via PromptService)
+            system_prompt = self._select_system_prompt(conversation, db)
 
             # Adicionar contexto da vaga se existir
             job_context = ""
@@ -516,11 +469,19 @@ class ChatService:
         # Reverter para ordem cronologica
         return list(reversed(messages))
 
-    def _select_system_prompt(self, conversation: ChatConversation) -> str:
-        """Seleciona prompt baseado no tipo de conversa"""
-        if conversation.job_description:
-            return SYSTEM_PROMPT_JOB_ANALYSIS
-        return SYSTEM_PROMPT_CHAT
+    def _select_system_prompt(self, conversation: ChatConversation, db: Session = None) -> str:
+        """Seleciona prompt baseado no tipo de conversa.
+
+        Prompts sao carregados dinamicamente via PromptService (DB override > config.py).
+        """
+        if db:
+            if conversation.job_description:
+                return PromptService.get_chat_prompt(db, "job_analysis")
+            return PromptService.get_chat_prompt(db, "default")
+        else:
+            if conversation.job_description:
+                return settings.prompt_chat_job_analysis
+            return settings.prompt_chat_default
 
     def _extract_candidates_from_chunks(
         self, chunks: List[Tuple[Chunk, float]]
