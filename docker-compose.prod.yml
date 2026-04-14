@@ -79,7 +79,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
-    command: celery -A app.core.celery_app worker --loglevel=info --queues=documents,search --concurrency=4
+    command: celery -A app.core.celery_app worker --loglevel=info --queues=documents,search,sourcing --concurrency=4
     env_file:
       - ./backend/.env
     environment:
@@ -104,6 +104,28 @@ services:
       timeout: 15s
       retries: 3
       start_period: 30s
+
+  # Celery Beat - Task Scheduler
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    command: celery -A app.core.celery_app beat --loglevel=info
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://analisador:${DB_PASSWORD:-ALTERE_ESTA_SENHA}@db:5432/analisador_curriculos
+      REDIS_URL: redis://:${REDIS_PASSWORD:-ALTERE_ESTA_SENHA}@redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   # Flower - Celery Monitoring
   flower:

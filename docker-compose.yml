@@ -56,7 +56,7 @@ services:
   celery-worker:
     build:
       context: ./backend
-    command: celery -A app.core.celery_app worker --loglevel=info --queues=documents,search --concurrency=4
+    command: celery -A app.core.celery_app worker --loglevel=info --queues=documents,search,sourcing --concurrency=4
     env_file:
       - ./backend/.env
     environment:
@@ -71,6 +71,23 @@ services:
     volumes:
       - ./backend/uploads:/app/uploads
       - ./backend/app:/app/app
+    restart: unless-stopped
+
+  # Celery Beat - Task Scheduler
+  celery-beat:
+    build:
+      context: ./backend
+    command: celery -A app.core.celery_app beat --loglevel=info
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://analisador:analisador@db:5432/analisador_curriculos
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   # Flower - Celery Monitoring

@@ -494,6 +494,20 @@ class ApiService {
     const response = await this.api.get<HealthCheck>('/health');
     return response.data;
   }
+
+  // ==================== Sourcing ====================
+  getSourcingProviders() { return this.api.get('/v1/sourcing/providers'); }
+  getProviderStatus(name: string) { return this.api.get(`/v1/sourcing/providers/${name}/status`); }
+  upsertProviderConfig(data: any) { return this.api.post('/v1/sourcing/providers/config', data); }
+  testProvider(name: string) { return this.api.post(`/v1/sourcing/providers/${name}/test`); }
+  triggerSync(name: string, criteria?: any) { return this.api.post(`/v1/sourcing/providers/${name}/sync`, criteria ? { criteria } : {}); }
+  getSyncRuns(providerName?: string, limit?: number) { return this.api.get('/v1/sourcing/runs', { params: { provider_name: providerName, limit } }); }
+  getSyncRunDetail(runId: number) { return this.api.get(`/v1/sourcing/runs/${runId}`); }
+  getCandidateSources(candidateId: number) { return this.api.get(`/v1/sourcing/candidates/${candidateId}/sources`); }
+  getCandidateSnapshots(candidateId: number) { return this.api.get(`/v1/sourcing/candidates/${candidateId}/snapshots`); }
+  getSnapshotDiff(candidateId: number, fromId: number, toId: number) { return this.api.get(`/v1/sourcing/candidates/${candidateId}/snapshots/diff`, { params: { from_id: fromId, to_id: toId } }); }
+  getMergeSuggestions(limit?: number) { return this.api.get('/v1/sourcing/merge-suggestions', { params: { limit } }); }
+  executeMerge(primaryId: number, secondaryId: number) { return this.api.post('/v1/sourcing/merge', { primary_candidate_id: primaryId, secondary_candidate_id: secondaryId }); }
 }
 
 export const apiService = new ApiService();

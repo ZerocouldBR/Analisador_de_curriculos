@@ -41,6 +41,10 @@ def create_default_roles(db: Session):
                 "companies.manage_own": True,
                 "analytics.view": True,
                 "costs.view": True,
+                "sourcing.read": True,
+                "sourcing.config": True,
+                "sourcing.sync": True,
+                "sourcing.merge": True,
             }
         },
         {
@@ -65,6 +69,10 @@ def create_default_roles(db: Session):
                 "companies.manage_own": True,
                 "analytics.view": True,
                 "costs.view": True,
+                "sourcing.read": True,
+                "sourcing.config": True,
+                "sourcing.sync": True,
+                "sourcing.merge": True,
             }
         },
         {
@@ -86,6 +94,10 @@ def create_default_roles(db: Session):
                 "linkedin.enrich": True,
                 "search.advanced": True,
                 "users.manage": False,
+                "sourcing.read": True,
+                "sourcing.config": False,
+                "sourcing.sync": True,
+                "sourcing.merge": False,
             }
         },
         {

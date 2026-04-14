@@ -328,3 +328,82 @@ export interface HealthCheck {
   celery: string;
   vector_db: string;
 }
+
+// ==================== Sourcing ====================
+export interface SourcingProvider {
+  name: string;
+  type: string;
+  is_configured: boolean;
+  is_enabled: boolean;
+  last_sync_at: string | null;
+}
+
+export interface ProviderConfig {
+  id: number;
+  provider_name: string;
+  is_enabled: boolean;
+  schedule_cron: string | null;
+  rate_limit_rpm: number;
+  rate_limit_daily: number;
+  config_keys: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProviderStatus {
+  provider_name: string;
+  healthy: boolean;
+  message: string;
+  remaining_quota: number | null;
+}
+
+export interface SyncRun {
+  id: number;
+  provider_name: string;
+  run_type: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  total_scanned: number;
+  total_created: number;
+  total_updated: number;
+  total_unchanged: number;
+  total_failed: number;
+  error_detail: string | null;
+}
+
+export interface CandidateSource {
+  id: number;
+  provider_name: string;
+  provider_type: string;
+  external_id: string | null;
+  external_url: string | null;
+  sync_enabled: boolean;
+  consent_status: string;
+  source_priority: number;
+  source_confidence: number;
+  last_sync_at: string | null;
+  last_status: string | null;
+  created_at: string;
+}
+
+export interface SnapshotSummary {
+  id: number;
+  snapshot_hash: string;
+  source_id: number | null;
+  created_at: string;
+}
+
+export interface SnapshotDiff {
+  changed_fields: Record<string, { from: any; to: any }>;
+  diff_summary: string;
+}
+
+export interface MergeSuggestion {
+  candidate_id_a: number;
+  candidate_id_b: number;
+  name_a: string;
+  name_b: string;
+  similarity_score: number;
+  matched_fields: string[];
+}

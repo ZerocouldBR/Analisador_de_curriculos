@@ -50,6 +50,7 @@ class Company(Base):
     users = relationship("User", back_populates="company")
     candidates = relationship("Candidate", back_populates="company")
     ai_usage_logs = relationship("AIUsageLog", back_populates="company", cascade="all, delete-orphan")
+    sourcing_configs = relationship("ProviderConfig", back_populates="company", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_company_active", "is_active"),
@@ -155,6 +156,7 @@ class Candidate(Base):
     consents = relationship("Consent", back_populates="candidate", cascade="all, delete-orphan")
     external_enrichments = relationship("ExternalEnrichment", back_populates="candidate", cascade="all, delete-orphan")
     encrypted_pii = relationship("EncryptedPII", back_populates="candidate", uselist=False, cascade="all, delete-orphan")
+    sources = relationship("CandidateSource", back_populates="candidate", cascade="all, delete-orphan")
 
 
 class CandidateProfile(Base):
@@ -379,3 +381,138 @@ class AuditLog(Base):
 
     # Relacionamentos
     user = relationship("User", back_populates="audit_logs")
+
+
+# ================================================================
+# Sourcing Hibrido - Modelos para multi-source candidate management
+# ================================================================
+
+class CandidateSource(Base):
+    """Registro de cada fonte de dados de um candidato"""
+    __tablename__ = "candidate_sources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    candidate_id = Column(Integer, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False)
+    provider_name = Column(String, nullable=False)
+    provider_type = Column(String, nullable=False)  # api, file, manual, webhook
+    external_id = Column(String, nullable=True)
+    external_url = Column(String, nullable=True)
+    sync_enabled = Column(Boolean, default=True)
+    consent_status = Column(String, default="pending")  # pending, granted, revoked
+    source_priority = Column(Integer, default=50)  # 0-100, maior = mais prioritario
+    source_confidence = Column(Float, default=0.5)  # 0.0-1.0
+    last_sync_at = Column(DateTime, nullable=True)
+    last_status = Column(String, nullable=True)  # success, error, skipped
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relacionamentos
+    candidate = relationship("Candidate", back_populates="sources")
+    company = relationship("Company")
+    snapshots = relationship("CandidateSnapshot", back_populates="source", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_source_company_provider", "company_id", "provider_name"),
+        Index("idx_source_company_candidate", "company_id", "candidate_id"),
+        Index("idx_source_unique_external", "company_id", "provider_name", "external_id", unique=True),
+    )
+
+
+class CandidateSnapshot(Base):
+    """Snapshot versionado do perfil canonico do candidato"""
+    __tablename__ = "candidate_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    candidate_id = Column(Integer, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False)
+    source_id = Column(Integer, ForeignKey("candidate_sources.id", ondelete="SET NULL"), nullable=True)
+    snapshot_hash = Column(String, index=True, nullable=False)
+    canonical_json = Column(JSONB, nullable=False)
+    extracted_text = Column(Text, nullable=True)
+    embedding_version = Column(String, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+    # Relacionamentos
+    source = relationship("CandidateSource", back_populates="snapshots")
+    candidate = relationship("Candidate")
+    company = relationship("Company")
+
+    __table_args__ = (
+        Index("idx_snapshot_company_candidate", "company_id", "candidate_id"),
+    )
+
+
+class CandidateChangeLog(Base):
+    """Registro de diferencas entre snapshots"""
+    __tablename__ = "candidate_change_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    candidate_id = Column(Integer, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False)
+    snapshot_from_id = Column(Integer, ForeignKey("candidate_snapshots.id", ondelete="SET NULL"), nullable=True)
+    snapshot_to_id = Column(Integer, ForeignKey("candidate_snapshots.id", ondelete="SET NULL"), nullable=False)
+    changed_fields_json = Column(JSONB, nullable=False)
+    diff_summary = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+    # Relacionamentos
+    candidate = relationship("Candidate")
+    snapshot_from = relationship("CandidateSnapshot", foreign_keys=[snapshot_from_id])
+    snapshot_to = relationship("CandidateSnapshot", foreign_keys=[snapshot_to_id])
+
+    __table_args__ = (
+        Index("idx_changelog_candidate", "company_id", "candidate_id"),
+        Index("idx_changelog_snapshot_to", "snapshot_to_id"),
+    )
+
+
+class SourcingSyncRun(Base):
+    """Registro de cada execucao de sincronizacao"""
+    __tablename__ = "sourcing_sync_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    provider_name = Column(String, nullable=False)
+    run_type = Column(String, nullable=False)  # manual, scheduled, webhook
+    status = Column(String, default="pending")  # pending, running, completed, failed
+    started_at = Column(DateTime, default=_utcnow)
+    finished_at = Column(DateTime, nullable=True)
+    total_scanned = Column(Integer, default=0)
+    total_created = Column(Integer, default=0)
+    total_updated = Column(Integer, default=0)
+    total_unchanged = Column(Integer, default=0)
+    total_failed = Column(Integer, default=0)
+    metadata_json = Column(JSONB, nullable=True)
+    error_detail = Column(Text, nullable=True)
+
+    # Relacionamentos
+    company = relationship("Company")
+
+    __table_args__ = (
+        Index("idx_syncrun_company_provider", "company_id", "provider_name", "started_at"),
+    )
+
+
+class ProviderConfig(Base):
+    """Configuracao de provider de sourcing por tenant"""
+    __tablename__ = "provider_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    provider_name = Column(String, nullable=False)
+    is_enabled = Column(Boolean, default=False)
+    config_json_encrypted = Column(Text, nullable=True)
+    schedule_cron = Column(String, nullable=True, default="0 2 */5 * *")
+    rate_limit_rpm = Column(Integer, default=60)
+    rate_limit_daily = Column(Integer, default=1000)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relacionamentos
+    company = relationship("Company", back_populates="sourcing_configs")
+
+    __table_args__ = (
+        Index("idx_provider_config_unique", "company_id", "provider_name", unique=True),
+    )

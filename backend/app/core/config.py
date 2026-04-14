@@ -511,6 +511,41 @@ REGRAS:
     )
 
     # ================================================================
+    # Sourcing Hibrido
+    # ================================================================
+    sourcing_enabled: bool = Field(
+        default=False, description="Habilitar modulo de sourcing hibrido"
+    )
+    sourcing_sync_interval_days: int = Field(
+        default=5, description="Intervalo padrao entre sincronizacoes (dias)"
+    )
+    sourcing_dedup_email_weight: float = Field(
+        default=0.4, description="Peso do email na deduplicacao"
+    )
+    sourcing_dedup_phone_weight: float = Field(
+        default=0.2, description="Peso do telefone na deduplicacao"
+    )
+    sourcing_dedup_name_weight: float = Field(
+        default=0.25, description="Peso do nome na deduplicacao"
+    )
+    sourcing_dedup_linkedin_weight: float = Field(
+        default=0.15, description="Peso do LinkedIn URL na deduplicacao"
+    )
+    sourcing_dedup_threshold: float = Field(
+        default=0.7, description="Score minimo para considerar duplicata (0.0-1.0)"
+    )
+    sourcing_merge_priority_order: List[str] = Field(
+        default=["linkedin", "manual", "csv_import", "xlsx_import", "webhook", "external_partner"],
+        description="Ordem de prioridade para resolucao de conflitos entre fontes"
+    )
+    sourcing_max_sync_candidates: int = Field(
+        default=500, description="Maximo de candidatos processados por sincronizacao"
+    )
+    sourcing_snapshot_retention_days: int = Field(
+        default=365, description="Retencao de snapshots em dias"
+    )
+
+    # ================================================================
     # LinkedIn
     # ================================================================
     linkedin_enrichment_score_weight: float = Field(
