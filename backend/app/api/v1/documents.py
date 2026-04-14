@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from pydantic import BaseModel
 
 from app.db.database import get_db
 from app.schemas.candidate import DocumentResponse
@@ -11,6 +12,21 @@ from app.db.models import User
 
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+
+class BulkUploadFileResult(BaseModel):
+    filename: str
+    status: str  # uploaded, error
+    message: str
+    document_id: Optional[int] = None
+    candidate_id: Optional[int] = None
+
+
+class BulkUploadResponse(BaseModel):
+    total_files: int
+    uploaded: int
+    errors: int
+    results: List[BulkUploadFileResult]
 
 
 @router.post("/upload", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
@@ -115,3 +131,85 @@ async def reprocess_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao reprocessar documento: {str(e)}"
         )
+
+
+@router.post("/bulk-upload", response_model=BulkUploadResponse)
+async def bulk_upload_resumes(
+    files: List[UploadFile] = File(..., description="Multiplos arquivos de curriculo"),
+    candidate_id: Optional[int] = Query(None, description="ID do candidato (cria novo por arquivo se omitido)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("documents.create"))
+):
+    """
+    Upload em lote de multiplos curriculos via browser
+
+    Aceita multiplos arquivos simultaneamente (PDF, DOCX, TXT, imagens).
+    Suporta selecao de pasta inteira via atributo webkitdirectory do browser.
+
+    Para cada arquivo:
+    - Cria um novo candidato (ou vincula ao candidato_id informado)
+    - Salva no storage com deduplicacao por SHA256
+    - Enfileira processamento async (OCR, parsing, embeddings)
+
+    **Requer permissao:** documents.create
+    """
+    max_size = settings.max_upload_size_mb * 1024 * 1024
+    results: List[BulkUploadFileResult] = []
+    uploaded_count = 0
+    error_count = 0
+
+    for file in files:
+        try:
+            # Validate file size
+            content = await file.read()
+            if len(content) > max_size:
+                results.append(BulkUploadFileResult(
+                    filename=file.filename or "unknown",
+                    status="error",
+                    message=f"Arquivo excede o limite de {settings.max_upload_size_mb}MB",
+                ))
+                error_count += 1
+                continue
+
+            # Reset file for downstream processing
+            await file.seek(0)
+
+            document = await DocumentService.upload_resume(
+                db,
+                file,
+                candidate_id,
+                current_user.id,
+                company_id=current_user.company_id,
+            )
+
+            results.append(BulkUploadFileResult(
+                filename=file.filename or "unknown",
+                status="uploaded",
+                message="Upload realizado, processamento enfileirado",
+                document_id=document.id,
+                candidate_id=document.candidate_id,
+            ))
+            uploaded_count += 1
+
+        except ValueError as e:
+            results.append(BulkUploadFileResult(
+                filename=file.filename or "unknown",
+                status="error",
+                message=str(e),
+            ))
+            error_count += 1
+
+        except Exception as e:
+            results.append(BulkUploadFileResult(
+                filename=file.filename or "unknown",
+                status="error",
+                message=f"Erro: {str(e)}",
+            ))
+            error_count += 1
+
+    return BulkUploadResponse(
+        total_files=len(files),
+        uploaded=uploaded_count,
+        errors=error_count,
+        results=results,
+    )

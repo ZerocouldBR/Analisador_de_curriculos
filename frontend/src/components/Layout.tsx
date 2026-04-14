@@ -37,6 +37,7 @@ import {
   DarkMode,
   LightMode,
   ChevronLeft,
+  Storage,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useThemeMode } from '../contexts/ThemeContext';
@@ -59,6 +60,7 @@ const menuItems: MenuItem_[] = [
   { text: 'LinkedIn', icon: <LinkedIn />, path: '/linkedin', dividerAfter: true },
   { text: 'Empresas', icon: <Business />, path: '/companies' },
   { text: 'Configuracoes', icon: <Settings />, path: '/settings' },
+  { text: 'Banco de Dados', icon: <Storage />, path: '/database' },
   { text: 'Funcoes e Permissoes', icon: <AdminPanelSettings />, path: '/roles' },
 ];
 

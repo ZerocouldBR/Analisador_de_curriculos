@@ -230,5 +230,13 @@ class StorageService:
         return extension in supported_extensions
 
 
-# Instância global do serviço de storage
-storage_service = StorageService()
+# Instancia global do servico de storage
+# Usa o caminho configurado em settings ou o padrao /app/uploads
+def _get_storage_path() -> str:
+    try:
+        from app.core.config import settings
+        return settings.storage_path
+    except Exception:
+        return "/app/uploads"
+
+storage_service = StorageService(base_path=_get_storage_path())

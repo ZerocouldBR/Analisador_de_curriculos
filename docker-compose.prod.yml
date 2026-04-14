@@ -47,6 +47,11 @@ services:
       dockerfile: Dockerfile.prod
     env_file:
       - ./backend/.env
+    environment:
+      # Sobrescrever URLs para apontar aos containers Docker
+      DATABASE_URL: postgresql+psycopg://analisador:${DB_PASSWORD:-ALTERE_ESTA_SENHA}@db:5432/analisador_curriculos
+      REDIS_URL: redis://:${REDIS_PASSWORD:-ALTERE_ESTA_SENHA}@redis:6379/0
+      STORAGE_PATH: /app/uploads
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -77,6 +82,10 @@ services:
     command: celery -A app.core.celery_app worker --loglevel=info --queues=documents,search --concurrency=4
     env_file:
       - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://analisador:${DB_PASSWORD:-ALTERE_ESTA_SENHA}@db:5432/analisador_curriculos
+      REDIS_URL: redis://:${REDIS_PASSWORD:-ALTERE_ESTA_SENHA}@redis:6379/0
+      STORAGE_PATH: /app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -104,6 +113,8 @@ services:
     command: celery -A app.core.celery_app flower --port=5555 --basic-auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-ALTERE_ESTA_SENHA}
     env_file:
       - ./backend/.env
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD:-ALTERE_ESTA_SENHA}@redis:6379/0
     ports:
       - "127.0.0.1:5555:5555"
     depends_on:

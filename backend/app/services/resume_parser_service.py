@@ -56,7 +56,7 @@ class ResumeParserService:
 
     @staticmethod
     def extract_personal_info(text: str) -> Dict[str, Optional[str]]:
-        """Extrai informacoes pessoais"""
+        """Extrai informacoes pessoais com deteccao melhorada"""
         info = {
             "name": None,
             "email": None,
@@ -75,30 +75,37 @@ class ResumeParserService:
         if email_match:
             info["email"] = email_match.group()
 
-        # Telefone (formatos brasileiros)
+        # Telefone (formatos brasileiros - mais abrangente)
         phone_patterns = [
-            r'\+55\s*\(?\d{2}\)?\s*\d{4,5}[\s-]?\d{4}',
-            r'\(?\d{2}\)?\s*\d{4,5}[\s-]?\d{4}',
-            r'\d{2}\s*\d{4,5}[\s-]?\d{4}',
+            r'\+55\s*\(?\d{2}\)?\s*\d{4,5}[\s.-]?\d{4}',
+            r'\(\d{2}\)\s*\d{4,5}[\s.-]?\d{4}',
+            r'\b\d{2}\s*\d{4,5}[\s.-]?\d{4}\b',
+            r'(?:tel(?:efone)?|cel(?:ular)?|fone|whatsapp|wpp|contato)[\s.:]+\+?5?5?\s*\(?\d{2}\)?\s*\d{4,5}[\s.-]?\d{4}',
         ]
 
         for pattern in phone_patterns:
-            phone_match = re.search(pattern, text)
+            phone_match = re.search(pattern, text, re.IGNORECASE)
             if phone_match:
                 info["phone"] = phone_match.group().strip()
                 break
 
         # LinkedIn
-        linkedin_pattern = r'linkedin\.com/in/[\w-]+'
+        linkedin_pattern = r'(?:https?://)?(?:www\.)?linkedin\.com/in/[\w-]+'
         linkedin_match = re.search(linkedin_pattern, text, re.IGNORECASE)
         if linkedin_match:
-            info["linkedin"] = f"https://{linkedin_match.group()}"
+            url = linkedin_match.group()
+            if not url.startswith('http'):
+                url = f"https://{url}"
+            info["linkedin"] = url
 
         # GitHub
-        github_pattern = r'github\.com/[\w-]+'
+        github_pattern = r'(?:https?://)?(?:www\.)?github\.com/[\w-]+'
         github_match = re.search(github_pattern, text, re.IGNORECASE)
         if github_match:
-            info["github"] = f"https://{github_match.group()}"
+            url = github_match.group()
+            if not url.startswith('http'):
+                url = f"https://{url}"
+            info["github"] = url
 
         # CPF
         cpf_pattern = r'\b\d{3}[.\s]?\d{3}[.\s]?\d{3}[-.\s]?\d{2}\b'
@@ -106,10 +113,22 @@ class ResumeParserService:
         if cpf_match:
             info["cpf"] = cpf_match.group().strip()
 
-        # Data de nascimento
+        # RG
+        rg_patterns = [
+            r'(?:RG|identidade|registro\s+geral)[\s.:]+(\d{1,2}[.\s]?\d{3}[.\s]?\d{3}[-.\s]?\d{1,2})',
+            r'\b(\d{2}\.\d{3}\.\d{3}-\d{1,2})\b',
+        ]
+        for pattern in rg_patterns:
+            rg_match = re.search(pattern, text, re.IGNORECASE)
+            if rg_match:
+                info["rg"] = rg_match.group(1).strip() if rg_match.lastindex else rg_match.group().strip()
+                break
+
+        # Data de nascimento (mais padroes)
         birth_patterns = [
-            r'(?:nascimento|data\s+de\s+nascimento|born|nasc\.?)[\s:]+(\d{2}[/.-]\d{2}[/.-]\d{4})',
+            r'(?:nascimento|data\s+de\s+nascimento|born|nasc\.?|d\.?\s*n\.?|dt\.?\s*nasc\.?)[\s:]+(\d{2}[/.-]\d{2}[/.-]\d{4})',
             r'(\d{2}[/.-]\d{2}[/.-]\d{4})\s*(?:\(?\s*\d+\s*anos\s*\)?)',
+            r'(?:nascido\s+em|nascida\s+em)[\s:]+(\d{2}[/.-]\d{2}[/.-]\d{4})',
         ]
         for pattern in birth_patterns:
             birth_match = re.search(pattern, text, re.IGNORECASE)
@@ -117,45 +136,149 @@ class ResumeParserService:
                 info["birth_date"] = birth_match.group(1).strip()
                 break
 
-        # Nome (primeira linha nao vazia geralmente e o nome)
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
-        if lines:
-            for line in lines[:5]:
-                if len(line) > 5 and len(line) < 60:
-                    if not re.search(r'\d', line) and not re.search(r'[!@#$%^&*()]', line):
-                        # Verificar se nao e um cabecalho de secao
-                        section_headers = [
-                            'experiencia', 'formacao', 'habilidades', 'objetivo',
-                            'resumo', 'certificacao', 'idioma', 'dados pessoais',
-                            'curriculo', 'curriculum'
-                        ]
-                        if not any(h in line.lower() for h in section_headers):
-                            info["name"] = line
-                            break
+        # Nome - Estrategia melhorada com multiplas abordagens
+        name = None
 
-        # Localizacao
+        # 1. Tentar extrair nome de campos rotulados
+        name_label_patterns = [
+            r'(?:nome\s*(?:completo)?|name)[\s:]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõçA-ZÁÉÍÓÚÂÊÔÃÕÇ\s]+)',
+            r'(?:candidato|candidata)[\s:]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõçA-ZÁÉÍÓÚÂÊÔÃÕÇ\s]+)',
+        ]
+        for pattern in name_label_patterns:
+            name_match = re.search(pattern, text, re.IGNORECASE)
+            if name_match:
+                candidate_name = name_match.group(1).strip()
+                # Validar que parece um nome (2+ palavras, sem numeros)
+                if len(candidate_name.split()) >= 2 and not re.search(r'\d', candidate_name):
+                    name = candidate_name[:60]
+                    break
+
+        # 2. Se nao encontrou rotulado, tentar primeira linha significativa
+        if not name:
+            lines = [line.strip() for line in text.split('\n') if line.strip()]
+            section_headers = [
+                'experiencia', 'formacao', 'habilidades', 'objetivo',
+                'resumo', 'certificacao', 'idioma', 'dados pessoais',
+                'curriculo', 'curriculum', 'vitae', 'perfil', 'profissional',
+                'contato', 'informacoes', 'educacao', 'competencias',
+                'qualificacoes', 'sobre', 'endereco', 'rua', 'avenida',
+            ]
+
+            for line in lines[:10]:
+                # Pular linhas muito curtas ou muito longas
+                if len(line) < 3 or len(line) > 60:
+                    continue
+                # Pular linhas com numeros (telefone, CPF, endereco)
+                if re.search(r'\d', line):
+                    continue
+                # Pular linhas com caracteres especiais
+                if re.search(r'[!@#$%^&*()=+\[\]{}<>|\\/:;]', line):
+                    continue
+                # Pular cabecalhos de secao
+                line_lower = line.lower().strip()
+                if any(h in line_lower for h in section_headers):
+                    continue
+                # Pular linhas que sao emails ou URLs
+                if '@' in line or 'http' in line.lower() or '.com' in line.lower():
+                    continue
+                # Pular linhas com virgula seguida de estado (provavelmente endereco)
+                if re.search(r',\s*[A-Z]{2}\s*$', line):
+                    continue
+                # Verificar se parece um nome (maiuscula inicial, 2+ palavras)
+                words = line.split()
+                if len(words) >= 1 and words[0][0].isupper():
+                    # Nome com pelo menos 2 palavras e idealmente
+                    if len(words) >= 2 or len(line) > 5:
+                        name = line
+                        break
+
+        if name:
+            # Limpar nome: remover titulos e prefixos
+            name = re.sub(r'^(?:Sr\.?|Sra\.?|Dr\.?|Dra\.?|Prof\.?)\s+', '', name, flags=re.IGNORECASE)
+            info["name"] = name.strip()
+
+        # Localizacao (mais padroes)
         location_patterns = [
-            r'([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+),\s*([A-Z]{2})',
-            r'([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+)\s+-\s+([A-Z]{2})',
+            r'(?:endereço|endereco|moradia|resido|residência|residencia|localização|localizacao)[\s:]+(.+?)(?:\n|$)',
+            r'([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+),\s*([A-Z]{2})\b',
+            r'([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+)\s+[-–]\s+([A-Z]{2})\b',
             r'(?:cidade|city|local)[\s:]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+)',
         ]
 
         for pattern in location_patterns:
             location_match = re.search(pattern, text)
             if location_match:
-                info["location"] = location_match.group().strip()
-                break
+                loc = location_match.group().strip()
+                # Nao confundir com cabecalhos de experiencia
+                if len(loc) < 80 and not any(h in loc.lower() for h in ['experiencia', 'formacao']):
+                    info["location"] = loc
+                    break
 
         return info
 
     @staticmethod
+    def _find_section(text: str, keywords: list, next_keywords: list = None) -> str:
+        """
+        Encontra e retorna o conteudo de uma secao do curriculo.
+        Usa busca flexivel que funciona mesmo com formatacao inconsistente.
+        """
+        section_start = -1
+        for keyword in keywords:
+            # Busca flexivel - aceita com ou sem \n, com : ou sem
+            patterns = [
+                rf'\n\s*{re.escape(keyword)}\s*[:\-]?\s*\n',
+                rf'\n\s*{re.escape(keyword)}\s*[:\-]?\s*$',
+                rf'^\s*{re.escape(keyword)}\s*[:\-]?\s*\n',
+                rf'\n\s*{re.escape(keyword.upper())}\s*[:\-]?\s*\n',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+                if match:
+                    section_start = match.end()
+                    break
+            if section_start != -1:
+                break
+
+        if section_start == -1:
+            return ""
+
+        # Encontrar fim da secao
+        default_next = [
+            'formação', 'formacao', 'educação', 'educacao', 'education',
+            'habilidades', 'skills', 'idiomas', 'languages',
+            'certificações', 'certificacoes', 'cursos',
+            'dados pessoais', 'habilitações', 'habilitacoes',
+            'competências', 'competencias', 'qualificações', 'qualificacoes',
+            'objetivo', 'resumo', 'perfil', 'referencias',
+        ]
+        next_kws = next_keywords or default_next
+
+        section_end = len(text)
+        for keyword in next_kws:
+            patterns = [
+                rf'\n\s*{re.escape(keyword)}\s*[:\-]?\s*\n',
+                rf'\n\s*{re.escape(keyword.upper())}\s*[:\-]?\s*\n',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text[section_start:], re.IGNORECASE | re.MULTILINE)
+                if match:
+                    candidate_end = section_start + match.start()
+                    if candidate_end < section_end:
+                        section_end = candidate_end
+                    break
+
+        return text[section_start:section_end]
+
+    @staticmethod
     def extract_experiences(text: str) -> list[Dict[str, Any]]:
-        """Extrai experiencias profissionais"""
+        """Extrai experiencias profissionais com deteccao melhorada"""
         experiences = []
 
         experience_keywords = [
             'experiência profissional',
             'experiencia profissional',
+            'experiências profissionais',
+            'experiencias profissionais',
             'experiência',
             'experiencia',
             'histórico profissional',
@@ -163,40 +286,48 @@ class ResumeParserService:
             'experience',
             'work experience',
             'employment',
+            'atividades profissionais',
         ]
 
-        section_start = -1
-        for keyword in experience_keywords:
-            pattern = rf'\n\s*{re.escape(keyword)}\s*\n'
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                section_start = match.end()
-                break
+        experience_text = ResumeParserService._find_section(text, experience_keywords)
+        if not experience_text:
+            # Fallback: tentar busca direta
+            section_start = -1
+            for keyword in experience_keywords:
+                pattern = rf'\n\s*{re.escape(keyword)}\s*\n'
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    section_start = match.end()
+                    break
 
-        if section_start == -1:
-            return experiences
+            if section_start == -1:
+                return experiences
 
-        next_section_keywords = [
-            'formação', 'formacao', 'educação', 'educacao', 'education',
-            'habilidades', 'skills', 'idiomas', 'languages',
-            'certificações', 'certificacoes', 'cursos',
-            'dados pessoais', 'habilitações', 'habilitacoes',
-        ]
+            next_section_keywords = [
+                'formação', 'formacao', 'educação', 'educacao', 'education',
+                'habilidades', 'skills', 'idiomas', 'languages',
+                'certificações', 'certificacoes', 'cursos',
+                'dados pessoais', 'habilitações', 'habilitacoes',
+            ]
 
-        section_end = len(text)
-        for keyword in next_section_keywords:
-            pattern = rf'\n\s*{re.escape(keyword)}\s*\n'
-            match = re.search(pattern, text[section_start:], re.IGNORECASE)
-            if match:
-                section_end = section_start + match.start()
-                break
+            section_end = len(text)
+            for keyword in next_section_keywords:
+                pattern = rf'\n\s*{re.escape(keyword)}\s*\n'
+                match = re.search(pattern, text[section_start:], re.IGNORECASE)
+                if match:
+                    section_end = section_start + match.start()
+                    break
 
-        experience_text = text[section_start:section_end]
+            experience_text = text[section_start:section_end]
 
         date_patterns = [
-            r'(\d{2}/\d{4})\s*[-–a]\s*(\d{2}/\d{4}|atual|presente|current)',
-            r'(\d{4})\s*[-–a]\s*(\d{4}|atual|presente|current)',
-            r'(\w+\s+\d{4})\s*[-–a]\s*(\w+\s+\d{4}|atual|presente|current)',
+            r'(\d{2}/\d{4})\s*[-–a]\s*(\d{2}/\d{4}|atual|presente|current|atualmente)',
+            r'(\d{2}/\d{2}/\d{4})\s*[-–a]\s*(\d{2}/\d{2}/\d{4}|atual|presente|current|atualmente)',
+            r'(\d{4})\s*[-–a]\s*(\d{4}|atual|presente|current|atualmente)',
+            r'(\w+[./]\d{4})\s*[-–a]\s*(\w+[./]\d{4}|atual|presente|current|atualmente)',
+            r'(\w+\s+(?:de\s+)?\d{4})\s*[-–a]\s*(\w+\s+(?:de\s+)?\d{4}|atual|presente|current|atualmente)',
+            r'(?:desde|from)\s+(\d{2}/\d{4}|\d{4})',
+            r'(\d{2}\.\d{4})\s*[-–a]\s*(\d{2}\.\d{4}|atual|presente|current|atualmente)',
         ]
 
         lines = experience_text.split('\n')
