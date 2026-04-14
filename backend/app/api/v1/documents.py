@@ -160,19 +160,20 @@ async def bulk_upload_resumes(
 
     for file in files:
         try:
-            # Validate file size
+            # Validate file size - read content and check
             content = await file.read()
-            if len(content) > max_size:
+            file_size = len(content)
+            # Always reset file pointer after reading
+            await file.seek(0)
+
+            if file_size > max_size:
                 results.append(BulkUploadFileResult(
                     filename=file.filename or "unknown",
                     status="error",
-                    message=f"Arquivo excede o limite de {settings.max_upload_size_mb}MB",
+                    message=f"Arquivo excede o limite de {settings.max_upload_size_mb}MB ({file_size // (1024*1024)}MB)",
                 ))
                 error_count += 1
                 continue
-
-            # Reset file for downstream processing
-            await file.seek(0)
 
             document = await DocumentService.upload_resume(
                 db,

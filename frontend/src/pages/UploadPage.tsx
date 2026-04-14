@@ -23,12 +23,9 @@ import {
   Tabs,
   Tab,
   Alert,
-  Divider,
-  CircularProgress,
 } from '@mui/material';
 import {
   CloudUpload,
-  Description,
   CheckCircle,
   Error as ErrorIcon,
   HourglassEmpty,
@@ -46,7 +43,10 @@ import { websocketService } from '../services/websocket';
 import { Candidate, WebSocketMessage } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
 
+let uploadIdCounter = 0;
+
 interface UploadFile {
+  id: number; // Unique ID to avoid filename collision
   file: File;
   documentId?: number;
   status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error';
@@ -63,7 +63,9 @@ const getFileIcon = (mimeType: string) => {
 const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.txt', '.rtf', '.odt', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff'];
 
 const isSupportedFile = (file: File): boolean => {
-  const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+  const parts = file.name.split('.');
+  if (parts.length < 2) return false; // No extension
+  const ext = '.' + (parts.pop()?.toLowerCase() || '');
   return SUPPORTED_EXTENSIONS.includes(ext);
 };
 
@@ -116,6 +118,7 @@ const UploadPage: React.FC = () => {
   const uploadFilesSequentially = useCallback(
     async (acceptedFiles: File[]) => {
       const newFiles: UploadFile[] = acceptedFiles.map((file) => ({
+        id: ++uploadIdCounter,
         file,
         status: 'pending',
         progress: 0,
@@ -128,7 +131,7 @@ const UploadPage: React.FC = () => {
         try {
           setFiles((prev) =>
             prev.map((f) =>
-              f.file === uploadFile.file
+              f.id === uploadFile.id
                 ? { ...f, status: 'uploading', message: 'Fazendo upload...' }
                 : f
             )
@@ -141,7 +144,7 @@ const UploadPage: React.FC = () => {
 
           setFiles((prev) =>
             prev.map((f) =>
-              f.file === uploadFile.file
+              f.id === uploadFile.id
                 ? {
                     ...f,
                     documentId: document.id,
@@ -158,7 +161,7 @@ const UploadPage: React.FC = () => {
         } catch (err: any) {
           setFiles((prev) =>
             prev.map((f) =>
-              f.file === uploadFile.file
+              f.id === uploadFile.id
                 ? {
                     ...f,
                     status: 'error',
@@ -183,6 +186,7 @@ const UploadPage: React.FC = () => {
       setBulkProgress({ current: 0, total: acceptedFiles.length });
 
       const newFiles: UploadFile[] = acceptedFiles.map((file) => ({
+        id: ++uploadIdCounter,
         file,
         status: 'uploading',
         progress: 0,
@@ -198,49 +202,53 @@ const UploadPage: React.FC = () => {
 
       for (let i = 0; i < acceptedFiles.length; i += batchSize) {
         const batch = acceptedFiles.slice(i, i + batchSize);
+        // Map batch files to their UploadFile entries for proper matching
+        const batchUploadFiles = newFiles.slice(i, i + batchSize);
+
         try {
           const result = await apiService.bulkUploadDocuments(
             batch,
             selectedCandidate?.id
           );
 
-          // Update individual file statuses
-          for (const fileResult of result.results) {
+          // Update individual file statuses - match by index within batch
+          result.results.forEach((fileResult: any, resultIdx: number) => {
+            const matchedUpload = batchUploadFiles[resultIdx];
+            if (!matchedUpload) return;
+
             setFiles((prev) =>
               prev.map((f) => {
-                if (f.file.name === fileResult.filename) {
-                  if (fileResult.status === 'uploaded') {
-                    if (fileResult.document_id) {
-                      websocketService.subscribeDocument(fileResult.document_id);
-                    }
-                    return {
-                      ...f,
-                      documentId: fileResult.document_id,
-                      status: 'processing',
-                      progress: 0,
-                      message: 'Processando documento...',
-                    };
-                  } else {
-                    return {
-                      ...f,
-                      status: 'error',
-                      message: fileResult.message,
-                    };
+                if (f.id !== matchedUpload.id) return f;
+                if (fileResult.status === 'uploaded') {
+                  if (fileResult.document_id) {
+                    websocketService.subscribeDocument(fileResult.document_id);
                   }
+                  return {
+                    ...f,
+                    documentId: fileResult.document_id,
+                    status: 'processing',
+                    progress: 0,
+                    message: 'Processando documento...',
+                  };
+                } else {
+                  return {
+                    ...f,
+                    status: 'error',
+                    message: fileResult.message,
+                  };
                 }
-                return f;
               })
             );
-          }
+          });
 
           totalUploaded += result.uploaded;
           totalErrors += result.errors;
         } catch (err: any) {
           // Mark remaining batch as error
-          batch.forEach((file) => {
+          batchUploadFiles.forEach((uf) => {
             setFiles((prev) =>
               prev.map((f) =>
-                f.file === file
+                f.id === uf.id
                   ? {
                       ...f,
                       status: 'error',

@@ -313,15 +313,15 @@ class TextExtractionService:
                         page_text = direct_text
 
                     # Extrair imagens embutidas na pagina e fazer OCR nelas
-                    if OCR_AVAILABLE:
+                    # So extrair se a pagina nao teve texto direto suficiente,
+                    # para evitar duplicar texto que ja foi capturado
+                    if OCR_AVAILABLE and not has_sufficient_text:
                         try:
                             embedded_img_texts = TextExtractionService._extract_images_from_pdf_page(
                                 page, page_num
                             )
                             if embedded_img_texts:
                                 page_text += "\n" + "\n".join(embedded_img_texts)
-                                if not has_sufficient_text:
-                                    pages_with_ocr += 1
                         except Exception as img_err:
                             logger.debug(f"Erro ao extrair imagens da pagina {page_num + 1}: {img_err}")
 

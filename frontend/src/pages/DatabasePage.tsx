@@ -15,7 +15,6 @@ import {
   TextField,
   FormControlLabel,
   Checkbox,
-  Chip,
   Divider,
   CircularProgress,
   useTheme,
@@ -25,7 +24,6 @@ import {
   DeleteForever,
   Refresh,
   Warning,
-  CheckCircle,
   People,
   Description,
   DataArray,
@@ -197,7 +195,12 @@ const DatabasePage: React.FC = () => {
                       color="error"
                       startIcon={<DeleteForever />}
                       onClick={() => setCleanupDialogOpen(true)}
-                      disabled={stats?.total_candidates === 0 && stats?.total_documents === 0}
+                      disabled={
+                        (stats?.total_candidates || 0) === 0 &&
+                        (stats?.total_documents || 0) === 0 &&
+                        (stats?.total_chunks || 0) === 0 &&
+                        (stats?.total_conversations || 0) === 0
+                      }
                     >
                       Limpar Dados
                     </Button>

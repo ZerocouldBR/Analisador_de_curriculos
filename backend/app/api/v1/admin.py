@@ -183,20 +183,36 @@ def cleanup_database(
     sequences_reset = []
 
     try:
-        # Ordem de delecao respeita foreign keys
-
+        # Contar ANTES de deletar para ter os numeros corretos
         if data.delete_chunks:
-            count = db.query(Embedding).delete(synchronize_session=False)
-            deleted["embeddings"] = count
-            count = db.query(Chunk).delete(synchronize_session=False)
-            deleted["chunks"] = count
-
+            deleted["embeddings"] = db.query(func.count(Embedding.id)).scalar() or 0
+            deleted["chunks"] = db.query(func.count(Chunk.id)).scalar() or 0
         if data.delete_experiences:
-            count = db.query(Experience).delete(synchronize_session=False)
-            deleted["experiences"] = count
-
+            deleted["experiences"] = db.query(func.count(Experience.id)).scalar() or 0
         if data.delete_documents:
-            # Deletar arquivos fisicos primeiro
+            deleted["documents"] = db.query(func.count(Document.id)).scalar() or 0
+        if data.delete_candidates:
+            deleted["consents"] = db.query(func.count(Consent.id)).scalar() or 0
+            deleted["candidates"] = db.query(func.count(Candidate.id)).scalar() or 0
+        if data.delete_chat_history:
+            deleted["chat_messages"] = db.query(func.count(ChatMessage.id)).scalar() or 0
+            deleted["chat_conversations"] = db.query(func.count(ChatConversation.id)).scalar() or 0
+        if data.delete_audit_logs:
+            deleted["audit_logs"] = db.query(func.count(AuditLog.id)).scalar() or 0
+
+        # Deletar na ordem correta (foreign keys: filhos antes de pais)
+
+        # 1. Embeddings dependem de Chunks
+        if data.delete_chunks or data.delete_documents or data.delete_candidates:
+            db.query(Embedding).delete(synchronize_session=False)
+            db.query(Chunk).delete(synchronize_session=False)
+
+        # 2. Experiences
+        if data.delete_experiences or data.delete_candidates:
+            db.query(Experience).delete(synchronize_session=False)
+
+        # 3. Documents e arquivos fisicos
+        if data.delete_documents or data.delete_candidates:
             documents = db.query(Document).all()
             files_deleted = 0
             for doc in documents:
@@ -204,46 +220,27 @@ def cleanup_database(
                     if doc.source_path:
                         storage_service.delete_file(doc.source_path)
                         files_deleted += 1
-                except Exception:
-                    pass
-
-            if not data.delete_chunks:
-                # Se nao deletou chunks acima, deletar agora (cascade)
-                db.query(Embedding).delete(synchronize_session=False)
-                db.query(Chunk).delete(synchronize_session=False)
-
-            count = db.query(Document).delete(synchronize_session=False)
-            deleted["documents"] = count
+                except Exception as e:
+                    logger.warning(f"Erro ao deletar arquivo {doc.source_path}: {e}")
             deleted["files_deleted"] = files_deleted
+            db.query(Document).delete(synchronize_session=False)
 
+        # 4. Dados associados a candidatos
         if data.delete_candidates:
-            # Deletar dados associados primeiro
             db.query(Consent).delete(synchronize_session=False)
-            deleted["consents"] = db.query(func.count(Consent.id)).scalar() or 0
-
             db.query(ExternalEnrichment).delete(synchronize_session=False)
             db.query(EncryptedPII).delete(synchronize_session=False)
             db.query(CandidateProfile).delete(synchronize_session=False)
+            db.query(Candidate).delete(synchronize_session=False)
 
-            if not data.delete_experiences:
-                db.query(Experience).delete(synchronize_session=False)
-            if not data.delete_documents:
-                db.query(Embedding).delete(synchronize_session=False)
-                db.query(Chunk).delete(synchronize_session=False)
-                db.query(Document).delete(synchronize_session=False)
-
-            count = db.query(Candidate).delete(synchronize_session=False)
-            deleted["candidates"] = count
-
+        # 5. Chat
         if data.delete_chat_history:
-            count = db.query(ChatMessage).delete(synchronize_session=False)
-            deleted["chat_messages"] = count
-            count = db.query(ChatConversation).delete(synchronize_session=False)
-            deleted["chat_conversations"] = count
+            db.query(ChatMessage).delete(synchronize_session=False)
+            db.query(ChatConversation).delete(synchronize_session=False)
 
+        # 6. Audit logs
         if data.delete_audit_logs:
-            count = db.query(AuditLog).delete(synchronize_session=False)
-            deleted["audit_logs"] = count
+            db.query(AuditLog).delete(synchronize_session=False)
 
         db.commit()
 
@@ -251,12 +248,14 @@ def cleanup_database(
         if data.reset_sequences:
             tables_to_reset = []
             if data.delete_candidates:
+                # Candidatos e todos os filhos (cascade)
                 tables_to_reset.extend([
                     "candidates", "candidate_profiles", "consents",
                     "external_enrichments", "encrypted_pii",
+                    "documents", "chunks", "embeddings", "experiences",
                 ])
             if data.delete_documents:
-                tables_to_reset.extend(["documents"])
+                tables_to_reset.extend(["documents", "chunks", "embeddings"])
             if data.delete_chunks:
                 tables_to_reset.extend(["chunks", "embeddings"])
             if data.delete_experiences:
@@ -347,17 +346,27 @@ def delete_candidates_batch(
                 try:
                     if doc.source_path:
                         storage_service.delete_file(doc.source_path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Erro ao deletar arquivo do candidato {cid}: {e}")
 
             # Cascade vai cuidar dos relacionamentos
             db.delete(candidate)
             deleted_count += 1
 
         except Exception as e:
+            db.rollback()
             errors.append(f"Erro ao deletar candidato {cid}: {str(e)}")
+            logger.error(f"Erro ao deletar candidato {cid}: {e}")
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao commitar delecao de candidatos: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao salvar delecao: {str(e)}"
+        )
 
     # Audit log
     audit = AuditLog(
