@@ -539,6 +539,48 @@ CONFIG_MANIFEST: list[dict[str, Any]] = [
                    min_value=10, max_value=200, step=10),
         ],
     },
+
+    # ================================================================
+    # Prompts do Sistema
+    # ================================================================
+    {
+        "category": "prompts",
+        "label": "Prompts do Sistema",
+        "icon": "SmartToy",
+        "description": "Prompts de sistema para o LLM e Chat - editaveis para customizar comportamento da IA",
+        "fields": [
+            _field("prompt_llm_general", "Prompt LLM Geral", "textarea",
+                   "Prompt do sistema para consultas gerais de RH e analise de curriculos"),
+            _field("prompt_llm_production", "Prompt LLM Producao", "textarea",
+                   "Prompt especializado para recrutamento de producao industrial"),
+            _field("prompt_llm_logistics", "Prompt LLM Logistica", "textarea",
+                   "Prompt especializado para recrutamento de logistica e supply chain"),
+            _field("prompt_llm_quality", "Prompt LLM Qualidade", "textarea",
+                   "Prompt especializado para recrutamento de qualidade industrial"),
+            _field("prompt_chat_default", "Prompt Chat Padrao", "textarea",
+                   "Prompt principal do chat conversacional de RH"),
+            _field("prompt_chat_job_analysis", "Prompt Analise de Vagas", "textarea",
+                   "Prompt para matching de candidatos com vagas"),
+        ],
+    },
+
+    # ================================================================
+    # Keywords de Dominio
+    # ================================================================
+    {
+        "category": "domain_keywords",
+        "label": "Palavras-chave de Dominio",
+        "icon": "Label",
+        "description": "Palavras-chave usadas para deteccao automatica de dominio nas consultas",
+        "fields": [
+            _field("domain_keywords_production", "Keywords Producao", "list_str",
+                   "Palavras-chave que ativam o prompt de producao industrial (separadas por virgula)"),
+            _field("domain_keywords_logistics", "Keywords Logistica", "list_str",
+                   "Palavras-chave que ativam o prompt de logistica (separadas por virgula)"),
+            _field("domain_keywords_quality", "Keywords Qualidade", "list_str",
+                   "Palavras-chave que ativam o prompt de qualidade industrial (separadas por virgula)"),
+        ],
+    },
 ]
 
 

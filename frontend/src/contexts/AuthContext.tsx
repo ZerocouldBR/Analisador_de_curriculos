@@ -12,6 +12,8 @@ interface AuthContextType {
   updateUser: (user: User) => void;
   isAuthenticated: boolean;
   isSuperuser: boolean;
+  isCompanyAdmin: boolean;
+  hasRole: (roleName: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -78,6 +80,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(updatedUser);
   }, []);
 
+  const hasRole = useCallback((roleName: string) => {
+    return !!user?.roles?.includes(roleName);
+  }, [user]);
+
   const value: AuthContextType = {
     user,
     loading,
@@ -87,6 +93,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     updateUser,
     isAuthenticated: !!user,
     isSuperuser: !!user?.is_superuser,
+    isCompanyAdmin: !!user?.is_superuser || hasRole('company_admin') || hasRole('admin'),
+    hasRole,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

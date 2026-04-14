@@ -303,6 +303,19 @@ class SettingsService:
         db.add(audit)
         db.commit()
 
+        # Invalidar cache de prompts se algum prompt foi alterado
+        prompt_keys = {
+            "prompt_llm_general", "prompt_llm_production", "prompt_llm_logistics",
+            "prompt_llm_quality", "prompt_chat_default", "prompt_chat_job_analysis",
+            "domain_keywords_production", "domain_keywords_logistics", "domain_keywords_quality",
+        }
+        if prompt_keys.intersection(updated_keys):
+            try:
+                from app.services.prompt_service import PromptService
+                PromptService.invalidate_cache()
+            except ImportError:
+                pass
+
         # Identificar quais mudancas requerem restart
         restart_needed = False
         for key in updated_keys:

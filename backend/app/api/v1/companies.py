@@ -17,8 +17,9 @@ from pydantic import BaseModel, Field
 from app.db.database import get_db
 from app.core.config import settings
 from app.core.dependencies import get_current_user, require_permission, get_current_superuser
-from app.db.models import User, Company, AIUsageLog
+from app.db.models import User, Company, Role, AIUsageLog, AuditLog
 from app.services.ai_usage_service import AIUsageService
+from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,19 @@ def _generate_slug(name: str) -> str:
     slug = re.sub(r'[^a-z0-9]+', '-', name.lower().strip())
     slug = slug.strip('-')
     return slug or "empresa"
+
+
+def _is_company_admin_or_superuser(user: User, company_id: int) -> bool:
+    """Verifica se o usuario e superuser ou company_admin/admin da empresa"""
+    if user.is_superuser:
+        return True
+    if user.company_id != company_id:
+        return False
+    return AuthService.has_role(user, "company_admin") or AuthService.has_role(user, "admin")
+
+
+# Roles que um company_admin pode atribuir/remover
+COMPANY_ADMIN_ASSIGNABLE_ROLES = {"recruiter", "viewer"}
 
 
 # ============================================
@@ -213,6 +227,59 @@ def update_my_company(
     resp.user_count = len(company.users)
     resp.candidate_count = len(company.candidates)
     return resp
+
+
+@router.get("/me/ai-usage", response_model=AIUsageSummaryResponse)
+def get_my_ai_usage(
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Resumo de uso de IA da empresa do usuario atual
+
+    **Requer:** Autenticacao
+    """
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario nao associado a nenhuma empresa"
+        )
+
+    summary = AIUsageService.get_company_usage_summary(
+        db, current_user.company_id, days
+    )
+    return summary
+
+
+@router.get("/me/users")
+def list_my_company_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("users.manage")),
+):
+    """
+    Lista usuarios da empresa do usuario atual
+
+    **Requer permissao:** users.manage (company_admin, admin ou superuser)
+    """
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario nao esta associado a nenhuma empresa"
+        )
+
+    users = db.query(User).filter(User.company_id == current_user.company_id).all()
+    return [
+        {
+            "id": u.id,
+            "name": u.name,
+            "email": u.email,
+            "status": u.status,
+            "is_superuser": u.is_superuser,
+            "roles": [r.name for r in u.roles],
+        }
+        for u in users
+    ]
 
 
 @router.get("/{company_id}", response_model=CompanyResponse)
@@ -356,7 +423,7 @@ async def upload_company_logo(
     company_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Upload do logo da empresa
@@ -364,8 +431,13 @@ async def upload_company_logo(
     Formatos: PNG, JPG, SVG, WEBP
     Tamanho max: configuravel via COMPANY_LOGO_MAX_SIZE_KB
 
-    **Requer:** Superuser
+    **Requer:** Superuser ou company_admin da mesma empresa
     """
+    if not _is_company_admin_or_superuser(current_user, company_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: superuser ou company_admin da empresa necessario"
+        )
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(
@@ -493,13 +565,19 @@ def assign_user_to_company(
 def list_company_users(
     company_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Lista usuarios de uma empresa
 
-    **Requer:** Superuser
+    **Requer:** Superuser ou company_admin da mesma empresa
     """
+    if not _is_company_admin_or_superuser(current_user, company_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: superuser ou company_admin da empresa necessario"
+        )
+
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(
@@ -515,6 +593,7 @@ def list_company_users(
             "email": u.email,
             "status": u.status,
             "is_superuser": u.is_superuser,
+            "roles": [r.name for r in u.roles],
         }
         for u in users
     ]
@@ -529,13 +608,19 @@ def get_company_ai_usage(
     company_id: int,
     days: int = Query(default=30, ge=1, le=365),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Resumo de uso e custos de IA da empresa
 
-    **Requer:** Superuser
+    **Requer:** Superuser ou company_admin da mesma empresa
     """
+    if not _is_company_admin_or_superuser(current_user, company_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: superuser ou company_admin da empresa necessario"
+        )
+
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(
@@ -547,27 +632,173 @@ def get_company_ai_usage(
     return summary
 
 
-@router.get("/me/ai-usage", response_model=AIUsageSummaryResponse)
-def get_my_ai_usage(
-    days: int = Query(default=30, ge=1, le=365),
+@router.post("/me/users/{user_id}/roles/{role_name}")
+def assign_role_in_my_company(
+    user_id: int,
+    role_name: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("users.manage")),
 ):
     """
-    Resumo de uso de IA da empresa do usuario atual
+    Atribui um role a um usuario da mesma empresa
 
-    **Requer:** Autenticacao
+    company_admin so pode atribuir roles: recruiter, viewer
+    Superuser pode atribuir qualquer role
+
+    **Requer permissao:** users.manage
     """
     if not current_user.company_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuario nao associado a nenhuma empresa"
+            detail="Usuario nao esta associado a nenhuma empresa"
         )
 
-    summary = AIUsageService.get_company_usage_summary(
-        db, current_user.company_id, days
+    # company_admin nao pode atribuir roles privilegiados
+    if not current_user.is_superuser and role_name not in COMPANY_ADMIN_ASSIGNABLE_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Sem permissao para atribuir role '{role_name}'. Roles permitidos: {', '.join(COMPANY_ADMIN_ASSIGNABLE_ROLES)}"
+        )
+
+    # Verificar que o usuario alvo pertence a mesma empresa
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Usuario {user_id} nao encontrado"
+        )
+
+    if not current_user.is_superuser and target_user.company_id != current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuario nao pertence a sua empresa"
+        )
+
+    # Verificar que o role existe
+    role = db.query(Role).filter(Role.name == role_name).first()
+    if not role:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Role '{role_name}' nao encontrado"
+        )
+
+    # Verificar se ja tem o role
+    if role in target_user.roles:
+        return {
+            "status": "already_assigned",
+            "user_id": user_id,
+            "role": role_name,
+            "message": f"Usuario ja possui o role '{role_name}'"
+        }
+
+    target_user.roles.append(role)
+    db.commit()
+
+    # Audit log
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="assign_role",
+        entity="user",
+        entity_id=user_id,
+        metadata_json={
+            "role": role_name,
+            "assigned_by": current_user.email,
+            "company_id": current_user.company_id,
+        }
     )
-    return summary
+    db.add(audit)
+    db.commit()
+
+    return {
+        "status": "assigned",
+        "user_id": user_id,
+        "role": role_name,
+        "message": f"Role '{role_name}' atribuido ao usuario {target_user.email}"
+    }
+
+
+@router.delete("/me/users/{user_id}/roles/{role_name}")
+def remove_role_in_my_company(
+    user_id: int,
+    role_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("users.manage")),
+):
+    """
+    Remove um role de um usuario da mesma empresa
+
+    company_admin so pode remover roles: recruiter, viewer
+    Superuser pode remover qualquer role
+
+    **Requer permissao:** users.manage
+    """
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario nao esta associado a nenhuma empresa"
+        )
+
+    # company_admin nao pode remover roles privilegiados
+    if not current_user.is_superuser and role_name not in COMPANY_ADMIN_ASSIGNABLE_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Sem permissao para remover role '{role_name}'. Roles permitidos: {', '.join(COMPANY_ADMIN_ASSIGNABLE_ROLES)}"
+        )
+
+    # Verificar que o usuario alvo pertence a mesma empresa
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Usuario {user_id} nao encontrado"
+        )
+
+    if not current_user.is_superuser and target_user.company_id != current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuario nao pertence a sua empresa"
+        )
+
+    # Verificar que o role existe
+    role = db.query(Role).filter(Role.name == role_name).first()
+    if not role:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Role '{role_name}' nao encontrado"
+        )
+
+    if role not in target_user.roles:
+        return {
+            "status": "not_assigned",
+            "user_id": user_id,
+            "role": role_name,
+            "message": f"Usuario nao possui o role '{role_name}'"
+        }
+
+    target_user.roles.remove(role)
+    db.commit()
+
+    # Audit log
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="remove_role",
+        entity="user",
+        entity_id=user_id,
+        metadata_json={
+            "role": role_name,
+            "removed_by": current_user.email,
+            "company_id": current_user.company_id,
+        }
+    )
+    db.add(audit)
+    db.commit()
+
+    return {
+        "status": "removed",
+        "user_id": user_id,
+        "role": role_name,
+        "message": f"Role '{role_name}' removido do usuario {target_user.email}"
+    }
 
 
 # ============================================
@@ -578,13 +809,18 @@ def get_my_ai_usage(
 def get_company_settings(
     company_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Retorna configuracoes personalizadas da empresa
 
-    **Requer:** Superuser
+    **Requer:** Superuser ou company_admin da mesma empresa
     """
+    if not _is_company_admin_or_superuser(current_user, company_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: superuser ou company_admin da empresa necessario"
+        )
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(
@@ -615,13 +851,18 @@ def update_company_settings(
     company_id: int,
     new_settings: Dict[str, Any],
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Atualiza configuracoes personalizadas da empresa
 
-    **Requer:** Superuser
+    **Requer:** Superuser ou company_admin da mesma empresa
     """
+    if not _is_company_admin_or_superuser(current_user, company_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado: superuser ou company_admin da empresa necessario"
+        )
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(
