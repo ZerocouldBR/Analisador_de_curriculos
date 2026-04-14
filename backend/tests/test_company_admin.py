@@ -229,20 +229,20 @@ def setup_company_admin(setup_database):
 
     db.commit()
 
-    # Login para obter tokens
-    yield {
-        "company1": company1,
-        "company2": company2,
-        "ca_user": ca_user,
-        "rec_user": rec_user,
-        "viewer_user": viewer_user,
-        "other_user": other_user,
-        "superuser": superuser,
-        "recruiter_role": recruiter_role,
-        "viewer_role": viewer_role,
+    # Extrair IDs antes de fechar a sessao para evitar DetachedInstanceError
+    result = {
+        "company1_id": company1.id,
+        "company2_id": company2.id,
+        "ca_user_id": ca_user.id,
+        "rec_user_id": rec_user.id,
+        "viewer_user_id": viewer_user.id,
+        "other_user_id": other_user.id,
+        "superuser_id": superuser.id,
     }
 
     db.close()
+
+    yield result
 
 
 def _login(email: str, password: str) -> str:
@@ -255,6 +255,7 @@ def _login(email: str, password: str) -> str:
     return response.json()["access_token"]
 
 
+@pytest.mark.unit
 class TestCompanyAdminAccess:
     """Testes de acesso do company_admin"""
 
@@ -310,7 +311,7 @@ class TestCompanyAdminAccess:
         token = _login("ca@alpha.com", "Capass123!")
 
         response = client.get(
-            f"/api/v1/companies/{data['company2'].id}/users",
+            f"/api/v1/companies/{data['company2_id']}/users",
             headers={"Authorization": f"Bearer {token}"}
         )
 
@@ -346,6 +347,7 @@ class TestCompanyAdminAccess:
         assert response.status_code == 200
 
 
+@pytest.mark.unit
 class TestCompanyAdminRoleManagement:
     """Testes de gerenciamento de roles pelo company_admin"""
 
@@ -355,7 +357,7 @@ class TestCompanyAdminRoleManagement:
         token = _login("ca@alpha.com", "Capass123!")
 
         response = client.post(
-            f"/api/v1/companies/me/users/{data['viewer_user'].id}/roles/recruiter",
+            f"/api/v1/companies/me/users/{data['viewer_user_id']}/roles/recruiter",
             headers={"Authorization": f"Bearer {token}"}
         )
 
@@ -368,7 +370,7 @@ class TestCompanyAdminRoleManagement:
         token = _login("ca@alpha.com", "Capass123!")
 
         response = client.post(
-            f"/api/v1/companies/me/users/{data['viewer_user'].id}/roles/viewer",
+            f"/api/v1/companies/me/users/{data['viewer_user_id']}/roles/viewer",
             headers={"Authorization": f"Bearer {token}"}
         )
 
@@ -380,7 +382,7 @@ class TestCompanyAdminRoleManagement:
         token = _login("ca@alpha.com", "Capass123!")
 
         response = client.post(
-            f"/api/v1/companies/me/users/{data['viewer_user'].id}/roles/admin",
+            f"/api/v1/companies/me/users/{data['viewer_user_id']}/roles/admin",
             headers={"Authorization": f"Bearer {token}"}
         )
 
@@ -392,7 +394,7 @@ class TestCompanyAdminRoleManagement:
         token = _login("ca@alpha.com", "Capass123!")
 
         response = client.post(
-            f"/api/v1/companies/me/users/{data['viewer_user'].id}/roles/company_admin",
+            f"/api/v1/companies/me/users/{data['viewer_user_id']}/roles/company_admin",
             headers={"Authorization": f"Bearer {token}"}
         )
 
@@ -404,7 +406,7 @@ class TestCompanyAdminRoleManagement:
         token = _login("ca@alpha.com", "Capass123!")
 
         response = client.post(
-            f"/api/v1/companies/me/users/{data['other_user'].id}/roles/recruiter",
+            f"/api/v1/companies/me/users/{data['other_user_id']}/roles/recruiter",
             headers={"Authorization": f"Bearer {token}"}
         )
 
@@ -416,7 +418,7 @@ class TestCompanyAdminRoleManagement:
         token = _login("ca@alpha.com", "Capass123!")
 
         response = client.delete(
-            f"/api/v1/companies/me/users/{data['rec_user'].id}/roles/recruiter",
+            f"/api/v1/companies/me/users/{data['rec_user_id']}/roles/recruiter",
             headers={"Authorization": f"Bearer {token}"}
         )
 
@@ -424,6 +426,7 @@ class TestCompanyAdminRoleManagement:
         assert response.json()["status"] == "removed"
 
 
+@pytest.mark.unit
 class TestCompanyAdminVsSuperuser:
     """Testes comparando acesso company_admin vs superuser"""
 

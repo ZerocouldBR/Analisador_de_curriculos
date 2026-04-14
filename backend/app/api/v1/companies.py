@@ -229,6 +229,59 @@ def update_my_company(
     return resp
 
 
+@router.get("/me/ai-usage", response_model=AIUsageSummaryResponse)
+def get_my_ai_usage(
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Resumo de uso de IA da empresa do usuario atual
+
+    **Requer:** Autenticacao
+    """
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario nao associado a nenhuma empresa"
+        )
+
+    summary = AIUsageService.get_company_usage_summary(
+        db, current_user.company_id, days
+    )
+    return summary
+
+
+@router.get("/me/users")
+def list_my_company_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("users.manage")),
+):
+    """
+    Lista usuarios da empresa do usuario atual
+
+    **Requer permissao:** users.manage (company_admin, admin ou superuser)
+    """
+    if not current_user.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario nao esta associado a nenhuma empresa"
+        )
+
+    users = db.query(User).filter(User.company_id == current_user.company_id).all()
+    return [
+        {
+            "id": u.id,
+            "name": u.name,
+            "email": u.email,
+            "status": u.status,
+            "is_superuser": u.is_superuser,
+            "roles": [r.name for r in u.roles],
+        }
+        for u in users
+    ]
+
+
 @router.get("/{company_id}", response_model=CompanyResponse)
 def get_company(
     company_id: int,
@@ -577,63 +630,6 @@ def get_company_ai_usage(
 
     summary = AIUsageService.get_company_usage_summary(db, company_id, days)
     return summary
-
-
-@router.get("/me/ai-usage", response_model=AIUsageSummaryResponse)
-def get_my_ai_usage(
-    days: int = Query(default=30, ge=1, le=365),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Resumo de uso de IA da empresa do usuario atual
-
-    **Requer:** Autenticacao
-    """
-    if not current_user.company_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuario nao associado a nenhuma empresa"
-        )
-
-    summary = AIUsageService.get_company_usage_summary(
-        db, current_user.company_id, days
-    )
-    return summary
-
-
-# ============================================
-# Gerenciamento de usuarios da propria empresa (company_admin)
-# ============================================
-
-@router.get("/me/users")
-def list_my_company_users(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("users.manage")),
-):
-    """
-    Lista usuarios da empresa do usuario atual
-
-    **Requer permissao:** users.manage (company_admin, admin ou superuser)
-    """
-    if not current_user.company_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuario nao esta associado a nenhuma empresa"
-        )
-
-    users = db.query(User).filter(User.company_id == current_user.company_id).all()
-    return [
-        {
-            "id": u.id,
-            "name": u.name,
-            "email": u.email,
-            "status": u.status,
-            "is_superuser": u.is_superuser,
-            "roles": [r.name for r in u.roles],
-        }
-        for u in users
-    ]
 
 
 @router.post("/me/users/{user_id}/roles/{role_name}")
