@@ -49,18 +49,118 @@ class LinkedInService:
     @staticmethod
     async def extract_profile_data(profile_url: str) -> Optional[Dict[str, Any]]:
         """
-        Extrai dados de um perfil do LinkedIn
+        Extrai dados de um perfil do LinkedIn.
 
-        IMPORTANTE: Implementacao de demonstracao.
-        Em producao, use:
-        1. LinkedIn API oficial (requer parceria)
-        2. Servicos como PhantomBuster, Apify, Proxycurl
-        3. RapidAPI LinkedIn endpoints
+        Usa o provider configurado (Proxycurl, RapidAPI, ou scraping basico).
         """
         linkedin_pattern = r'https?://(www\.)?linkedin\.com/in/[\w-]+'
         if not re.match(linkedin_pattern, profile_url):
             raise ValueError("URL do LinkedIn invalida")
 
+        provider = settings.linkedin_api_provider
+
+        if provider == "proxycurl" and settings.proxycurl_api_key:
+            return await LinkedInService._extract_via_proxycurl(profile_url)
+
+        # Fallback: scraping basico (demonstracao)
+        return await LinkedInService._extract_via_scraping(profile_url)
+
+    @staticmethod
+    async def _extract_via_proxycurl(profile_url: str) -> Optional[Dict[str, Any]]:
+        """Extrai perfil completo via Proxycurl API"""
+        try:
+            async with httpx.AsyncClient(timeout=settings.linkedin_request_timeout) as client:
+                response = await client.get(
+                    "https://nubela.co/proxycurl/api/v2/linkedin",
+                    params={"url": profile_url},
+                    headers={"Authorization": f"Bearer {settings.proxycurl_api_key}"},
+                )
+
+                if response.status_code == 404:
+                    logger.warning(f"Proxycurl: perfil nao encontrado: {profile_url}")
+                    return None
+
+                if response.status_code == 403:
+                    logger.error("Proxycurl: API key invalida ou sem creditos")
+                    raise ValueError(
+                        "Erro de autenticacao com Proxycurl. "
+                        "Verifique sua API key e creditos em nubela.co/proxycurl"
+                    )
+
+                if response.status_code == 429:
+                    logger.warning("Proxycurl: rate limit atingido")
+                    raise ValueError(
+                        "Limite de requisicoes atingido no Proxycurl. "
+                        "Aguarde alguns minutos e tente novamente."
+                    )
+
+                if response.status_code != 200:
+                    logger.error(f"Proxycurl erro {response.status_code}: {response.text[:200]}")
+                    return None
+
+                data = response.json()
+
+                # Mapear resposta Proxycurl para formato interno
+                experiences = []
+                for exp in (data.get("experiences") or []):
+                    experiences.append({
+                        "company": exp.get("company"),
+                        "title": exp.get("title"),
+                        "start_date": exp.get("starts_at"),
+                        "end_date": exp.get("ends_at"),
+                        "description": exp.get("description"),
+                        "location": exp.get("location"),
+                    })
+
+                education = []
+                for edu in (data.get("education") or []):
+                    education.append({
+                        "school": edu.get("school"),
+                        "degree": edu.get("degree_name"),
+                        "field": edu.get("field_of_study"),
+                        "start_date": edu.get("starts_at"),
+                        "end_date": edu.get("ends_at"),
+                    })
+
+                skills = data.get("skills") or []
+                certifications = [
+                    c.get("name") for c in (data.get("certifications") or [])
+                    if c.get("name")
+                ]
+                languages = [
+                    lang.get("name") for lang in (data.get("languages") or [])
+                    if lang.get("name")
+                ]
+
+                return {
+                    "profile_url": profile_url,
+                    "full_name": data.get("full_name"),
+                    "headline": data.get("headline"),
+                    "location": (
+                        f"{data.get('city', '')}, {data.get('state', '')}, {data.get('country_full_name', '')}"
+                    ).strip(", "),
+                    "about": data.get("summary"),
+                    "experiences": experiences,
+                    "education": education,
+                    "skills": skills,
+                    "certifications": certifications,
+                    "languages": languages,
+                    "profile_pic_url": data.get("profile_pic_url"),
+                    "follower_count": data.get("follower_count"),
+                    "connections": data.get("connections"),
+                    "extracted_at": datetime.now(timezone.utc).isoformat(),
+                    "source": "proxycurl",
+                }
+
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error(f"Erro Proxycurl ao extrair perfil: {str(e)}")
+            return None
+
+    @staticmethod
+    async def _extract_via_scraping(profile_url: str) -> Optional[Dict[str, Any]]:
+        """Fallback: extrai dados basicos via scraping HTML (limitado)"""
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -87,7 +187,8 @@ class LinkedInService:
                     "skills": [],
                     "certifications": [],
                     "languages": [],
-                    "extracted_at": datetime.now(timezone.utc).isoformat()
+                    "extracted_at": datetime.now(timezone.utc).isoformat(),
+                    "source": "scraping",
                 }
 
                 title_tag = soup.find('title')
@@ -98,7 +199,6 @@ class LinkedInService:
                     elif '-' in title_text:
                         profile_data["full_name"] = title_text.split('-')[0].strip()
 
-                # Meta tags podem conter informacoes uteis
                 meta_desc = soup.find('meta', {'name': 'description'})
                 if meta_desc and meta_desc.get('content'):
                     profile_data["headline"] = meta_desc['content'][:200]
@@ -106,8 +206,140 @@ class LinkedInService:
                 return profile_data
 
         except Exception as e:
-            logger.error(f"Erro ao extrair perfil do LinkedIn: {str(e)}")
+            logger.error(f"Erro ao extrair perfil do LinkedIn via scraping: {str(e)}")
             return None
+
+    # ================================================================
+    # Proxycurl Person Search
+    # ================================================================
+
+    @staticmethod
+    async def search_via_proxycurl(criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Busca profissionais via Proxycurl Person Search API"""
+        if not settings.proxycurl_api_key:
+            return []
+
+        try:
+            params: Dict[str, Any] = {}
+            if criteria.get("title"):
+                params["current_role_title"] = criteria["title"]
+            if criteria.get("location"):
+                params["city"] = criteria["location"]
+            if criteria.get("industry"):
+                params["industry"] = criteria["industry"]
+            if criteria.get("keywords"):
+                params["keyword"] = " ".join(criteria["keywords"])
+
+            if not params:
+                return []
+
+            params["country"] = "BR"
+            params["page_size"] = min(
+                criteria.get("limit", 10),
+                settings.linkedin_search_results_limit
+            )
+
+            async with httpx.AsyncClient(timeout=settings.linkedin_request_timeout) as client:
+                response = await client.get(
+                    "https://nubela.co/proxycurl/api/search/person/",
+                    params=params,
+                    headers={"Authorization": f"Bearer {settings.proxycurl_api_key}"},
+                )
+
+                if response.status_code != 200:
+                    logger.warning(f"Proxycurl search erro {response.status_code}")
+                    return []
+
+                data = response.json()
+                results = []
+
+                for person in (data.get("results") or []):
+                    results.append({
+                        "name": person.get("name", "N/A"),
+                        "linkedin_url": person.get("linkedin_profile_url"),
+                        "headline": person.get("headline"),
+                        "location": person.get("location"),
+                        "score": 50,
+                        "match_details": ["Resultado Proxycurl"],
+                        "source": "proxycurl_search",
+                    })
+
+                return results
+
+        except Exception as e:
+            logger.error(f"Erro Proxycurl search: {str(e)}")
+            return []
+
+    # ================================================================
+    # Config Status
+    # ================================================================
+
+    @staticmethod
+    def get_config_status() -> Dict[str, Any]:
+        """Retorna o status atual da configuracao LinkedIn"""
+        provider = settings.linkedin_api_provider
+        enabled = settings.linkedin_api_enabled
+
+        status = {
+            "enabled": enabled,
+            "provider": provider,
+            "provider_label": {
+                "none": "Nenhum (apenas entrada manual)",
+                "proxycurl": "Proxycurl API",
+                "rapidapi": "RapidAPI",
+                "official": "API Oficial LinkedIn",
+            }.get(provider, provider),
+            "credentials_configured": False,
+            "ready": False,
+            "message": "",
+        }
+
+        if not enabled:
+            status["message"] = (
+                "Integracao LinkedIn desabilitada. "
+                "Ative em Configuracoes > LinkedIn."
+            )
+            return status
+
+        if provider == "proxycurl":
+            has_key = bool(settings.proxycurl_api_key)
+            status["credentials_configured"] = has_key
+            status["ready"] = has_key
+            if has_key:
+                status["message"] = "Proxycurl configurado e pronto para uso."
+            else:
+                status["message"] = (
+                    "Proxycurl selecionado mas API key nao configurada. "
+                    "Adicione a chave em Configuracoes > LinkedIn."
+                )
+
+        elif provider == "official":
+            has_creds = bool(settings.linkedin_client_id and settings.linkedin_client_secret)
+            status["credentials_configured"] = has_creds
+            status["ready"] = has_creds
+            if has_creds:
+                status["message"] = "API Oficial LinkedIn configurada."
+            else:
+                status["message"] = (
+                    "API Oficial selecionada mas credenciais incompletas. "
+                    "Configure Client ID e Secret em Configuracoes > LinkedIn."
+                )
+
+        elif provider == "rapidapi":
+            status["credentials_configured"] = False
+            status["ready"] = False
+            status["message"] = (
+                "RapidAPI selecionado. Configure a integracao diretamente "
+                "no codigo do servico."
+            )
+
+        else:
+            status["message"] = (
+                "Nenhum provider configurado. "
+                "Apenas entrada manual e busca na base interna disponiveis."
+            )
+
+        return status
 
     # ================================================================
     # Professional Search

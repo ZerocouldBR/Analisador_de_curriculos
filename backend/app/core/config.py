@@ -175,9 +175,14 @@ class Settings(BaseSettings):
 
     # -- LinkedIn --
     linkedin_api_enabled: bool = Field(default=False, description="Habilitar integracao LinkedIn API")
+    linkedin_api_provider: str = Field(
+        default="none",
+        description="Provider da API LinkedIn: none, proxycurl, rapidapi, official"
+    )
     linkedin_client_id: Optional[str] = Field(default=None, description="LinkedIn OAuth Client ID")
     linkedin_client_secret: Optional[str] = Field(default=None, description="LinkedIn OAuth Client Secret")
     linkedin_redirect_uri: Optional[str] = Field(default=None, description="LinkedIn OAuth Redirect URI")
+    proxycurl_api_key: Optional[str] = Field(default=None, description="Chave da API Proxycurl para enriquecimento LinkedIn")
 
     # ================================================================
     # LLM e Chat

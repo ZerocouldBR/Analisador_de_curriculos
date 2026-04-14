@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Paper,
@@ -17,6 +17,16 @@ import {
   useTheme,
   alpha,
   Autocomplete,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Alert,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
 } from '@mui/material';
 import {
   LinkedIn,
@@ -26,6 +36,15 @@ import {
   Work,
   LocationOn,
   OpenInNew,
+  Settings,
+  CheckCircle,
+  Cancel,
+  ExpandMore,
+  Key,
+  Business,
+  Speed,
+  AttachMoney,
+  Star,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../services/api';
@@ -63,6 +82,28 @@ const LinkedInPage: React.FC = () => {
 
   // Skills input
   const [skillInput, setSkillInput] = useState('');
+
+  // Config status
+  const [configStatus, setConfigStatus] = useState<any>(null);
+  const [loadingConfig, setLoadingConfig] = useState(false);
+
+  useEffect(() => {
+    if (tab === 2) {
+      loadConfigStatus();
+    }
+  }, [tab]);
+
+  const loadConfigStatus = async () => {
+    setLoadingConfig(true);
+    try {
+      const status = await apiService.getLinkedInConfigStatus();
+      setConfigStatus(status);
+    } catch {
+      setConfigStatus(null);
+    } finally {
+      setLoadingConfig(false);
+    }
+  };
 
   const handleExtract = async () => {
     if (!profileUrl.trim()) {
@@ -142,6 +183,7 @@ const LinkedInPage: React.FC = () => {
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
         <Tab label="Extrair Perfil" icon={<LinkIcon />} iconPosition="start" />
         <Tab label="Enriquecimento Manual" icon={<Person />} iconPosition="start" />
+        <Tab label="Configuracao da API" icon={<Settings />} iconPosition="start" />
       </Tabs>
 
       {/* Extract Profile Tab */}
@@ -352,6 +394,525 @@ const LinkedInPage: React.FC = () => {
             </Card>
           </Grid>
         </Grid>
+      )}
+
+      {/* API Configuration Tab */}
+      {tab === 2 && (
+        <Box>
+          {/* Status Card */}
+          <Paper sx={{ p: 3, mb: 3, border: '1px solid', borderColor: 'divider' }}>
+            <Box display="flex" alignItems="center" gap={2} mb={2}>
+              {loadingConfig ? (
+                <CircularProgress size={24} />
+              ) : configStatus?.ready ? (
+                <CheckCircle sx={{ fontSize: 32, color: 'success.main' }} />
+              ) : (
+                <Cancel sx={{ fontSize: 32, color: 'warning.main' }} />
+              )}
+              <Box>
+                <Typography variant="h6" fontWeight={600}>
+                  Status da Integracao
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {loadingConfig
+                    ? 'Verificando configuracao...'
+                    : configStatus?.message || 'Nao foi possivel verificar o status'}
+                </Typography>
+              </Box>
+            </Box>
+            {configStatus && (
+              <Box display="flex" gap={1} flexWrap="wrap">
+                <Chip
+                  label={configStatus.enabled ? 'Habilitado' : 'Desabilitado'}
+                  color={configStatus.enabled ? 'success' : 'default'}
+                  size="small"
+                />
+                <Chip
+                  label={`Provider: ${configStatus.provider_label}`}
+                  variant="outlined"
+                  size="small"
+                />
+                <Chip
+                  label={configStatus.credentials_configured ? 'Credenciais OK' : 'Credenciais pendentes'}
+                  color={configStatus.credentials_configured ? 'success' : 'warning'}
+                  size="small"
+                  variant="outlined"
+                />
+              </Box>
+            )}
+          </Paper>
+
+          {/* Decision: Centralized vs Per-Company */}
+          <Typography variant="h6" fontWeight={600} gutterBottom>
+            Qual modelo de API usar?
+          </Typography>
+          <Grid container spacing={3} sx={{ mb: 4 }}>
+            <Grid item xs={12} md={6}>
+              <Card
+                sx={{
+                  height: '100%',
+                  border: '2px solid',
+                  borderColor: 'primary.main',
+                  position: 'relative',
+                }}
+              >
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: 12,
+                    right: 12,
+                  }}
+                >
+                  <Chip label="Recomendado" color="primary" size="small" icon={<Star />} />
+                </Box>
+                <CardContent>
+                  <Box display="flex" alignItems="center" gap={1} mb={2}>
+                    <Key color="primary" />
+                    <Typography variant="h6" fontWeight={600}>
+                      API Centralizada (Unica)
+                    </Typography>
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Uma unica chave de API (Proxycurl) gerenciada pelo administrador da
+                    plataforma atende todas as empresas clientes de RH.
+                  </Typography>
+                  <Divider sx={{ my: 1.5 }} />
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Typography variant="body2"><strong>Vantagens:</strong></Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      - Configuracao simples: uma chave para todos
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      - Sem necessidade de OAuth por empresa
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      - Custo centralizado (~R$0,05/perfil)
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      - Funciona imediatamente apos configurar a chave
+                    </Typography>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+
+            <Grid item xs={12} md={6}>
+              <Card sx={{ height: '100%', border: '1px solid', borderColor: 'divider' }}>
+                <CardContent>
+                  <Box display="flex" alignItems="center" gap={1} mb={2}>
+                    <Business color="action" />
+                    <Typography variant="h6" fontWeight={600}>
+                      API por Empresa
+                    </Typography>
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Cada empresa cliente cria sua propria aplicacao no LinkedIn Developer
+                    Portal e configura suas credenciais OAuth.
+                  </Typography>
+                  <Divider sx={{ my: 1.5 }} />
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Typography variant="body2"><strong>Consideracoes:</strong></Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      - Requer LinkedIn Company Page por empresa
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      - Cada empresa precisa aprovacao de parceiro LinkedIn
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      - Processo demorado (semanas para aprovacao)
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      - Ideal apenas para clientes enterprise
+                    </Typography>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+
+          {/* Step-by-step guides */}
+          <Typography variant="h6" fontWeight={600} gutterBottom>
+            Guia Passo-a-Passo por Metodo
+          </Typography>
+
+          {/* Method 1: Proxycurl */}
+          <Accordion defaultExpanded sx={{ mb: 1 }}>
+            <AccordionSummary expandIcon={<ExpandMore />}>
+              <Box display="flex" alignItems="center" gap={1.5}>
+                <Chip label="1" size="small" color="primary" sx={{ fontWeight: 700 }} />
+                <Typography fontWeight={600}>Proxycurl API (Recomendado)</Typography>
+                <Chip label="Facil" size="small" color="success" variant="outlined" />
+              </Box>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Alert severity="info" variant="outlined">
+                  O Proxycurl oferece creditos gratuitos para teste. Uma unica chave
+                  atende todos os clientes da plataforma.
+                </Alert>
+                {[
+                  {
+                    step: '1',
+                    title: 'Criar conta no Proxycurl',
+                    desc: 'Acesse nubela.co/proxycurl e crie uma conta. Voce recebera creditos gratuitos para teste.',
+                  },
+                  {
+                    step: '2',
+                    title: 'Obter API Key',
+                    desc: 'No dashboard do Proxycurl, copie sua API Key na secao "API Keys".',
+                  },
+                  {
+                    step: '3',
+                    title: 'Configurar no sistema',
+                    desc: 'Va em Configuracoes > LinkedIn > selecione Provider "proxycurl" > cole a API Key > Habilite o LinkedIn.',
+                  },
+                  {
+                    step: '4',
+                    title: 'Testar a integracao',
+                    desc: 'Volte para a aba "Extrair Perfil" e teste com uma URL de perfil do LinkedIn.',
+                  },
+                ].map((item) => (
+                  <Box key={item.step} display="flex" gap={1.5} alignItems="flex-start">
+                    <Chip
+                      label={item.step}
+                      size="small"
+                      color="primary"
+                      sx={{ fontWeight: 700, minWidth: 28, mt: 0.3 }}
+                    />
+                    <Box>
+                      <Typography variant="body2" fontWeight={600}>
+                        {item.title}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {item.desc}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ))}
+                <Box sx={{ mt: 1, p: 2, bgcolor: alpha(theme.palette.info.main, 0.05), borderRadius: 2 }}>
+                  <Typography variant="body2" fontWeight={600} gutterBottom>
+                    Exemplo de teste com curl:
+                  </Typography>
+                  <Box
+                    component="pre"
+                    sx={{
+                      p: 1.5,
+                      bgcolor: 'grey.900',
+                      color: 'grey.100',
+                      borderRadius: 1,
+                      fontSize: '0.8rem',
+                      overflow: 'auto',
+                      m: 0,
+                    }}
+                  >
+{`curl -H "Authorization: Bearer SUA_API_KEY" \\
+  "https://nubela.co/proxycurl/api/v2/linkedin?url=https://linkedin.com/in/perfil"`}
+                  </Box>
+                </Box>
+              </Box>
+            </AccordionDetails>
+          </Accordion>
+
+          {/* Method 2: Official LinkedIn API */}
+          <Accordion sx={{ mb: 1 }}>
+            <AccordionSummary expandIcon={<ExpandMore />}>
+              <Box display="flex" alignItems="center" gap={1.5}>
+                <Chip label="2" size="small" color="primary" sx={{ fontWeight: 700 }} />
+                <Typography fontWeight={600}>API Oficial do LinkedIn</Typography>
+                <Chip label="Avancado" size="small" color="warning" variant="outlined" />
+              </Box>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Alert severity="warning" variant="outlined">
+                  A API oficial requer aprovacao de parceiro e uma LinkedIn Company Page.
+                  O token expira a cada 60 dias e NAO tem refresh token.
+                </Alert>
+                {[
+                  {
+                    step: '1',
+                    title: 'Criar app no LinkedIn Developer Portal',
+                    desc: 'Acesse linkedin.com/developers/apps > "Create app" > Preencha nome, Company Page e logo.',
+                  },
+                  {
+                    step: '2',
+                    title: 'Configurar OAuth 2.0',
+                    desc: 'Na aba "Auth", adicione o Redirect URL do seu sistema. Solicite escopos: r_liteprofile, r_emailaddress. Para buscas: r_basicprofile.',
+                  },
+                  {
+                    step: '3',
+                    title: 'Solicitar acesso a Products',
+                    desc: 'Na aba "Products", solicite: "Sign In with LinkedIn using OpenID Connect". Para buscas avancadas, solicite "LinkedIn Recruiter System Connect" (requer conta Recruiter).',
+                  },
+                  {
+                    step: '4',
+                    title: 'Configurar no sistema',
+                    desc: 'Va em Configuracoes > LinkedIn > Provider "official" > Cole Client ID e Client Secret > Habilite.',
+                  },
+                ].map((item) => (
+                  <Box key={item.step} display="flex" gap={1.5} alignItems="flex-start">
+                    <Chip
+                      label={item.step}
+                      size="small"
+                      color="primary"
+                      sx={{ fontWeight: 700, minWidth: 28, mt: 0.3 }}
+                    />
+                    <Box>
+                      <Typography variant="body2" fontWeight={600}>
+                        {item.title}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {item.desc}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ))}
+                <Box sx={{ mt: 1 }}>
+                  <Typography variant="body2" fontWeight={600} gutterBottom>
+                    Escopos disponiveis:
+                  </Typography>
+                  <TableContainer component={Paper} variant="outlined">
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell><strong>Escopo</strong></TableCell>
+                          <TableCell><strong>Descricao</strong></TableCell>
+                          <TableCell><strong>Aprovacao</strong></TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {[
+                          ['r_liteprofile', 'Nome, foto, headline', 'Automatica'],
+                          ['r_emailaddress', 'Email do membro', 'Automatica'],
+                          ['r_basicprofile', 'Perfil completo', 'Parceiro'],
+                          ['w_member_social', 'Publicar posts', 'Parceiro'],
+                          ['r_organization_social', 'Pagina da empresa', 'Parceiro'],
+                        ].map(([scope, desc, approval]) => (
+                          <TableRow key={scope}>
+                            <TableCell>
+                              <Chip label={scope} size="small" variant="outlined" sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }} />
+                            </TableCell>
+                            <TableCell>{desc}</TableCell>
+                            <TableCell>
+                              <Chip
+                                label={approval}
+                                size="small"
+                                color={approval === 'Automatica' ? 'success' : 'warning'}
+                                variant="outlined"
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Box>
+              </Box>
+            </AccordionDetails>
+          </Accordion>
+
+          {/* Method 3: RapidAPI */}
+          <Accordion sx={{ mb: 1 }}>
+            <AccordionSummary expandIcon={<ExpandMore />}>
+              <Box display="flex" alignItems="center" gap={1.5}>
+                <Chip label="3" size="small" color="primary" sx={{ fontWeight: 700 }} />
+                <Typography fontWeight={600}>RapidAPI LinkedIn Endpoints</Typography>
+                <Chip label="Medio" size="small" color="info" variant="outlined" />
+              </Box>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Alert severity="info" variant="outlined">
+                  Alternativa freemium com 50-500 requisicoes/mes gratuitas.
+                  Menor confiabilidade que o Proxycurl.
+                </Alert>
+                {[
+                  {
+                    step: '1',
+                    title: 'Criar conta no RapidAPI',
+                    desc: 'Acesse rapidapi.com e crie uma conta gratuita.',
+                  },
+                  {
+                    step: '2',
+                    title: 'Escolher API de LinkedIn',
+                    desc: 'Busque por "LinkedIn" no marketplace. APIs recomendadas: "LinkedIn Profile Data" (rockapis), "Fresh LinkedIn Profile Data" (mgujjargamingm).',
+                  },
+                  {
+                    step: '3',
+                    title: 'Inscrever-se no plano gratuito',
+                    desc: 'Selecione o plano Free para testar. Copie sua RapidAPI Key do dashboard.',
+                  },
+                ].map((item) => (
+                  <Box key={item.step} display="flex" gap={1.5} alignItems="flex-start">
+                    <Chip
+                      label={item.step}
+                      size="small"
+                      color="primary"
+                      sx={{ fontWeight: 700, minWidth: 28, mt: 0.3 }}
+                    />
+                    <Box>
+                      <Typography variant="body2" fontWeight={600}>
+                        {item.title}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {item.desc}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
+            </AccordionDetails>
+          </Accordion>
+
+          {/* Method 4: Manual */}
+          <Accordion sx={{ mb: 3 }}>
+            <AccordionSummary expandIcon={<ExpandMore />}>
+              <Box display="flex" alignItems="center" gap={1.5}>
+                <Chip label="4" size="small" color="primary" sx={{ fontWeight: 700 }} />
+                <Typography fontWeight={600}>Entrada Manual (Sem API)</Typography>
+                <Chip label="Gratuito" size="small" color="success" variant="outlined" />
+              </Box>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Alert severity="success" variant="outlined">
+                  Ja disponivel! Use a aba "Enriquecimento Manual" para inserir dados
+                  copiados diretamente do perfil do LinkedIn.
+                </Alert>
+                <Typography variant="body2" color="text.secondary">
+                  Acesse o perfil do candidato no LinkedIn, copie as informacoes
+                  relevantes (headline, skills, experiencias) e insira na aba
+                  "Enriquecimento Manual" com o ID do candidato.
+                </Typography>
+              </Box>
+            </AccordionDetails>
+          </Accordion>
+
+          {/* Comparison Table */}
+          <Typography variant="h6" fontWeight={600} gutterBottom>
+            Comparacao de Metodos
+          </Typography>
+          <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.05) }}>
+                  <TableCell><strong>Metodo</strong></TableCell>
+                  <TableCell><strong>Custo</strong></TableCell>
+                  <TableCell><strong>Dificuldade</strong></TableCell>
+                  <TableCell><strong>Confiabilidade</strong></TableCell>
+                  <TableCell><strong>Dados</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {[
+                  {
+                    method: 'Proxycurl',
+                    cost: '~R$0,05/perfil',
+                    difficulty: 'Facil',
+                    diffColor: 'success' as const,
+                    reliability: 'Alta',
+                    relColor: 'success' as const,
+                    data: 'Completo (perfil, experiencias, skills, educacao)',
+                  },
+                  {
+                    method: 'API Oficial',
+                    cost: 'Gratuito (basico)',
+                    difficulty: 'Alta',
+                    diffColor: 'error' as const,
+                    reliability: 'Alta',
+                    relColor: 'success' as const,
+                    data: 'Basico (nome, foto, email). Completo requer Recruiter',
+                  },
+                  {
+                    method: 'RapidAPI',
+                    cost: 'Freemium',
+                    difficulty: 'Media',
+                    diffColor: 'warning' as const,
+                    reliability: 'Media',
+                    relColor: 'warning' as const,
+                    data: 'Variavel conforme o endpoint',
+                  },
+                  {
+                    method: 'Manual',
+                    cost: 'Gratuito',
+                    difficulty: 'Facil',
+                    diffColor: 'success' as const,
+                    reliability: 'Alta',
+                    relColor: 'success' as const,
+                    data: 'O que o usuario copiar do perfil',
+                  },
+                ].map((row) => (
+                  <TableRow key={row.method}>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={600}>{row.method}</Typography>
+                    </TableCell>
+                    <TableCell>{row.cost}</TableCell>
+                    <TableCell>
+                      <Chip label={row.difficulty} size="small" color={row.diffColor} variant="outlined" />
+                    </TableCell>
+                    <TableCell>
+                      <Chip label={row.reliability} size="small" color={row.relColor} variant="outlined" />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">{row.data}</Typography>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          {/* Rate Limits Info */}
+          <Alert severity="info" variant="outlined" sx={{ mb: 3 }}>
+            <Typography variant="body2" fontWeight={600} gutterBottom>
+              Limites da API Oficial do LinkedIn (por dia):
+            </Typography>
+            <Typography variant="body2">
+              API de Perfil: 100 req/dia | Publicacoes: 50/dia | Admin Empresa: 500/dia |
+              Token expira em 60 dias (sem refresh token - usuario precisa reautenticar)
+            </Typography>
+          </Alert>
+
+          {/* Quick action */}
+          <Paper sx={{ p: 3, border: '1px solid', borderColor: 'divider' }}>
+            <Typography variant="h6" fontWeight={600} gutterBottom>
+              Proximos Passos
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Typography variant="body2" color="text.secondary">
+                1. Escolha o metodo de integracao (recomendamos <strong>Proxycurl</strong>)
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                2. Obtenha as credenciais seguindo o guia acima
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                3. Configure em <strong>Configuracoes &gt; LinkedIn</strong> (menu lateral)
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                4. Volte aqui e verifique o status no topo desta pagina
+              </Typography>
+              <Box display="flex" gap={1} mt={1}>
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={() => navigate('/settings')}
+                  startIcon={<Settings />}
+                >
+                  Ir para Configuracoes
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={loadConfigStatus}
+                  disabled={loadingConfig}
+                  startIcon={loadingConfig ? <CircularProgress size={16} /> : <CheckCircle />}
+                >
+                  Verificar Status
+                </Button>
+              </Box>
+            </Box>
+          </Paper>
+        </Box>
       )}
     </Box>
   );

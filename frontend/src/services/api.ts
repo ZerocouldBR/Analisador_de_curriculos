@@ -431,6 +431,16 @@ class ApiService {
     return response.data;
   }
 
+  async getLinkedInConfigStatus(): Promise<any> {
+    const response = await this.api.get('/v1/linkedin/config-status');
+    return response.data;
+  }
+
+  async getLinkedInGuide(): Promise<any> {
+    const response = await this.api.get('/v1/linkedin/guide');
+    return response.data;
+  }
+
   // ==================== Companies ====================
   async getCompanies(): Promise<Company[]> {
     const response = await this.api.get<Company[]>('/v1/companies/');
