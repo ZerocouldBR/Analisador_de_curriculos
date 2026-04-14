@@ -248,9 +248,18 @@ class TextExtractionService:
                 for page_num, page in enumerate(pdf.pages):
                     page_text = ""
 
-                    # Tentar extracao direta de texto
+                    # Tentar extracao direta de texto (com configuracoes otimizadas)
                     try:
-                        direct_text = page.extract_text() or ""
+                        # Usar configuracao otimizada para extrair texto
+                        extract_settings = {
+                            "x_tolerance": 3,
+                            "y_tolerance": 3,
+                            "keep_blank_chars": False,
+                        }
+                        direct_text = page.extract_text(
+                            x_tolerance=extract_settings["x_tolerance"],
+                            y_tolerance=extract_settings["y_tolerance"],
+                        ) or ""
                         direct_text = direct_text.strip()
                     except Exception as e:
                         direct_text = ""
@@ -279,7 +288,7 @@ class TextExtractionService:
                         pages_with_text += 1
                         page_confidence = 1.0
                     elif OCR_AVAILABLE:
-                        # Aplicar OCR com preprocessamento
+                        # Aplicar OCR com preprocessamento na pagina inteira
                         ocr_text, ocr_confidence = TextExtractionService._ocr_pdf_page(
                             page, page_num
                         )
@@ -302,6 +311,19 @@ class TextExtractionService:
                                 )
                     else:
                         page_text = direct_text
+
+                    # Extrair imagens embutidas na pagina e fazer OCR nelas
+                    # So extrair se a pagina nao teve texto direto suficiente,
+                    # para evitar duplicar texto que ja foi capturado
+                    if OCR_AVAILABLE and not has_sufficient_text:
+                        try:
+                            embedded_img_texts = TextExtractionService._extract_images_from_pdf_page(
+                                page, page_num
+                            )
+                            if embedded_img_texts:
+                                page_text += "\n" + "\n".join(embedded_img_texts)
+                        except Exception as img_err:
+                            logger.debug(f"Erro ao extrair imagens da pagina {page_num + 1}: {img_err}")
 
                     # Combinar texto direto + tabelas
                     combined = page_text
@@ -348,7 +370,9 @@ class TextExtractionService:
         """
         Aplica OCR em uma pagina do PDF com preprocessamento
 
-        Tenta multiplas resolucoes e tecnicas de preprocessamento
+        Tenta multiplas resolucoes e tecnicas de preprocessamento.
+        Para cada resolucao, tenta com e sem preprocessamento para
+        capturar o melhor resultado possivel.
 
         Returns:
             Tuple (texto_extraido, confianca_media)
@@ -361,7 +385,7 @@ class TextExtractionService:
                 # Converter pagina para imagem
                 page_image = page.to_image(resolution=resolution).original
 
-                # Preprocessar imagem
+                # Tentar com preprocessamento
                 processed_image = TextExtractionService._preprocess_image(page_image)
 
                 # OCR com dados de confianca
@@ -383,7 +407,6 @@ class TextExtractionService:
                         confidences.append(float(conf))
 
                 if text_parts:
-                    text = " ".join(text_parts)
                     avg_conf = sum(confidences) / len(confidences) if confidences else 0
 
                     # Reconstruir com quebras de linha baseado em blocos
@@ -392,6 +415,34 @@ class TextExtractionService:
                     if avg_conf > best_confidence and len(text) > len(best_text):
                         best_text = text
                         best_confidence = avg_conf
+
+                # Tambem tentar sem preprocessamento (imagem original)
+                # pois alguns PDFs com texto digital sao prejudicados pelo preprocessamento
+                try:
+                    ocr_data_raw = pytesseract.image_to_data(
+                        page_image,
+                        lang=TextExtractionService._ocr_languages(),
+                        output_type=pytesseract.Output.DICT,
+                        config='--oem 3 --psm 3'
+                    )
+                    raw_parts = []
+                    raw_confs = []
+                    for i, conf in enumerate(ocr_data_raw['conf']):
+                        word = ocr_data_raw['text'][i].strip()
+                        if word and conf != -1:
+                            raw_parts.append(word)
+                            raw_confs.append(float(conf))
+
+                    if raw_parts:
+                        raw_avg = sum(raw_confs) / len(raw_confs)
+                        raw_text = TextExtractionService._reconstruct_text_from_ocr_data(ocr_data_raw)
+                        raw_quality = len(raw_text.strip()) * (raw_avg / 100.0)
+                        best_quality = len(best_text.strip()) * (best_confidence / 100.0)
+                        if raw_quality > best_quality:
+                            best_text = raw_text
+                            best_confidence = raw_avg
+                except Exception:
+                    pass
 
                 # Se confianca boa, nao precisa tentar outras resolucoes
                 from app.core.config import settings as _settings
@@ -403,6 +454,58 @@ class TextExtractionService:
                 continue
 
         return best_text, best_confidence
+
+    @staticmethod
+    def _extract_images_from_pdf_page(page, page_num: int) -> list:
+        """
+        Extrai imagens embutidas em uma pagina do PDF e aplica OCR nelas.
+        Isso captura logos, fotos e imagens com texto que nao sao capturadas
+        pela extracao de texto normal.
+        """
+        image_texts = []
+
+        try:
+            images = page.images
+            if not images:
+                return image_texts
+
+            for img_idx, img in enumerate(images[:10]):  # Limitar a 10 imagens por pagina
+                try:
+                    # Extrair regiao da imagem da pagina
+                    x0 = img.get("x0", 0)
+                    y0 = img.get("top", 0)
+                    x1 = img.get("x1", page.width)
+                    y1 = img.get("bottom", page.height)
+
+                    # Ignorar imagens muito pequenas (icones, decoracao)
+                    img_width = x1 - x0
+                    img_height = y1 - y0
+                    if img_width < 50 or img_height < 30:
+                        continue
+
+                    # Converter a regiao da pagina para imagem
+                    cropped = page.crop((x0, y0, x1, y1))
+                    page_image = cropped.to_image(resolution=300).original
+
+                    # Preprocessar e OCR
+                    processed = TextExtractionService._preprocess_image(page_image)
+                    ocr_text = pytesseract.image_to_string(
+                        processed,
+                        lang=TextExtractionService._ocr_languages(),
+                        config='--oem 3 --psm 6'
+                    ).strip()
+
+                    if len(ocr_text) > 20:  # Ignorar textos muito curtos
+                        image_texts.append(ocr_text)
+
+                except Exception as e:
+                    logger.debug(f"Erro OCR imagem {img_idx} pagina {page_num + 1}: {e}")
+                    continue
+
+        except Exception as e:
+            logger.debug(f"Erro ao listar imagens pagina {page_num + 1}: {e}")
+
+        return image_texts
 
     @staticmethod
     def _reconstruct_text_from_ocr_data(ocr_data: dict) -> str:

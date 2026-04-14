@@ -177,8 +177,56 @@ class ApiService {
     await this.api.post(`/v1/documents/${documentId}/reprocess`);
   }
 
+  async bulkUploadDocuments(files: File[], candidateId?: number): Promise<any> {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+
+    const params: Record<string, any> = {};
+    if (candidateId) params.candidate_id = candidateId;
+
+    const response = await this.api.post('/v1/documents/bulk-upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      params,
+      timeout: 600000, // 10 min for bulk
+    });
+
+    return response.data;
+  }
+
   async deleteDocument(documentId: number): Promise<void> {
     await this.api.delete(`/v1/candidates/documents/${documentId}`);
+  }
+
+  // ==================== Admin ====================
+  async getDatabaseStats(): Promise<any> {
+    const response = await this.api.get('/v1/admin/stats');
+    return response.data;
+  }
+
+  async cleanupDatabase(options: {
+    delete_candidates?: boolean;
+    delete_documents?: boolean;
+    delete_chunks?: boolean;
+    delete_experiences?: boolean;
+    delete_chat_history?: boolean;
+    delete_audit_logs?: boolean;
+    reset_sequences?: boolean;
+    confirm: string;
+  }): Promise<any> {
+    const response = await this.api.post('/v1/admin/cleanup', options, {
+      timeout: 120000,
+    });
+    return response.data;
+  }
+
+  async deleteCandidatesBatch(candidateIds: number[]): Promise<any> {
+    const response = await this.api.post('/v1/admin/delete-candidates', {
+      candidate_ids: candidateIds,
+      confirm: true,
+    });
+    return response.data;
   }
 
   // ==================== Search ====================

@@ -35,6 +35,11 @@ services:
       context: ./backend
     env_file:
       - ./backend/.env
+    environment:
+      # Pre-configurado para Docker: URLs apontam para containers
+      DATABASE_URL: postgresql+psycopg://analisador:analisador@db:5432/analisador_curriculos
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_PATH: /app/uploads
     ports:
       - "8000:8000"
     depends_on:
@@ -54,6 +59,10 @@ services:
     command: celery -A app.core.celery_app worker --loglevel=info --queues=documents,search --concurrency=4
     env_file:
       - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://analisador:analisador@db:5432/analisador_curriculos
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_PATH: /app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -71,6 +80,8 @@ services:
     command: celery -A app.core.celery_app flower --port=5555
     env_file:
       - ./backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "5555:5555"
     depends_on:
