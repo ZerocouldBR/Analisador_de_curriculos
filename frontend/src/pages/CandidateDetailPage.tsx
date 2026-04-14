@@ -20,6 +20,14 @@ import {
   Tabs,
   useTheme,
   alpha,
+  LinearProgress,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Link,
 } from '@mui/material';
 import {
   ArrowBack,
@@ -33,9 +41,12 @@ import {
   Badge,
   CloudUpload,
   SmartToy,
+  Hub,
+  OpenInNew,
+  Timeline,
 } from '@mui/icons-material';
 import { apiService } from '../services/api';
-import { Candidate, Document, Experience } from '../types';
+import { Candidate, Document, Experience, CandidateSource } from '../types';
 import { DetailSkeleton } from '../components/LoadingSkeleton';
 import { useNotification } from '../contexts/NotificationContext';
 
@@ -57,6 +68,7 @@ const CandidateDetailPage: React.FC = () => {
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [experiences, setExperiences] = useState<Experience[]>([]);
+  const [sources, setSources] = useState<CandidateSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState(0);
 
@@ -81,6 +93,13 @@ const CandidateDetailPage: React.FC = () => {
         setExperiences(experiencesData);
       } catch {
         // Experiences endpoint might not exist yet
+      }
+
+      try {
+        const sourcesResponse = await apiService.getCandidateSources(candidateId);
+        setSources(sourcesResponse.data);
+      } catch {
+        // Sources endpoint might not exist yet
       }
     } catch (error) {
       showError('Erro ao carregar dados do candidato');
@@ -168,6 +187,7 @@ const CandidateDetailPage: React.FC = () => {
               <Tab label="Informacoes" />
               <Tab label={`Documentos (${documents.length})`} />
               <Tab label={`Experiencias (${experiences.length})`} />
+              <Tab label={`Fontes (${sources.length})`} />
             </Tabs>
 
             <TabPanel value={tab} index={0}>
@@ -317,6 +337,112 @@ const CandidateDetailPage: React.FC = () => {
                       )}
                     </Box>
                   ))
+                )}
+              </Box>
+            </TabPanel>
+
+            <TabPanel value={tab} index={3}>
+              <Box sx={{ px: 3 }}>
+                {sources.length === 0 ? (
+                  <Box textAlign="center" py={4}>
+                    <Hub sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+                    <Typography color="text.secondary">
+                      Nenhuma fonte de sourcing vinculada
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Fontes sao criadas automaticamente durante sincronizacoes
+                    </Typography>
+                  </Box>
+                ) : (
+                  <>
+                    <TableContainer>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Provider</TableCell>
+                            <TableCell>Tipo</TableCell>
+                            <TableCell>URL Externa</TableCell>
+                            <TableCell>Confianca</TableCell>
+                            <TableCell>Ultimo Sync</TableCell>
+                            <TableCell>Status</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {sources.map((source) => (
+                            <TableRow key={source.id}>
+                              <TableCell>
+                                <Typography variant="body2" fontWeight={500}>
+                                  {source.provider_name}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Chip label={source.provider_type} size="small" variant="outlined" />
+                              </TableCell>
+                              <TableCell>
+                                {source.external_url ? (
+                                  <Link
+                                    href={source.external_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
+                                  >
+                                    <Typography variant="body2" noWrap sx={{ maxWidth: 150 }}>
+                                      {source.external_url}
+                                    </Typography>
+                                    <OpenInNew sx={{ fontSize: 14 }} />
+                                  </Link>
+                                ) : (
+                                  <Typography variant="body2" color="text.secondary">-</Typography>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Box display="flex" alignItems="center" gap={1} minWidth={100}>
+                                  <LinearProgress
+                                    variant="determinate"
+                                    value={source.source_confidence * 100}
+                                    sx={{ flex: 1, height: 6, borderRadius: 3 }}
+                                  />
+                                  <Typography variant="caption" fontWeight={500}>
+                                    {Math.round(source.source_confidence * 100)}%
+                                  </Typography>
+                                </Box>
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2">
+                                  {source.last_sync_at
+                                    ? new Date(source.last_sync_at).toLocaleString('pt-BR')
+                                    : 'Nunca'}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={source.last_status || 'N/A'}
+                                  size="small"
+                                  color={
+                                    source.last_status === 'success'
+                                      ? 'success'
+                                      : source.last_status === 'error'
+                                      ? 'error'
+                                      : 'default'
+                                  }
+                                  variant="outlined"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    <Box display="flex" justifyContent="flex-end" mt={2}>
+                      <Button
+                        variant="outlined"
+                        startIcon={<Timeline />}
+                        onClick={() => navigate(`/candidates/${id}/snapshots`)}
+                      >
+                        Ver Snapshots
+                      </Button>
+                    </Box>
+                  </>
                 )}
               </Box>
             </TabPanel>

@@ -25,6 +25,9 @@ import ProfilePage from './pages/ProfilePage';
 import CompaniesPage from './pages/CompaniesPage';
 import LinkedInPage from './pages/LinkedInPage';
 import DatabasePage from './pages/DatabasePage';
+import SourcingProvidersPage from './pages/SourcingProvidersPage';
+import SyncRunsPage from './pages/SyncRunsPage';
+import SnapshotTimelinePage from './pages/SnapshotTimelinePage';
 
 interface ProtectedRouteProps {
   children: React.ReactElement;
@@ -107,6 +110,9 @@ function App() {
                   <Route path="companies" element={<AdminGuard><CompaniesPage /></AdminGuard>} />
                   <Route path="linkedin" element={<LinkedInPage />} />
                   <Route path="database" element={<AdminGuard><DatabasePage /></AdminGuard>} />
+                  <Route path="sourcing" element={<SourcingProvidersPage />} />
+                  <Route path="sourcing/runs" element={<SyncRunsPage />} />
+                  <Route path="candidates/:id/snapshots" element={<SnapshotTimelinePage />} />
                 </Route>
 
                 {/* Catch-all */}
