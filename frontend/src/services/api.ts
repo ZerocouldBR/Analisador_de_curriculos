@@ -461,6 +461,23 @@ class ApiService {
     await this.api.delete(`/v1/companies/${id}`);
   }
 
+  async uploadCompanyLogo(companyId: number, file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await this.api.post(`/v1/companies/${companyId}/logo`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
+
+  async deleteCompanyLogo(companyId: number): Promise<void> {
+    await this.api.delete(`/v1/companies/${companyId}/logo`);
+  }
+
+  getCompanyLogoUrl(companyId: number): string {
+    return `${this.api.defaults.baseURL}/v1/companies/${companyId}/logo`;
+  }
+
   // ==================== VectorDB ====================
   async refreshEmbeddings(): Promise<any> {
     const response = await this.api.post('/v1/vectordb/initialize', {}, { timeout: 300000 });
