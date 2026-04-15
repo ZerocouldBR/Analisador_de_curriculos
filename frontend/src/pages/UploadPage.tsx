@@ -60,14 +60,7 @@ const getFileIcon = (mimeType: string) => {
   return <Article color="action" />;
 };
 
-const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.txt', '.rtf', '.odt', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff'];
-
-const isSupportedFile = (file: File): boolean => {
-  const parts = file.name.split('.');
-  if (parts.length < 2) return false; // No extension
-  const ext = '.' + (parts.pop()?.toLowerCase() || '');
-  return SUPPORTED_EXTENSIONS.includes(ext);
-};
+const DEFAULT_EXTENSIONS = ['.pdf', '.docx', '.doc', '.txt', '.rtf', '.odt', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff'];
 
 const UploadPage: React.FC = () => {
   const theme = useTheme();
@@ -79,6 +72,14 @@ const UploadPage: React.FC = () => {
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const [supportedExtensions, setSupportedExtensions] = useState<string[]>(DEFAULT_EXTENSIONS);
+
+  const isSupportedFile = useCallback((file: File): boolean => {
+    const parts = file.name.split('.');
+    if (parts.length < 2) return false;
+    const ext = '.' + (parts.pop()?.toLowerCase() || '');
+    return supportedExtensions.includes(ext);
+  }, [supportedExtensions]);
 
   useEffect(() => {
     const fetchCandidates = async () => {
@@ -90,6 +91,19 @@ const UploadPage: React.FC = () => {
       }
     };
     fetchCandidates();
+
+    // Fetch supported extensions from backend config
+    apiService.getSystemConfig()
+      .then((data) => {
+        const storageCategory = data.categories.find((c: any) => c.category === 'storage');
+        if (storageCategory) {
+          const extField = storageCategory.fields.find((f: any) => f.key === 'supported_upload_extensions');
+          if (extField?.value && Array.isArray(extField.value) && extField.value.length > 0) {
+            setSupportedExtensions(extField.value);
+          }
+        }
+      })
+      .catch(() => {});
 
     const handleProgress = (message: WebSocketMessage) => {
       if (message.type === 'document_progress' && message.document_id) {

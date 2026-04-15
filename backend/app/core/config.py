@@ -709,6 +709,10 @@ REGRAS:
     # Upload / Storage
     # ================================================================
     max_upload_size_mb: int = Field(default=20, description="Tamanho maximo de upload (MB)")
+    supported_upload_extensions: List[str] = Field(
+        default=[".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff"],
+        description="Extensoes de arquivo permitidas para upload de curriculos"
+    )
     storage_backend: str = Field(
         default="local",
         description="Backend de armazenamento: local, s3, minio"

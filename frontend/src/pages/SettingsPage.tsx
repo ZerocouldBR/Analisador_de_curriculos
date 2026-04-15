@@ -56,6 +56,8 @@ import {
   Info,
   NetworkCheck,
   FiberManualRecord,
+  SmartToy,
+  Label,
 } from '@mui/icons-material';
 import { apiService } from '../services/api';
 import {
@@ -84,6 +86,8 @@ const iconMap: Record<string, React.ReactElement> = {
   Security: <Security />,
   AttachMoney: <AttachMoney />,
   LinkedIn: <LinkedIn />,
+  SmartToy: <SmartToy />,
+  Label: <Label />,
 };
 
 // Field renderer component
