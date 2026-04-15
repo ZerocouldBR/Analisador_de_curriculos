@@ -80,6 +80,61 @@ const UploadPage: React.FC = () => {
   const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
   const folderInputRef = useRef<HTMLInputElement>(null);
 
+  // Track files in a ref for polling to avoid recreating interval on every render
+  const filesRef = useRef(files);
+  filesRef.current = files;
+
+  // Poll for document processing status via API (reliable, works across processes)
+  useEffect(() => {
+    const pollInterval = setInterval(async () => {
+      const currentFiles = filesRef.current;
+      const processingFiles = currentFiles.filter(
+        (f) => f.documentId && (f.status === 'processing' || f.status === 'uploading')
+      );
+
+      if (processingFiles.length === 0) return;
+
+      const documentIds = processingFiles
+        .map((f) => f.documentId!)
+        .filter((id) => id != null);
+
+      if (documentIds.length === 0) return;
+
+      try {
+        const statuses = await apiService.getBatchDocumentStatus(documentIds);
+
+        setFiles((prevFiles) =>
+          prevFiles.map((f) => {
+            if (!f.documentId) return f;
+            const statusUpdate = statuses.find((s) => s.id === f.documentId);
+            if (!statusUpdate) return f;
+
+            const newStatus = statusUpdate.processing_status as UploadFile['status'];
+            // Only update if there's actual progress
+            if (
+              newStatus === f.status &&
+              statusUpdate.processing_progress === f.progress
+            ) {
+              return f;
+            }
+
+            return {
+              ...f,
+              status: newStatus === 'pending' ? 'processing' : newStatus,
+              progress: statusUpdate.processing_progress,
+              message: statusUpdate.processing_message || f.message,
+            };
+          })
+        );
+      } catch (error) {
+        // Silently ignore polling errors - will retry on next interval
+        console.debug('Status polling error:', error);
+      }
+    }, 2000); // Poll every 2 seconds
+
+    return () => clearInterval(pollInterval);
+  }, []); // Empty deps - interval runs once, uses ref for current files
+
   useEffect(() => {
     const fetchCandidates = async () => {
       try {
@@ -91,6 +146,7 @@ const UploadPage: React.FC = () => {
     };
     fetchCandidates();
 
+    // Also keep WebSocket as secondary real-time channel
     const handleProgress = (message: WebSocketMessage) => {
       if (message.type === 'document_progress' && message.document_id) {
         setFiles((prevFiles) =>

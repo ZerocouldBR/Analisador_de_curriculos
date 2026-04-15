@@ -80,7 +80,10 @@ class DocumentService:
             original_filename=file.filename,
             mime_type=mime_type,
             source_path=relative_path,
-            sha256_hash=sha256_hash
+            sha256_hash=sha256_hash,
+            processing_status="pending",
+            processing_progress=0,
+            processing_message="Aguardando processamento",
         )
 
         db.add(document)

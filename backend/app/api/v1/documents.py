@@ -4,11 +4,11 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from app.db.database import get_db
-from app.schemas.candidate import DocumentResponse
+from app.schemas.candidate import DocumentResponse, DocumentStatusResponse
 from app.services.document_service import DocumentService
 from app.core.dependencies import get_current_user, require_permission
 from app.core.config import settings
-from app.db.models import User
+from app.db.models import User, Document
 
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -106,8 +106,6 @@ async def reprocess_document(
 
     **Requer permissão:** documents.update
     """
-    from app.db.models import Document
-
     document = db.query(Document).filter(Document.id == document_id).first()
 
     if not document:
@@ -131,6 +129,56 @@ async def reprocess_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao reprocessar documento: {str(e)}"
         )
+
+
+@router.get("/{document_id}/status", response_model=DocumentStatusResponse)
+async def get_document_status(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get the processing status of a document.
+    Used by frontend to poll for status updates.
+    """
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento nao encontrado"
+        )
+
+    return DocumentStatusResponse(
+        id=document.id,
+        processing_status=document.processing_status or "pending",
+        processing_progress=document.processing_progress or 0,
+        processing_message=document.processing_message,
+        processing_error=document.processing_error,
+    )
+
+
+@router.post("/batch-status", response_model=List[DocumentStatusResponse])
+async def get_batch_document_status(
+    document_ids: List[int],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get the processing status of multiple documents in a single request.
+    Used by frontend to poll status for all active uploads.
+    """
+    documents = db.query(Document).filter(Document.id.in_(document_ids)).all()
+
+    return [
+        DocumentStatusResponse(
+            id=doc.id,
+            processing_status=doc.processing_status or "pending",
+            processing_progress=doc.processing_progress or 0,
+            processing_message=doc.processing_message,
+            processing_error=doc.processing_error,
+        )
+        for doc in documents
+    ]
 
 
 @router.post("/bulk-upload", response_model=BulkUploadResponse)
