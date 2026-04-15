@@ -533,6 +533,11 @@ class ApiService {
     return response.data;
   }
 
+  async setupPgvector(): Promise<any> {
+    const response = await this.api.post('/v1/vectordb/setup-pgvector', {}, { timeout: 120000 });
+    return response.data;
+  }
+
   // ==================== Health ====================
   async healthCheck(): Promise<HealthCheck> {
     const response = await this.api.get<HealthCheck>('/health');
