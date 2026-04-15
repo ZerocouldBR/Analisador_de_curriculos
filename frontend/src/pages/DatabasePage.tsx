@@ -408,7 +408,7 @@ const DatabasePage: React.FC = () => {
                       gap: 1,
                       p: 1.5,
                       borderRadius: 1,
-                      bgcolor: step.status === 'error' ? 'error.50' : 'action.hover',
+                      bgcolor: step.status === 'error' ? 'rgba(211, 47, 47, 0.08)' : 'action.hover',
                       border: '1px solid',
                       borderColor: step.status === 'error' ? 'error.light' : 'divider',
                     }}
