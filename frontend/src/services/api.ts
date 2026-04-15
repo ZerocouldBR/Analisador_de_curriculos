@@ -195,6 +195,28 @@ class ApiService {
     return response.data;
   }
 
+  async getDocumentStatus(documentId: number): Promise<{
+    id: number;
+    processing_status: string;
+    processing_progress: number;
+    processing_message: string | null;
+    processing_error: string | null;
+  }> {
+    const response = await this.api.get(`/v1/documents/${documentId}/status`);
+    return response.data;
+  }
+
+  async getBatchDocumentStatus(documentIds: number[]): Promise<Array<{
+    id: number;
+    processing_status: string;
+    processing_progress: number;
+    processing_message: string | null;
+    processing_error: string | null;
+  }>> {
+    const response = await this.api.post('/v1/documents/batch-status', documentIds);
+    return response.data;
+  }
+
   async deleteDocument(documentId: number): Promise<void> {
     await this.api.delete(`/v1/candidates/documents/${documentId}`);
   }

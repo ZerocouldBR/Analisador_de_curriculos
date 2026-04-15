@@ -57,6 +57,21 @@ class DocumentResponse(DocumentBase):
     source_path: str
     sha256_hash: str
     uploaded_at: datetime
+    processing_status: Optional[str] = "pending"
+    processing_progress: Optional[int] = 0
+    processing_message: Optional[str] = None
+    processing_error: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DocumentStatusResponse(BaseModel):
+    id: int
+    processing_status: str
+    processing_progress: int
+    processing_message: Optional[str] = None
+    processing_error: Optional[str] = None
 
     class Config:
         from_attributes = True

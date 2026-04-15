@@ -183,6 +183,14 @@ class Document(Base):
     sha256_hash = Column(String, index=True)  # Indexado para deduplicação (não unique: mesmo arquivo pode ser associado a candidatos diferentes)
     uploaded_at = Column(DateTime, default=_utcnow)
 
+    # Processing status tracking
+    processing_status = Column(String, default="pending", index=True)  # pending, processing, completed, error
+    processing_progress = Column(Integer, default=0)  # 0-100
+    processing_message = Column(String, nullable=True)
+    processing_error = Column(Text, nullable=True)
+    processing_started_at = Column(DateTime, nullable=True)
+    processing_completed_at = Column(DateTime, nullable=True)
+
     # Relacionamentos
     candidate = relationship("Candidate", back_populates="documents")
     chunks = relationship("Chunk", back_populates="document", cascade="all, delete-orphan")
