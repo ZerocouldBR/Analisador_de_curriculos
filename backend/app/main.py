@@ -33,6 +33,33 @@ async def lifespan(app: FastAPI):
         logger.error(f"Erro ao inicializar banco de dados: {e}", exc_info=True)
         logger.warning("Execute manualmente: python -m app.db.init_db")
 
+    # Startup: Carregar overrides de configuracao do banco de dados
+    try:
+        from app.db.database import SessionLocal
+        from app.services.settings_service import SettingsService
+        db_session = SessionLocal()
+        try:
+            overrides = SettingsService.get_system_config_overrides(db_session)
+            if overrides:
+                applied = []
+                for key, value in overrides.items():
+                    if hasattr(settings, key):
+                        current_val = getattr(settings, key)
+                        if hasattr(current_val, 'value') and isinstance(value, str):
+                            enum_class = type(current_val)
+                            try:
+                                value = enum_class(value)
+                            except ValueError:
+                                pass
+                        object.__setattr__(settings, key, value)
+                        applied.append(key)
+                if applied:
+                    logger.info(f"Overrides de configuracao carregados do DB: {len(applied)} campos")
+        finally:
+            db_session.close()
+    except Exception as e:
+        logger.warning(f"Nao foi possivel carregar overrides de configuracao: {e}")
+
     # Startup: Inicializar vector store
     try:
         from app.vectorstore.factory import initialize_vector_store

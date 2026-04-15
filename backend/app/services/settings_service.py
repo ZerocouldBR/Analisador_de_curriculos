@@ -319,18 +319,52 @@ class SettingsService:
             except ImportError:
                 pass
 
-        # Identificar quais mudancas requerem restart
+        # Aplicar overrides ao singleton de settings em runtime
+        # (apenas campos que NAO requerem restart)
+        runtime_applied = []
         restart_needed = False
         for key in updated_keys:
             meta = get_field_metadata(key)
             if meta and meta.get("restart_required"):
                 restart_needed = True
-                break
+            else:
+                # Aplicar diretamente ao singleton de settings
+                try:
+                    if hasattr(app_settings, key):
+                        current_val = getattr(app_settings, key)
+                        new_val = current_overrides[key]
+                        # Converter enums se necessario
+                        if hasattr(current_val, 'value') and isinstance(new_val, str):
+                            enum_class = type(current_val)
+                            try:
+                                new_val = enum_class(new_val)
+                            except ValueError:
+                                pass
+                        object.__setattr__(app_settings, key, new_val)
+                        runtime_applied.append(key)
+                except Exception as e:
+                    logger.warning(f"Nao foi possivel aplicar '{key}' em runtime: {e}")
+
+        if runtime_applied:
+            logger.info(f"Configuracoes aplicadas em runtime: {runtime_applied}")
+
+        # Reset vector store registry se configuracoes de vector DB mudaram
+        vector_keys = {
+            "pgvector_enabled", "supabase_enabled", "qdrant_enabled",
+            "vector_db_primary", "pgvector_distance_metric",
+        }
+        if vector_keys.intersection(updated_keys):
+            try:
+                from app.vectorstore.factory import reset_vector_store
+                reset_vector_store()
+            except ImportError:
+                pass
 
         return {
             "updated_keys": updated_keys,
             "total_overrides": len(current_overrides),
             "restart_required": restart_needed,
+            "runtime_applied": runtime_applied,
         }
 
     @staticmethod

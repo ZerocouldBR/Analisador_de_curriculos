@@ -78,6 +78,16 @@ class PgVectorStore(VectorStore):
 
             # Criar indice GIN para full-text search
             try:
+                # Validar fts_language contra whitelist para prevenir SQL injection
+                _VALID_FTS_LANGS = {
+                    "portuguese", "english", "spanish", "french", "german",
+                    "italian", "dutch", "russian", "simple",
+                }
+                fts_lang = settings.fts_language
+                if fts_lang not in _VALID_FTS_LANGS:
+                    logger.warning(f"fts_language invalido: {fts_lang}, usando 'portuguese'")
+                    fts_lang = "portuguese"
+
                 result = conn.execute(sql_text(
                     "SELECT indexname FROM pg_indexes "
                     "WHERE indexname = 'idx_chunks_content_fts'"
@@ -86,7 +96,7 @@ class PgVectorStore(VectorStore):
                     conn.execute(sql_text(
                         f"CREATE INDEX idx_chunks_content_fts "
                         f"ON chunks USING GIN ("
-                        f"to_tsvector('{settings.fts_language}', content));"
+                        f"to_tsvector('{fts_lang}', content));"
                     ))
                     conn.commit()
                     logger.info("FTS index created")
@@ -317,7 +327,7 @@ class PgVectorStore(VectorStore):
                 "pgvector_version": pgvector_version,
                 "embeddings_count": count,
                 "distance_metric": settings.pgvector_distance_metric,
-                "dimensions": settings.embedding_dimensions,
+                "dimensions": settings.active_embedding_dimensions,
             }
         except Exception as e:
             return {"status": "unhealthy", "provider": "pgvector", "error": str(e)}

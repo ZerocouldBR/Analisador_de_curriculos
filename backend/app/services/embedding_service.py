@@ -323,7 +323,7 @@ class EmbeddingService:
 
         stores = get_all_enabled_stores()
         meta = metadata or {}
-        meta["model"] = self.model
+        meta["model"] = self.active_model_name
 
         errors = []
         for name, store in stores.items():
@@ -353,7 +353,7 @@ class EmbeddingService:
 
         stores = get_all_enabled_stores()
         ids = [str(cid) for cid in chunk_ids]
-        metas = metadatas or [{"model": self.model} for _ in chunk_ids]
+        metas = metadatas or [{"model": self.active_model_name} for _ in chunk_ids]
 
         errors = []
         for name, store in stores.items():
