@@ -11,10 +11,10 @@ Enhanced with:
 """
 import re
 import logging
+from datetime import datetime, timezone
 from celery import Task
 from sqlalchemy.orm import Session
 from typing import Optional
-import asyncio
 
 from app.core.celery_app import celery_app
 from app.db.database import SessionLocal
@@ -24,7 +24,6 @@ from app.services.text_extraction_service import TextExtractionService
 from app.services.resume_parser_service import ResumeParserService
 from app.services.keyword_extraction_service import KeywordExtractionService
 from app.services.embedding_service import SemanticChunker
-from app.core.websocket_manager import websocket_manager
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -74,19 +73,19 @@ def process_document_task(
 
     try:
         # Send initial status
-        _send_progress(document_id, "started", 0, "Iniciando processamento do documento")
+        _update_document_status(db, document_id, "processing", 0, "Iniciando processamento do documento")
 
         # Get document
         document = db.query(Document).filter(Document.id == document_id).first()
         if not document:
-            _send_progress(document_id, "error", 0, f"Documento {document_id} nao encontrado")
+            _update_document_status(db, document_id, "error", 0, f"Documento {document_id} nao encontrado", error=f"Document {document_id} not found")
             raise ValueError(f"Document {document_id} not found")
 
-        _send_progress(document_id, "processing", 10, "Documento encontrado")
+        _update_document_status(db, document_id, "processing", 10, "Documento encontrado")
 
         # Get absolute file path
         file_path = storage_service.get_absolute_path(document.source_path)
-        _send_progress(document_id, "processing", 15, "Extraindo texto do documento (OCR avancado)")
+        _update_document_status(db, document_id, "processing", 15, "Extraindo texto do documento (OCR avancado)")
 
         # ============================================
         # STEP 1: Enhanced Text Extraction
@@ -115,20 +114,20 @@ def process_document_task(
         if ocr_result.pages_with_ocr > 0:
             progress_msg += f" (OCR em {ocr_result.pages_with_ocr} paginas, confianca: {ocr_result.confidence:.0%})"
 
-        _send_progress(document_id, "processing", 35, progress_msg)
+        _update_document_status(db, document_id, "processing", 35, progress_msg)
 
         # ============================================
         # STEP 2: Normalize Text
         # ============================================
         text = TextExtractionService.normalize_text(text)
-        _send_progress(document_id, "processing", 40, "Texto normalizado")
+        _update_document_status(db, document_id, "processing", 40, "Texto normalizado")
 
         # ============================================
         # STEP 3: Parse Resume Structure
         # ============================================
-        _send_progress(document_id, "processing", 45, "Analisando estrutura do curriculo")
+        _update_document_status(db, document_id, "processing", 45, "Analisando estrutura do curriculo")
         resume_data = ResumeParserService.parse_resume(text)
-        _send_progress(document_id, "processing", 55, "Curriculo analisado com sucesso")
+        _update_document_status(db, document_id, "processing", 55, "Curriculo analisado com sucesso")
 
         # ============================================
         # STEP 4: Update Candidate Information
@@ -175,7 +174,7 @@ def process_document_task(
 
             db.commit()
 
-        _send_progress(document_id, "processing", 58, "Dados do candidato atualizados")
+        _update_document_status(db, document_id, "processing", 58, "Dados do candidato atualizados")
 
         # ============================================
         # STEP 4b: Populate Experience Table
@@ -227,27 +226,27 @@ def process_document_task(
 
             db.commit()
 
-        _send_progress(document_id, "processing", 60, "Experiencias salvas no banco de dados")
+        _update_document_status(db, document_id, "processing", 60, "Experiencias salvas no banco de dados")
 
         # ============================================
         # STEP 5: Extract Keywords (Enhanced)
         # ============================================
-        _send_progress(document_id, "processing", 65, "Extraindo palavras-chave (producao/logistica/qualidade)")
+        _update_document_status(db, document_id, "processing", 65, "Extraindo palavras-chave (producao/logistica/qualidade)")
 
         document_keywords = {}
         if getattr(settings, 'enable_keyword_extraction', True):
             document_keywords = KeywordExtractionService.extract_keywords(text, resume_data)
 
         profile_type = document_keywords.get("candidate_profile_type", "general")
-        _send_progress(
-            document_id, "processing", 72,
+        _update_document_status(
+            db, document_id, "processing", 72,
             f"Keywords extraidas - Perfil detectado: {profile_type}"
         )
 
         # ============================================
         # STEP 6: Clear Old Chunks and Create New Ones
         # ============================================
-        _send_progress(document_id, "processing", 75, "Criando chunks de texto otimizados")
+        _update_document_status(db, document_id, "processing", 75, "Criando chunks de texto otimizados")
 
         # Delete old embeddings for this document's chunks first (cascade)
         old_chunk_ids = [
@@ -389,7 +388,7 @@ def process_document_task(
                 chunks_created += 1
 
         db.commit()
-        _send_progress(document_id, "processing", 88, f"{chunks_created} chunks criados")
+        _update_document_status(db, document_id, "processing", 88, f"{chunks_created} chunks criados")
 
         # ============================================
         # STEP 7: Save CandidateProfile Snapshot
@@ -410,7 +409,7 @@ def process_document_task(
             db.add(profile)
             db.commit()
 
-        _send_progress(document_id, "processing", 92, "Perfil do candidato salvo")
+        _update_document_status(db, document_id, "processing", 92, "Perfil do candidato salvo")
 
         # ============================================
         # STEP 8: Audit Log
@@ -441,7 +440,7 @@ def process_document_task(
         db.add(audit)
         db.commit()
 
-        _send_progress(document_id, "completed", 100, "Processamento concluido com sucesso")
+        _update_document_status(db, document_id, "completed", 100, "Processamento concluido com sucesso")
 
         return {
             "document_id": document_id,
@@ -456,7 +455,7 @@ def process_document_task(
     except Exception as e:
         error_msg = f"Erro ao processar documento: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        _send_progress(document_id, "error", 0, error_msg)
+        _update_document_status(db, document_id, "error", 0, error_msg, error=str(e))
 
         audit = AuditLog(
             user_id=user_id,
@@ -471,16 +470,24 @@ def process_document_task(
         raise
 
 
-def _send_progress(document_id: int, status: str, progress: int, message: str):
-    """Send progress update via WebSocket"""
+def _update_document_status(db: Session, document_id: int, status: str, progress: int, message: str, error: str = None):
+    """Persist processing status in the database so frontend can poll it"""
     try:
-        asyncio.run(
-            websocket_manager.send_document_progress(
-                document_id=document_id,
-                status=status,
-                progress=progress,
-                message=message
-            )
-        )
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if document:
+            document.processing_status = status
+            document.processing_progress = progress
+            document.processing_message = message
+            if error:
+                document.processing_error = error
+            if status == "processing" and not document.processing_started_at:
+                document.processing_started_at = datetime.now(timezone.utc)
+            if status in ("completed", "error"):
+                document.processing_completed_at = datetime.now(timezone.utc)
+            db.commit()
     except Exception as e:
-        logger.debug(f"Failed to send WebSocket progress: {e}")
+        logger.warning(f"Failed to update document status: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
