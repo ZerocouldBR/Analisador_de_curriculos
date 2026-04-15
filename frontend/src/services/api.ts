@@ -494,6 +494,67 @@ class ApiService {
     const response = await this.api.get<HealthCheck>('/health');
     return response.data;
   }
+
+  // ==================== Sourcing ====================
+  async getSourcingProviders(): Promise<any> {
+    const response = await this.api.get('/v1/sourcing/providers');
+    return response.data;
+  }
+
+  async getProviderStatus(name: string): Promise<any> {
+    const response = await this.api.get(`/v1/sourcing/providers/${name}/status`);
+    return response.data;
+  }
+
+  async upsertProviderConfig(data: any): Promise<any> {
+    const response = await this.api.post('/v1/sourcing/providers/config', data);
+    return response.data;
+  }
+
+  async testProvider(name: string): Promise<any> {
+    const response = await this.api.post(`/v1/sourcing/providers/${name}/test`);
+    return response.data;
+  }
+
+  async triggerSync(name: string, criteria?: any): Promise<any> {
+    const response = await this.api.post(`/v1/sourcing/providers/${name}/sync`, criteria ? { criteria } : {});
+    return response.data;
+  }
+
+  async getSyncRuns(providerName?: string, limit?: number): Promise<any> {
+    const response = await this.api.get('/v1/sourcing/runs', { params: { provider_name: providerName, limit } });
+    return response.data;
+  }
+
+  async getSyncRunDetail(runId: number): Promise<any> {
+    const response = await this.api.get(`/v1/sourcing/runs/${runId}`);
+    return response.data;
+  }
+
+  async getCandidateSources(candidateId: number): Promise<any> {
+    const response = await this.api.get(`/v1/sourcing/candidates/${candidateId}/sources`);
+    return response.data;
+  }
+
+  async getCandidateSnapshots(candidateId: number): Promise<any> {
+    const response = await this.api.get(`/v1/sourcing/candidates/${candidateId}/snapshots`);
+    return response.data;
+  }
+
+  async getSnapshotDiff(candidateId: number, fromId: number, toId: number): Promise<any> {
+    const response = await this.api.get(`/v1/sourcing/candidates/${candidateId}/snapshots/diff`, { params: { from_id: fromId, to_id: toId } });
+    return response.data;
+  }
+
+  async getMergeSuggestions(limit?: number): Promise<any> {
+    const response = await this.api.get('/v1/sourcing/merge-suggestions', { params: { limit } });
+    return response.data;
+  }
+
+  async executeMerge(primaryId: number, secondaryId: number): Promise<any> {
+    const response = await this.api.post('/v1/sourcing/merge', { primary_candidate_id: primaryId, secondary_candidate_id: secondaryId });
+    return response.data;
+  }
 }
 
 export const apiService = new ApiService();

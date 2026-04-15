@@ -192,45 +192,107 @@ REDIS_URL=redis://redis:6379/0
 - ✅ Logs de auditoria imutáveis
 - ✅ Políticas de retenção de dados
 
-## 📖 Documentação Adicional
+### 4. Sourcing Hibrido de Candidatos
+
+Ingestao de candidatos de multiplas fontes com deduplicacao e versionamento:
+
+```bash
+# Listar providers de sourcing
+GET /api/v1/sourcing/providers
+
+# Configurar provider
+POST /api/v1/sourcing/providers/config
+
+# Testar conexao
+POST /api/v1/sourcing/providers/{name}/test
+
+# Sincronizar manualmente
+POST /api/v1/sourcing/providers/{name}/sync
+
+# Listar execucoes de sync
+GET /api/v1/sourcing/runs
+
+# Fontes de um candidato
+GET /api/v1/sourcing/candidates/{id}/sources
+
+# Snapshots e diffs
+GET /api/v1/sourcing/candidates/{id}/snapshots
+GET /api/v1/sourcing/candidates/{id}/snapshots/diff?from_id=1&to_id=2
+
+# Busca hibrida
+POST /api/v1/sourcing/search
+
+# Sugestoes de merge
+GET /api/v1/sourcing/merge-suggestions
+
+# Executar merge
+POST /api/v1/sourcing/merge
+```
+
+Configuracao via `.env`:
+```env
+SOURCING_ENABLED=true
+SOURCING_SYNC_INTERVAL_DAYS=5
+SOURCING_DEDUP_THRESHOLD=0.7
+SOURCING_MAX_SYNC_CANDIDATES=500
+```
+
+Documentacao completa: [Sourcing Hibrido](../docs/sourcing.md)
+
+## 📖 Documentacao Adicional
 
 - [Novas Funcionalidades](../docs/novas_funcionalidades.md)
+- [Sourcing Hibrido](../docs/sourcing.md)
 - [Arquitetura](../docs/arquitetura.md)
 - [Modelo de Dados](../docs/modelo_dados.md)
 - [Fluxos](../docs/fluxos.md)
 
 ## 🛠️ Desenvolvimento
 
-### Estrutura de Diretórios
+### Estrutura de Diretorios
 
 ```
 backend/
 ├── app/
 │   ├── api/
-│   │   └── v1/          # Endpoints da API
-│   ├── core/            # Configurações
-│   ├── db/              # Modelos e database
-│   ├── schemas/         # Schemas Pydantic
-│   └── services/        # Lógica de negócio
+│   │   └── v1/              # Endpoints da API (incl. sourcing.py)
+│   ├── core/                # Configuracoes (config.py, celery_app.py)
+│   ├── db/                  # Modelos e database
+│   ├── schemas/             # Schemas Pydantic (incl. sourcing.py)
+│   ├── services/
+│   │   ├── sourcing/        # Modulo de sourcing hibrido
+│   │   │   ├── provider_base.py
+│   │   │   ├── provider_registry.py
+│   │   │   ├── linkedin_provider.py
+│   │   │   ├── csv_import_provider.py
+│   │   │   ├── xlsx_import_provider.py
+│   │   │   ├── manual_entry_provider.py
+│   │   │   ├── webhook_provider.py
+│   │   │   ├── external_partner_provider.py
+│   │   │   ├── candidate_normalizer.py
+│   │   │   ├── snapshot_service.py
+│   │   │   ├── deduplication_service.py
+│   │   │   ├── candidate_merge_service.py
+│   │   │   └── sync_service.py
+│   │   └── ...              # Demais servicos
+│   ├── tasks/
+│   │   ├── document_tasks.py
+│   │   └── sourcing_tasks.py
+│   └── vectorstore/
+├── tests/
+│   ├── test_sourcing_models.py
+│   ├── test_provider_registry.py
+│   ├── test_candidate_normalizer.py
+│   └── test_sourcing_api.py
 ├── requirements.txt
 └── Dockerfile
 ```
 
-### Adicionar nova funcionalidade
+### Adicionar novo provider de sourcing
 
-1. Criar schema em `app/schemas/`
-2. Adicionar lógica em `app/services/`
-3. Criar endpoints em `app/api/v1/`
-4. Registrar router em `app/api/routes.py`
-5. Atualizar documentação
+1. Criar `app/services/sourcing/meu_provider.py` implementando `SourceProvider`
+2. Chamar `ProviderRegistry.register()` no final do arquivo
+3. Importar no `app/services/sourcing/__init__.py`
+4. Criar testes em `tests/test_meu_provider.py`
 
-## 📝 TODO
-
-- [ ] Implementar autenticação JWT
-- [ ] Adicionar RBAC (Role-Based Access Control)
-- [ ] Implementar upload de currículos
-- [ ] Adicionar OCR para PDFs/imagens
-- [ ] Integrar com API oficial do LinkedIn
-- [ ] Implementar busca semântica com embeddings
-- [ ] Adicionar testes unitários
-- [ ] Implementar processamento assíncrono com Celery
+Documentacao completa: [Como adicionar providers](../docs/sourcing.md#como-adicionar-novos-providers)

@@ -38,6 +38,7 @@ import {
   LightMode,
   ChevronLeft,
   Storage,
+  Hub,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useThemeMode } from '../contexts/ThemeContext';
@@ -57,7 +58,8 @@ const menuItems: MenuItem_[] = [
   { text: 'Candidatos', icon: <People />, path: '/candidates' },
   { text: 'Busca Inteligente', icon: <Search />, path: '/search' },
   { text: 'Upload de Curriculos', icon: <CloudUpload />, path: '/upload' },
-  { text: 'LinkedIn', icon: <LinkedIn />, path: '/linkedin', dividerAfter: true },
+  { text: 'LinkedIn', icon: <LinkedIn />, path: '/linkedin' },
+  { text: 'Sourcing', icon: <Hub />, path: '/sourcing', dividerAfter: true },
   { text: 'Empresas', icon: <Business />, path: '/companies' },
   { text: 'Configuracoes', icon: <Settings />, path: '/settings' },
   { text: 'Banco de Dados', icon: <Storage />, path: '/database' },

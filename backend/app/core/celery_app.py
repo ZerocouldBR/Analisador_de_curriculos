@@ -2,13 +2,14 @@
 Celery application configuration for async task processing.
 """
 from celery import Celery
+from celery.schedules import crontab
 from app.core.config import settings
 
 celery_app = Celery(
     "analisador_curriculos",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.document_tasks"]
+    include=["app.tasks.document_tasks", "app.tasks.sourcing_tasks"]
 )
 
 # Celery configuration
@@ -30,6 +31,15 @@ celery_app.conf.update(
 celery_app.conf.task_routes = {
     "app.tasks.document_tasks.*": {"queue": "documents"},
     "app.tasks.search_tasks.*": {"queue": "search"},
+    "app.tasks.sourcing_tasks.*": {"queue": "sourcing"},
+}
+
+# Celery Beat schedule
+celery_app.conf.beat_schedule = {
+    "nightly-source-healthcheck": {
+        "task": "app.tasks.sourcing_tasks.nightly_source_healthcheck_task",
+        "schedule": crontab(hour=3, minute=0),
+    },
 }
 
 # Result backend settings

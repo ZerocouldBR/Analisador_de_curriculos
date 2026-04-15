@@ -13,6 +13,7 @@ Sistema completo de RH on-premises para ingestao, analise, indexacao vetorial e 
 - Processamento assincrono com Celery
 - WebSocket para atualizacoes em tempo real
 - LinkedIn integration para enriquecimento de perfis
+- Sourcing hibrido de candidatos (multiplas fontes, sync automatico, deduplicacao, snapshots)
 - LGPD compliance com auditoria completa e criptografia PII
 - Monitoramento com Prometheus + Grafana
 - Configuracao completa via interface web (sem editar arquivos)

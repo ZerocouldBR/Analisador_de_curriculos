@@ -25,6 +25,11 @@ from app.db.models import (
     ChatMessage,
     LinkedInSearch,
     EncryptedPII,
+    CandidateSource,
+    CandidateSnapshot,
+    CandidateChangeLog,
+    SourcingSyncRun,
+    ProviderConfig,
 )
 
 

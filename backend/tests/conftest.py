@@ -1,7 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, JSON
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.dialects.postgresql import JSONB, ARRAY
 
 from app.main import app
 from app.db.database import Base, get_db
@@ -11,6 +12,42 @@ from app.core.security import get_password_hash
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
+
+# ---------------------------------------------------------------------------
+# Make PostgreSQL-specific types work on SQLite for testing
+# ---------------------------------------------------------------------------
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    """Enable WAL and foreign keys for SQLite."""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
+# Register JSONB -> JSON compilation on the SQLite dialect so that
+# models using ``JSONB`` can create tables on an SQLite backend.
+from sqlalchemy.ext.compiler import compiles  # noqa: E402
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(element, compiler, **kw):
+    return "JSON"
+
+
+@compiles(ARRAY, "sqlite")
+def _compile_array_sqlite(element, compiler, **kw):
+    return "JSON"
+
+
+# pgvector's Vector type also needs a fallback for SQLite.
+try:
+    from pgvector.sqlalchemy import Vector
+
+    @compiles(Vector, "sqlite")
+    def _compile_vector_sqlite(element, compiler, **kw):
+        return "TEXT"
+except Exception:
+    pass
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
