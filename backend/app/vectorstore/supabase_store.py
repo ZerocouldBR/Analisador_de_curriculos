@@ -7,55 +7,14 @@ Requer:
 - Tabela de embeddings criada
 - Funcao RPC para busca vetorial
 
-Setup no Supabase (SQL Editor):
+Para gerar o SQL de setup atualizado com as dimensoes corretas:
+    python -m app.db.init_db --supabase-sql
 
--- Habilitar pgvector
-create extension if not exists vector;
-
--- Criar tabela de embeddings
-create table if not exists embeddings (
-    id bigserial primary key,
-    chunk_id text not null,
-    content text,
-    metadata jsonb,
-    vector vector(1536),  -- ajustar dimensao conforme modelo
-    created_at timestamptz default now()
-);
-
--- Criar indice HNSW
-create index on embeddings using hnsw (vector vector_cosine_ops);
-
--- Criar funcao de busca
-create or replace function match_embeddings(
-    query_embedding vector(1536),
-    match_threshold float default 0.3,
-    match_count int default 10,
-    filter_metadata jsonb default '{}'
-)
-returns table (
-    id bigint,
-    chunk_id text,
-    content text,
-    metadata jsonb,
-    similarity float
-)
-language plpgsql
-as $$
-begin
-    return query
-    select
-        e.id,
-        e.chunk_id,
-        e.content,
-        e.metadata,
-        1 - (e.vector <=> query_embedding) as similarity
-    from embeddings e
-    where 1 - (e.vector <=> query_embedding) >= match_threshold
-      and (filter_metadata = '{}' or e.metadata @> filter_metadata)
-    order by e.vector <=> query_embedding
-    limit match_count;
-end;
-$$;
+O SQL gerado leva em conta:
+- Dimensoes do embedding (1536 para API/OpenAI, 384 para local/sentence-transformers)
+- Nome da tabela e funcao configurados
+- Metrica de distancia configurada
+- Parametros HNSW configurados
 """
 import json
 import logging
@@ -80,6 +39,10 @@ class SupabaseVectorStore(VectorStore):
     Requer:
     - pip install supabase
     - Variaveis: SUPABASE_URL, SUPABASE_KEY
+    - Tabela e funcao RPC criados via SQL Editor
+
+    Para gerar o SQL de setup:
+        python -m app.db.init_db --supabase-sql
     """
 
     def __init__(self):
@@ -103,9 +66,23 @@ class SupabaseVectorStore(VectorStore):
         return self._client
 
     async def initialize(self) -> None:
-        """Verifica conexao com Supabase"""
+        """Verifica conexao com Supabase e valida configuracao"""
         client = self._get_client()
-        logger.info(f"Supabase client initialized: {settings.supabase_url}")
+        table = settings.supabase_table_name
+
+        # Verificar se a tabela existe tentando uma query
+        try:
+            result = client.table(table).select("id", count="exact").limit(0).execute()
+            logger.info(
+                f"Supabase client initialized: {settings.supabase_url} "
+                f"(table={table}, dimensions={settings.active_embedding_dimensions})"
+            )
+        except Exception as e:
+            logger.error(
+                f"Supabase table '{table}' not accessible: {e}. "
+                f"Execute o SQL de setup: python -m app.db.init_db --supabase-sql"
+            )
+            raise
 
     async def upsert(
         self,
@@ -202,10 +179,19 @@ class SupabaseVectorStore(VectorStore):
         client = self._get_client()
         table = settings.supabase_table_name
 
-        # Supabase nao suporta filtro JSONB diretamente via client, usar abordagem simples
         if filters.get("document_id"):
             result = client.table(table).select("id").contains(
                 "metadata", {"document_id": filters["document_id"]}
+            ).execute()
+
+            count = len(result.data or [])
+            for row in (result.data or []):
+                client.table(table).delete().eq("id", row["id"]).execute()
+            return count
+
+        if filters.get("candidate_id"):
+            result = client.table(table).select("id").contains(
+                "metadata", {"candidate_id": filters["candidate_id"]}
             ).execute()
 
             count = len(result.data or [])
@@ -249,4 +235,5 @@ class SupabaseVectorStore(VectorStore):
             **health,
             "function_name": settings.supabase_function_name,
             "sdk_available": SUPABASE_AVAILABLE,
+            "embedding_mode": settings.embedding_mode.value,
         }
