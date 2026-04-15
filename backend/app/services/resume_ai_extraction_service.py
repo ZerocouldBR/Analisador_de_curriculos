@@ -40,8 +40,8 @@ REGRAS CRITICAS:
 Responda APENAS com JSON valido, sem markdown, sem explicacoes.
 
 FORMATO DE RESPOSTA (JSON):
-{
-  "personal_info": {
+{{
+  "personal_info": {{
     "name": "Nome Completo da Pessoa",
     "name_confidence": 0.95,
     "email": "email@exemplo.com",
@@ -57,14 +57,14 @@ FORMATO DE RESPOSTA (JSON):
     "birth_date": "01/01/1990",
     "cpf": "000.000.000-00",
     "rg": "00.000.000-0"
-  },
-  "professional_objective": {
+  }},
+  "professional_objective": {{
     "title": "Cargo ou titulo profissional desejado",
     "summary": "Resumo profissional completo do candidato",
     "confidence": 0.85
-  },
+  }},
   "experiences": [
-    {
+    {{
       "company": "Nome da Empresa",
       "title": "Cargo Ocupado",
       "start_date": "01/2020",
@@ -72,46 +72,46 @@ FORMATO DE RESPOSTA (JSON):
       "location": "Cidade, UF",
       "description": "Descricao das atividades e responsabilidades",
       "achievements": ["Conquista 1", "Conquista 2"]
-    }
+    }}
   ],
   "education": [
-    {
+    {{
       "institution": "Nome da Instituicao",
       "degree": "Tipo do curso (Graduacao, Pos, etc)",
       "field": "Area do curso",
       "start_year": "2015",
       "end_year": "2019",
       "status": "Completo"
-    }
+    }}
   ],
-  "skills": {
+  "skills": {{
     "technical": ["Skill tecnica 1", "Skill tecnica 2"],
     "soft": ["Habilidade comportamental 1"],
     "tools": ["Ferramenta 1", "Ferramenta 2"],
     "frameworks": ["Framework 1"]
-  },
+  }},
   "languages": [
-    {"language": "Portugues", "level": "Nativo"},
-    {"language": "Ingles", "level": "Avancado"}
+    {{"language": "Portugues", "level": "Nativo"}},
+    {{"language": "Ingles", "level": "Avancado"}}
   ],
   "certifications": [
-    {
+    {{
       "name": "Nome da Certificacao",
       "institution": "Instituicao Emissora",
       "year": "2023",
       "code": "Codigo se houver (ex: NR-10)"
-    }
+    }}
   ],
   "licenses": [
-    {"type": "CNH", "category": "B", "description": "Carteira de motorista categoria B"}
+    {{"type": "CNH", "category": "B", "description": "Carteira de motorista categoria B"}}
   ],
-  "additional_info": {
-    "availability": {"shifts": [], "travel": false, "relocation": false, "immediate_start": false},
+  "additional_info": {{
+    "availability": {{"shifts": [], "travel": false, "relocation": false, "immediate_start": false}},
     "equipment": [],
     "erp_systems": [],
     "safety_certifications": []
-  }
-}
+  }}
+}}
 
 CURRICULO PARA ANALISE:
 ---
@@ -297,7 +297,7 @@ class ResumeAIExtractionService:
                 "frameworks": [],
             }),
             "languages": ai.get("languages", regex_data.get("languages", [])),
-            "certifications": ai.get("certifications", []),
+            "certifications": ai.get("certifications") or regex_data.get("certifications", []),
             "licenses": ai.get("licenses", regex_data.get("licenses", [])),
             "additional_info": ai.get("additional_info", {
                 "availability": regex_data.get("availability", {}),
