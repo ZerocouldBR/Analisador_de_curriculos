@@ -14,6 +14,18 @@ Uso:
     results = await store.search(query_vector=[0.1, ...], limit=10)
 """
 from app.vectorstore.base import VectorStore, VectorSearchResult
-from app.vectorstore.factory import get_vector_store
+from app.vectorstore.factory import (
+    get_vector_store,
+    get_primary_store,
+    get_all_enabled_stores,
+    create_temporary_store,
+)
 
-__all__ = ["VectorStore", "VectorSearchResult", "get_vector_store"]
+__all__ = [
+    "VectorStore",
+    "VectorSearchResult",
+    "get_vector_store",
+    "get_primary_store",
+    "get_all_enabled_stores",
+    "create_temporary_store",
+]

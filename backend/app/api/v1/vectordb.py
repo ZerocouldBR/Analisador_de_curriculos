@@ -3,10 +3,12 @@ API de configuracao e gerenciamento do banco de dados vetorial
 
 Permite:
 - Visualizar configuracao atual
-- Trocar provedor (pgvector, supabase, qdrant)
-- Testar conexao
+- Habilitar/desabilitar provedores (pgvector, supabase, qdrant)
+- Testar conexao individual por provedor
 - Obter estatisticas
+- Health check multi-provedor
 """
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
@@ -24,7 +26,8 @@ router = APIRouter(prefix="/vectordb", tags=["vector-database"])
 
 class VectorDBConfigResponse(BaseModel):
     """Configuracao atual do vector DB"""
-    provider: str
+    primary_provider: str
+    enabled_providers: List[str]
     available_providers: List[str]
 
     # Embeddings
@@ -57,10 +60,10 @@ class VectorDBConfigResponse(BaseModel):
 
 
 class VectorDBHealthResponse(BaseModel):
-    """Saude do vector store"""
+    """Saude de todos os vector stores habilitados"""
     status: str
-    provider: str
-    details: Dict[str, Any] = {}
+    primary: str
+    providers: Dict[str, Any] = {}
 
 
 class VectorDBInfoResponse(BaseModel):
@@ -76,6 +79,13 @@ class VectorDBCountResponse(BaseModel):
     filters_applied: Optional[Dict[str, Any]] = None
 
 
+class VectorDBTestConnectionResponse(BaseModel):
+    """Resultado de teste de conexao individual"""
+    provider: str
+    status: str
+    details: Dict[str, Any] = {}
+
+
 # ============================================
 # Endpoints
 # ============================================
@@ -87,42 +97,48 @@ def get_vectordb_config(
     """
     Retorna a configuracao completa do banco de dados vetorial
 
-    Inclui provedor atual, configuracoes de embedding, busca,
-    indexacao HNSW e pesos da busca hibrida.
+    Inclui provedores habilitados, provedor primario, configuracoes de
+    embedding, busca, indexacao HNSW e pesos da busca hibrida.
 
     **Requer permissao:** settings.read
     """
-    provider = settings.vector_db_provider
+    enabled = settings.enabled_vector_providers
 
-    # Config especifica do provedor (sem expor secrets)
+    # Config especifica de cada provedor habilitado (sem expor secrets)
     provider_config: Dict[str, Any] = {}
 
-    if provider == VectorDBProvider.PGVECTOR:
+    if "pgvector" in enabled:
+        pgvector_cfg: Dict[str, Any] = {}
         pgvector_url = settings.effective_pgvector_url
-        # Mascara a senha na URL
         if "@" in pgvector_url:
             parts = pgvector_url.split("@")
-            provider_config["database_host"] = parts[-1] if len(parts) > 1 else "configured"
+            pgvector_cfg["database_host"] = parts[-1] if len(parts) > 1 else "configured"
         else:
-            provider_config["database_host"] = "configured"
-        provider_config["distance_ops"] = settings.pgvector_distance_ops
-        provider_config["distance_operator"] = settings.pgvector_distance_operator
+            pgvector_cfg["database_host"] = "configured"
+        pgvector_cfg["distance_ops"] = settings.pgvector_distance_ops
+        pgvector_cfg["distance_operator"] = settings.pgvector_distance_operator
+        provider_config["pgvector"] = pgvector_cfg
 
-    elif provider == VectorDBProvider.SUPABASE:
-        provider_config["url"] = settings.supabase_url or "not configured"
-        provider_config["key_configured"] = bool(settings.supabase_key)
-        provider_config["table_name"] = settings.supabase_table_name
-        provider_config["function_name"] = settings.supabase_function_name
+    if "supabase" in enabled:
+        provider_config["supabase"] = {
+            "url": settings.supabase_url or "not configured",
+            "key_configured": bool(settings.supabase_key),
+            "table_name": settings.supabase_table_name,
+            "function_name": settings.supabase_function_name,
+        }
 
-    elif provider == VectorDBProvider.QDRANT:
-        provider_config["url"] = settings.qdrant_url or "not configured"
-        provider_config["api_key_configured"] = bool(settings.qdrant_api_key)
-        provider_config["collection_name"] = settings.qdrant_collection_name
-        provider_config["grpc_port"] = settings.qdrant_grpc_port
-        provider_config["prefer_grpc"] = settings.qdrant_prefer_grpc
+    if "qdrant" in enabled:
+        provider_config["qdrant"] = {
+            "url": settings.qdrant_url or "not configured",
+            "api_key_configured": bool(settings.qdrant_api_key),
+            "collection_name": settings.qdrant_collection_name,
+            "grpc_port": settings.qdrant_grpc_port,
+            "prefer_grpc": settings.qdrant_prefer_grpc,
+        }
 
     return VectorDBConfigResponse(
-        provider=provider.value,
+        primary_provider=settings.vector_db_primary,
+        enabled_providers=enabled,
         available_providers=[p.value for p in VectorDBProvider],
         embedding_model=settings.embedding_model,
         embedding_dimensions=settings.embedding_dimensions,
@@ -153,27 +169,89 @@ async def check_vectordb_health(
     current_user: User = Depends(require_permission("settings.read"))
 ):
     """
-    Verifica a saude e conectividade do banco de dados vetorial
+    Verifica a saude de TODOS os bancos vetoriais habilitados
 
-    Testa a conexao com o provedor configurado e retorna status.
+    Testa conexao com cada provedor habilitado e retorna status individual.
 
     **Requer permissao:** settings.read
     """
+    from app.vectorstore.factory import get_all_enabled_stores
+
+    stores = get_all_enabled_stores()
+    providers_health: Dict[str, Any] = {}
+    overall_status = "ok"
+
+    for name, store in stores.items():
+        try:
+            health = await asyncio.wait_for(store.health_check(), timeout=10)
+            providers_health[name] = {
+                "status": health.get("status", "unknown"),
+                "primary": name == settings.vector_db_primary,
+                "details": health,
+            }
+        except asyncio.TimeoutError:
+            providers_health[name] = {
+                "status": "timeout",
+                "primary": name == settings.vector_db_primary,
+                "details": {"error": "Timeout ao verificar saude (10s)"},
+            }
+            overall_status = "degraded"
+        except Exception as e:
+            providers_health[name] = {
+                "status": "error",
+                "primary": name == settings.vector_db_primary,
+                "details": {"error": str(e)},
+            }
+            overall_status = "degraded"
+
+    return VectorDBHealthResponse(
+        status=overall_status,
+        primary=settings.vector_db_primary,
+        providers=providers_health,
+    )
+
+
+@router.post("/test-connection/{provider_name}", response_model=VectorDBTestConnectionResponse)
+async def test_provider_connection(
+    provider_name: str,
+    current_user: User = Depends(require_permission("settings.read"))
+):
+    """
+    Testa conexao com um provedor especifico sem afetar os stores ativos.
+
+    Cria uma instancia temporaria, executa health_check() e descarta.
+    Util para verificar configuracao antes de habilitar um provedor.
+
+    **Requer permissao:** settings.read
+    """
+    valid_providers = [p.value for p in VectorDBProvider]
+    if provider_name not in valid_providers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Provedor invalido: '{provider_name}'. Opcoes: {', '.join(valid_providers)}",
+        )
+
     try:
-        from app.vectorstore import get_vector_store
+        from app.vectorstore.factory import create_temporary_store
 
-        store = get_vector_store()
-        health = await store.health_check()
+        temp_store = create_temporary_store(provider_name)
+        health = await asyncio.wait_for(temp_store.health_check(), timeout=10)
 
-        return VectorDBHealthResponse(
+        return VectorDBTestConnectionResponse(
+            provider=provider_name,
             status=health.get("status", "unknown"),
-            provider=settings.vector_db_provider.value,
             details=health,
         )
+    except asyncio.TimeoutError:
+        return VectorDBTestConnectionResponse(
+            provider=provider_name,
+            status="timeout",
+            details={"error": "Timeout ao testar conexao (10s)"},
+        )
     except Exception as e:
-        return VectorDBHealthResponse(
+        return VectorDBTestConnectionResponse(
+            provider=provider_name,
             status="error",
-            provider=settings.vector_db_provider.value,
             details={"error": str(e)},
         )
 
@@ -183,7 +261,7 @@ async def get_vectordb_info(
     current_user: User = Depends(require_permission("settings.read"))
 ):
     """
-    Retorna informacoes detalhadas do vector store
+    Retorna informacoes detalhadas do vector store primario
 
     Inclui dimensoes, metrica, contagem de vetores e configuracoes
     do provedor.
@@ -197,7 +275,7 @@ async def get_vectordb_info(
         info = await store.get_info()
 
         return VectorDBInfoResponse(
-            provider=settings.vector_db_provider.value,
+            provider=settings.vector_db_primary,
             info=info,
         )
     except Exception as e:
@@ -215,7 +293,7 @@ async def get_vectordb_count(
     current_user: User = Depends(require_permission("settings.read")),
 ):
     """
-    Conta vetores armazenados, opcionalmente filtrados
+    Conta vetores armazenados no provedor primario, opcionalmente filtrados
 
     **Filtros opcionais:**
     - candidate_id: Filtrar por candidato
@@ -242,7 +320,7 @@ async def get_vectordb_count(
         total = await store.count(filters=filters)
 
         return VectorDBCountResponse(
-            provider=settings.vector_db_provider.value,
+            provider=settings.vector_db_primary,
             total=total,
             filters_applied=filters,
         )
@@ -258,10 +336,10 @@ async def initialize_vectordb(
     current_user: User = Depends(require_permission("settings.create"))
 ):
     """
-    Inicializa (ou reinicializa) o vector store
+    Inicializa (ou reinicializa) todos os vector stores habilitados
 
-    Cria colecoes, tabelas e indices necessarios para o provedor
-    configurado. Seguro para executar multiplas vezes.
+    Cria colecoes, tabelas e indices necessarios para cada provedor
+    habilitado. Seguro para executar multiplas vezes.
 
     **Requer permissao:** settings.create
     """
@@ -274,13 +352,14 @@ async def initialize_vectordb(
 
         return {
             "status": "initialized",
-            "provider": settings.vector_db_provider.value,
-            "message": f"Vector store '{settings.vector_db_provider.value}' inicializado com sucesso",
+            "primary_provider": settings.vector_db_primary,
+            "enabled_providers": settings.enabled_vector_providers,
+            "message": f"Vector stores inicializados: {', '.join(settings.enabled_vector_providers)}",
         }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao inicializar vector store: {str(e)}",
+            detail=f"Erro ao inicializar vector stores: {str(e)}",
         )
 
 
@@ -289,18 +368,21 @@ def list_providers(
     current_user: User = Depends(require_permission("settings.read"))
 ):
     """
-    Lista todos os provedores de vector DB disponiveis e suas configuracoes
+    Lista todos os provedores de vector DB e suas configuracoes
 
-    Mostra quais provedores estao configurados e prontos para uso.
+    Mostra quais provedores estao habilitados, qual e o primario,
+    e quais estao configurados.
 
     **Requer permissao:** settings.read
     """
+    enabled_list = settings.enabled_vector_providers
     providers = []
 
     for provider in VectorDBProvider:
         info: Dict[str, Any] = {
             "name": provider.value,
-            "active": provider == settings.vector_db_provider,
+            "enabled": provider.value in enabled_list,
+            "primary": provider.value == settings.vector_db_primary,
             "configured": False,
             "description": "",
             "required_env_vars": [],
@@ -324,7 +406,7 @@ def list_providers(
         providers.append(info)
 
     return {
-        "current_provider": settings.vector_db_provider.value,
+        "primary_provider": settings.vector_db_primary,
+        "enabled_providers": enabled_list,
         "providers": providers,
-        "how_to_switch": "Defina a variavel de ambiente VECTOR_DB_PROVIDER com o nome do provedor desejado e reinicie a aplicacao.",
     }

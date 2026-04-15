@@ -54,6 +54,8 @@ import {
   Visibility,
   VisibilityOff,
   Info,
+  NetworkCheck,
+  FiberManualRecord,
 } from '@mui/icons-material';
 import { apiService } from '../services/api';
 import {
@@ -61,6 +63,7 @@ import {
   SystemConfigResponse,
   SystemConfigCategory,
   SystemConfigField,
+  SystemConfigGroup,
 } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
 import { TableSkeleton } from '../components/LoadingSkeleton';
@@ -238,6 +241,227 @@ const ConfigFieldRenderer: React.FC<{
         />
       );
   }
+};
+
+// Field wrapper with override/restart indicators
+const FieldWrapper: React.FC<{
+  field: SystemConfigField;
+  overrideKeys: string[];
+  editedValues: Record<string, any>;
+  onChange: (key: string, value: any) => void;
+}> = ({ field, overrideKeys, editedValues, onChange }) => (
+  <Box
+    sx={{
+      p: 2,
+      borderRadius: 1,
+      border: '1px solid',
+      borderColor: overrideKeys.includes(field.key) ? 'primary.main' : 'divider',
+      bgcolor: overrideKeys.includes(field.key) ? 'action.selected' : 'transparent',
+      position: 'relative',
+    }}
+  >
+    {field.restart_required && (
+      <Tooltip title="Requer reiniciar os servicos">
+        <Chip
+          label="restart"
+          size="small"
+          color="warning"
+          variant="outlined"
+          sx={{ position: 'absolute', top: 8, right: 8, fontSize: '0.65rem', height: 20 }}
+        />
+      </Tooltip>
+    )}
+    <ConfigFieldRenderer
+      field={field}
+      value={editedValues[field.key]}
+      onChange={onChange}
+    />
+  </Box>
+);
+
+// Status dot for provider tabs
+const StatusDot: React.FC<{
+  enabled: boolean;
+  testStatus?: string;
+}> = ({ enabled, testStatus }) => {
+  let color = 'grey.400'; // disabled
+  if (enabled && testStatus === 'ok') {
+    color = 'success.main';
+  } else if (enabled && testStatus === 'error') {
+    color = 'error.main';
+  } else if (enabled) {
+    color = 'warning.main';
+  }
+
+  return (
+    <FiberManualRecord sx={{ fontSize: 12, color }} />
+  );
+};
+
+// Grouped category renderer for categories with sub-groups (e.g., vector_db)
+const GroupedCategoryRenderer: React.FC<{
+  category: SystemConfigCategory;
+  editedValues: Record<string, any>;
+  onChange: (key: string, value: any) => void;
+  overrideKeys: string[];
+  hasChanges: boolean;
+  saving: boolean;
+  onSave: () => void;
+}> = ({ category, editedValues, onChange, overrideKeys, hasChanges, saving, onSave }) => {
+  const [activeGroup, setActiveGroup] = useState(0);
+  const [testResults, setTestResults] = useState<Record<string, any>>({});
+  const [testing, setTesting] = useState<string | null>(null);
+
+  const groups = category.groups || [];
+  const globalFields = category.fields.filter((f) => !f.group);
+  const getGroupFields = (groupKey: string) =>
+    category.fields.filter((f) => f.group === groupKey);
+
+  const handleTestConnection = async (providerName: string) => {
+    setTesting(providerName);
+    try {
+      const result = await apiService.testVectorDBConnection(providerName);
+      setTestResults((prev) => ({ ...prev, [providerName]: result }));
+    } catch (e: any) {
+      setTestResults((prev) => ({
+        ...prev,
+        [providerName]: {
+          status: 'error',
+          details: { error: e.response?.data?.detail || String(e) },
+        },
+      }));
+    } finally {
+      setTesting(null);
+    }
+  };
+
+  return (
+    <>
+      {/* Global fields (e.g., primary provider selector) */}
+      {globalFields.length > 0 && (
+        <Grid container spacing={3} sx={{ mb: 3 }}>
+          {globalFields.map((field) => (
+            <Grid item xs={12} md={6} key={field.key}>
+              <FieldWrapper
+                field={field}
+                overrideKeys={overrideKeys}
+                editedValues={editedValues}
+                onChange={onChange}
+              />
+            </Grid>
+          ))}
+        </Grid>
+      )}
+
+      {/* Provider sub-tabs */}
+      <Tabs
+        value={activeGroup}
+        onChange={(_, v) => setActiveGroup(v)}
+        sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
+      >
+        {groups.map((g) => {
+          const enabledKey = `${g.key}_enabled`;
+          const isEnabled = !!editedValues[enabledKey];
+          const testResult = testResults[g.key];
+          return (
+            <Tab
+              key={g.key}
+              label={
+                <Box display="flex" alignItems="center" gap={0.5}>
+                  <StatusDot enabled={isEnabled} testStatus={testResult?.status} />
+                  <span>{g.label}</span>
+                  {editedValues.vector_db_primary === g.key && (
+                    <Chip label="primario" size="small" color="info" variant="outlined"
+                      sx={{ ml: 0.5, fontSize: '0.6rem', height: 18 }} />
+                  )}
+                </Box>
+              }
+              sx={{ minHeight: 48 }}
+            />
+          );
+        })}
+      </Tabs>
+
+      {/* Active group panel */}
+      {groups.map((g, idx) =>
+        activeGroup === idx ? (
+          <Paper key={g.key} variant="outlined" sx={{ p: 3 }}>
+            {/* Group header with test button */}
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Box>
+                <Typography variant="subtitle1" fontWeight={600}>
+                  {g.label}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {g.description}
+                </Typography>
+              </Box>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => handleTestConnection(g.key)}
+                disabled={testing === g.key}
+                startIcon={
+                  testing === g.key
+                    ? <CircularProgress size={16} />
+                    : <NetworkCheck />
+                }
+              >
+                Testar Conexao
+              </Button>
+            </Box>
+
+            {/* Connection test result */}
+            {testResults[g.key] && (
+              <Alert
+                severity={testResults[g.key].status === 'ok' ? 'success' : 'error'}
+                sx={{ mb: 2 }}
+                onClose={() =>
+                  setTestResults((prev) => {
+                    const next = { ...prev };
+                    delete next[g.key];
+                    return next;
+                  })
+                }
+              >
+                {testResults[g.key].status === 'ok'
+                  ? 'Conexao bem-sucedida!'
+                  : `Erro: ${testResults[g.key].details?.error || 'Falha na conexao'}`}
+              </Alert>
+            )}
+
+            {/* Provider fields */}
+            <Grid container spacing={3}>
+              {getGroupFields(g.key).map((field) => (
+                <Grid item xs={12} md={6} key={field.key}>
+                  <FieldWrapper
+                    field={field}
+                    overrideKeys={overrideKeys}
+                    editedValues={editedValues}
+                    onChange={onChange}
+                  />
+                </Grid>
+              ))}
+            </Grid>
+          </Paper>
+        ) : null
+      )}
+
+      {/* Save button */}
+      {hasChanges && (
+        <Box mt={3} display="flex" justifyContent="flex-end">
+          <Button
+            variant="contained"
+            startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <Save />}
+            onClick={onSave}
+            disabled={saving}
+          >
+            Salvar Alteracoes
+          </Button>
+        </Box>
+      )}
+    </>
+  );
 };
 
 const SettingsPage: React.FC = () => {
@@ -484,62 +708,47 @@ const SettingsPage: React.FC = () => {
               </Typography>
             </Box>
 
-            <Grid container spacing={3}>
-              {cat.fields.map((field) => (
-                <Grid item xs={12} md={field.type === 'boolean' ? 6 : 6} key={field.key}>
-                  <Box
-                    sx={{
-                      p: 2,
-                      borderRadius: 1,
-                      border: '1px solid',
-                      borderColor: config?.override_keys.includes(field.key)
-                        ? 'primary.main'
-                        : 'divider',
-                      bgcolor: config?.override_keys.includes(field.key)
-                        ? 'action.selected'
-                        : 'transparent',
-                      position: 'relative',
-                    }}
-                  >
-                    {field.restart_required && (
-                      <Tooltip title="Requer reiniciar os servicos">
-                        <Chip
-                          label="restart"
-                          size="small"
-                          color="warning"
-                          variant="outlined"
-                          sx={{
-                            position: 'absolute',
-                            top: 8,
-                            right: 8,
-                            fontSize: '0.65rem',
-                            height: 20,
-                          }}
-                        />
-                      </Tooltip>
-                    )}
-                    <ConfigFieldRenderer
-                      field={field}
-                      value={editedValues[field.key]}
-                      onChange={handleFieldChange}
-                    />
-                  </Box>
+            {/* Grouped rendering for categories with groups (e.g., vector_db) */}
+            {cat.groups && cat.groups.length > 0 ? (
+              <GroupedCategoryRenderer
+                category={cat}
+                editedValues={editedValues}
+                onChange={handleFieldChange}
+                overrideKeys={config?.override_keys || []}
+                hasChanges={hasChanges}
+                saving={saving}
+                onSave={handleSave}
+              />
+            ) : (
+              <>
+                {/* Flat rendering for regular categories */}
+                <Grid container spacing={3}>
+                  {cat.fields.map((field) => (
+                    <Grid item xs={12} md={6} key={field.key}>
+                      <FieldWrapper
+                        field={field}
+                        overrideKeys={config?.override_keys || []}
+                        editedValues={editedValues}
+                        onChange={handleFieldChange}
+                      />
+                    </Grid>
+                  ))}
                 </Grid>
-              ))}
-            </Grid>
 
-            {/* Save button at bottom of each category */}
-            {hasChanges && (
-              <Box mt={3} display="flex" justifyContent="flex-end">
-                <Button
-                  variant="contained"
-                  startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <Save />}
-                  onClick={handleSave}
-                  disabled={saving}
-                >
-                  Salvar Alteracoes
-                </Button>
-              </Box>
+                {/* Save button at bottom of each category */}
+                {hasChanges && (
+                  <Box mt={3} display="flex" justifyContent="flex-end">
+                    <Button
+                      variant="contained"
+                      startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <Save />}
+                      onClick={handleSave}
+                      disabled={saving}
+                    >
+                      Salvar Alteracoes
+                    </Button>
+                  </Box>
+                )}
+              </>
             )}
           </Paper>
         )

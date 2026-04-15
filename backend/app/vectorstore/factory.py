@@ -1,83 +1,169 @@
 """
 Factory para criacao do VectorStore baseado na configuracao
 
-Seleciona dinamicamente o provedor conforme VECTOR_DB_PROVIDER:
+Suporta multiplos provedores simultaneamente:
 - pgvector: PostgreSQL com extensao pgvector (padrao)
 - supabase: Supabase com pgvector gerenciado
 - qdrant: Servidor Qdrant dedicado
+
+Escritas sao enviadas a todos os provedores habilitados (fan-out).
+Buscas usam o provedor primario (vector_db_primary).
 """
 import logging
-from typing import Optional
+from typing import Optional, Dict
 
 from app.vectorstore.base import VectorStore
-from app.core.config import settings, VectorDBProvider
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Cache global do vector store
-_vector_store: Optional[VectorStore] = None
+# Registry global de vector stores habilitados
+_vector_stores: Dict[str, VectorStore] = {}
 
 
-def get_vector_store() -> VectorStore:
+def _create_store(provider_name: str) -> VectorStore:
     """
-    Retorna a instancia do VectorStore configurado
+    Cria uma instancia do VectorStore para o provedor especificado.
 
-    Singleton: cria uma unica instancia e reutiliza.
-    O provedor e definido pela variavel VECTOR_DB_PROVIDER.
+    Args:
+        provider_name: Nome do provedor (pgvector, supabase, qdrant)
 
     Returns:
-        VectorStore configurado
+        Instancia do VectorStore
 
     Raises:
         ValueError: Se o provedor nao for suportado
         RuntimeError: Se dependencias do provedor nao estiverem instaladas
     """
-    global _vector_store
-
-    if _vector_store is not None:
-        return _vector_store
-
-    provider = settings.vector_db_provider
-
-    logger.info(f"Initializing vector store: {provider.value}")
-
-    if provider == VectorDBProvider.PGVECTOR:
+    if provider_name == "pgvector":
         from app.vectorstore.pgvector_store import PgVectorStore
-        _vector_store = PgVectorStore()
-
-    elif provider == VectorDBProvider.SUPABASE:
+        return PgVectorStore()
+    elif provider_name == "supabase":
         from app.vectorstore.supabase_store import SupabaseVectorStore
-        _vector_store = SupabaseVectorStore()
-
-    elif provider == VectorDBProvider.QDRANT:
+        return SupabaseVectorStore()
+    elif provider_name == "qdrant":
         from app.vectorstore.qdrant_store import QdrantVectorStore
-        _vector_store = QdrantVectorStore()
-
+        return QdrantVectorStore()
     else:
         raise ValueError(
-            f"Provedor de vector store nao suportado: {provider}. "
-            f"Opcoes: {', '.join(p.value for p in VectorDBProvider)}"
+            f"Provedor de vector store nao suportado: {provider_name}. "
+            f"Opcoes: pgvector, supabase, qdrant"
         )
 
-    logger.info(f"Vector store initialized: {provider.value}")
-    return _vector_store
+
+def _ensure_stores_initialized() -> None:
+    """Inicializa lazily todos os stores habilitados que ainda nao estao no registry"""
+    global _vector_stores
+    for provider_name in settings.enabled_vector_providers:
+        if provider_name not in _vector_stores:
+            try:
+                store = _create_store(provider_name)
+                _vector_stores[provider_name] = store
+                logger.info(f"Vector store initialized: {provider_name}")
+            except Exception as e:
+                logger.error(f"Falha ao inicializar vector store '{provider_name}': {e}")
+
+
+def get_vector_store() -> VectorStore:
+    """
+    Retorna a instancia do VectorStore primario (backward-compatible).
+
+    Singleton: cria uma unica instancia e reutiliza.
+
+    Returns:
+        VectorStore primario configurado
+
+    Raises:
+        RuntimeError: Se nenhum vector store estiver habilitado
+    """
+    return get_primary_store()
+
+
+def get_primary_store() -> VectorStore:
+    """
+    Retorna o VectorStore primario para operacoes de busca.
+
+    O provedor primario e definido por vector_db_primary.
+    Se o primario nao estiver habilitado, usa o primeiro habilitado.
+
+    Returns:
+        VectorStore primario
+
+    Raises:
+        RuntimeError: Se nenhum vector store estiver habilitado
+    """
+    _ensure_stores_initialized()
+
+    primary = settings.vector_db_primary
+    if primary in _vector_stores:
+        return _vector_stores[primary]
+
+    # Fallback: se o primario nao esta habilitado, usar o primeiro disponivel
+    if _vector_stores:
+        fallback = next(iter(_vector_stores))
+        logger.warning(
+            f"Provedor primario '{primary}' nao habilitado. "
+            f"Usando fallback: '{fallback}'"
+        )
+        return _vector_stores[fallback]
+
+    raise RuntimeError(
+        "Nenhum vector store habilitado. "
+        "Habilite pelo menos um provedor nas configuracoes."
+    )
+
+
+def get_all_enabled_stores() -> Dict[str, VectorStore]:
+    """
+    Retorna todos os VectorStores habilitados.
+
+    Usado para fan-out de escritas (gravar em todos os stores).
+
+    Returns:
+        Dict mapeando nome do provedor para instancia do VectorStore
+    """
+    _ensure_stores_initialized()
+    return dict(_vector_stores)
+
+
+def create_temporary_store(provider_name: str) -> VectorStore:
+    """
+    Cria uma instancia temporaria do VectorStore para teste de conexao.
+
+    NAO e adicionada ao registry global. Use para testar conexao
+    sem afetar os stores ativos.
+
+    Args:
+        provider_name: Nome do provedor a testar
+
+    Returns:
+        Instancia temporaria do VectorStore
+    """
+    return _create_store(provider_name)
 
 
 def reset_vector_store() -> None:
     """
-    Reseta o cache do vector store.
+    Reseta o registry de vector stores.
     Usado quando as configuracoes mudam em runtime.
     """
-    global _vector_store
-    _vector_store = None
-    logger.info("Vector store cache reset")
+    global _vector_stores
+    _vector_stores.clear()
+    logger.info("Vector store registry reset")
 
 
 async def initialize_vector_store() -> None:
     """
-    Inicializa o vector store (criar indices, colecoes, etc.)
-    Chamado no startup da aplicacao.
+    Inicializa todos os vector stores habilitados
+    (criar indices, colecoes, etc.)
+
+    Chamado no startup da aplicacao. Se um store falhar,
+    loga o erro mas continua com os demais.
     """
-    store = get_vector_store()
-    await store.initialize()
-    logger.info("Vector store initialization complete")
+    _ensure_stores_initialized()
+    for name, store in _vector_stores.items():
+        try:
+            await store.initialize()
+            logger.info(f"Vector store '{name}' initialization complete")
+        except Exception as e:
+            logger.error(f"Falha ao inicializar vector store '{name}': {e}")

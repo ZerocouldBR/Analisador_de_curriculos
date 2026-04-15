@@ -61,6 +61,14 @@ class SystemConfigField(BaseModel):
     max_value: Optional[float] = None
     step: Optional[float] = None
     placeholder: str = ""
+    group: Optional[str] = None
+
+
+class SystemConfigGroup(BaseModel):
+    """Um sub-grupo dentro de uma categoria (ex: provedor de banco vetorial)"""
+    key: str
+    label: str
+    description: str = ""
 
 
 class SystemConfigCategory(BaseModel):
@@ -70,6 +78,7 @@ class SystemConfigCategory(BaseModel):
     icon: str
     description: str
     fields: list[SystemConfigField]
+    groups: Optional[list[SystemConfigGroup]] = None
 
 
 class SystemConfigResponse(BaseModel):

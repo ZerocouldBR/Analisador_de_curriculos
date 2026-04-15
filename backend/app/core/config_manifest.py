@@ -34,6 +34,7 @@ def _field(
     max_value: float | None = None,
     step: float | None = None,
     placeholder: str = "",
+    group: str | None = None,
 ) -> dict[str, Any]:
     """Cria definicao de um campo de configuracao"""
     field = {
@@ -54,6 +55,8 @@ def _field(
         field["step"] = step
     if placeholder:
         field["placeholder"] = placeholder
+    if group is not None:
+        field["group"] = group
     return field
 
 
@@ -186,50 +189,82 @@ CONFIG_MANIFEST: list[dict[str, Any]] = [
         "category": "vector_db",
         "label": "Banco Vetorial",
         "icon": "Hub",
-        "description": "Provedor e parametros do banco de dados vetorial",
+        "description": "Provedores e parametros dos bancos de dados vetoriais",
+        "groups": [
+            {"key": "pgvector", "label": "pgvector", "description": "PostgreSQL com extensao pgvector"},
+            {"key": "supabase", "label": "Supabase", "description": "Supabase com pgvector gerenciado (cloud)"},
+            {"key": "qdrant", "label": "Qdrant", "description": "Servidor Qdrant dedicado"},
+        ],
         "fields": [
-            _field("vector_db_provider", "Provedor", "select",
-                   "pgvector (recomendado), Supabase ou Qdrant",
-                   restart_required=True,
+            # Campo global (sem grupo) - selecao do provedor primario
+            _field("vector_db_primary", "Provedor Primario", "select",
+                   "Provedor usado para buscas vetoriais. Todos os habilitados recebem escritas.",
                    options=["pgvector", "supabase", "qdrant"]),
-            # pgvector
+
+            # === pgvector ===
+            _field("pgvector_enabled", "Habilitar pgvector", "boolean",
+                   "Ativar pgvector como provedor de banco vetorial",
+                   restart_required=True, group="pgvector"),
             _field("pgvector_database_url", "pgvector URL", "password",
                    "URL separada para pgvector (vazio = usa mesma URL do banco principal)",
-                   sensitive=True, placeholder="postgresql+psycopg://..."),
+                   sensitive=True, placeholder="postgresql+psycopg://...",
+                   group="pgvector"),
             _field("pgvector_distance_metric", "Metrica de Distancia", "select",
                    "Metrica para calcular similaridade entre vetores",
-                   options=["cosine", "l2", "inner_product"]),
+                   options=["cosine", "l2", "inner_product"],
+                   group="pgvector"),
             _field("pgvector_hnsw_m", "HNSW M", "number",
                    "Conexoes por no no indice HNSW (mais = melhor recall, mais memoria)",
-                   min_value=4, max_value=64, step=2),
+                   min_value=4, max_value=64, step=2,
+                   group="pgvector"),
             _field("pgvector_hnsw_ef_construction", "HNSW EF Construction", "number",
                    "Qualidade da construcao do indice",
-                   min_value=16, max_value=512, step=8),
+                   min_value=16, max_value=512, step=8,
+                   group="pgvector"),
             _field("pgvector_hnsw_ef_search", "HNSW EF Search", "number",
                    "Qualidade da busca (mais = melhor recall, mais lento)",
-                   min_value=16, max_value=512, step=8),
+                   min_value=16, max_value=512, step=8,
+                   group="pgvector"),
             _field("enable_hnsw_index", "Habilitar Indice HNSW", "boolean",
-                   "Usar indice HNSW para acelerar buscas vetoriais"),
-            # Supabase
+                   "Usar indice HNSW para acelerar buscas vetoriais",
+                   group="pgvector"),
+
+            # === Supabase ===
+            _field("supabase_enabled", "Habilitar Supabase", "boolean",
+                   "Ativar Supabase como provedor de banco vetorial",
+                   restart_required=True, group="supabase"),
             _field("supabase_url", "Supabase URL", "text",
-                   "URL do projeto Supabase", placeholder="https://xxx.supabase.co"),
+                   "URL do projeto Supabase", placeholder="https://xxx.supabase.co",
+                   group="supabase"),
             _field("supabase_key", "Supabase Key", "password",
-                   "Chave de servico do Supabase", sensitive=True),
+                   "Chave de servico do Supabase", sensitive=True,
+                   group="supabase"),
             _field("supabase_table_name", "Tabela Supabase", "text",
-                   "Nome da tabela de embeddings"),
+                   "Nome da tabela de embeddings",
+                   group="supabase"),
             _field("supabase_function_name", "Funcao RPC Supabase", "text",
-                   "Nome da funcao de busca vetorial"),
-            # Qdrant
+                   "Nome da funcao de busca vetorial",
+                   group="supabase"),
+
+            # === Qdrant ===
+            _field("qdrant_enabled", "Habilitar Qdrant", "boolean",
+                   "Ativar Qdrant como provedor de banco vetorial",
+                   restart_required=True, group="qdrant"),
             _field("qdrant_url", "Qdrant URL", "text",
-                   "URL do servidor Qdrant", placeholder="http://localhost:6333"),
+                   "URL do servidor Qdrant", placeholder="http://localhost:6333",
+                   group="qdrant"),
             _field("qdrant_api_key", "Qdrant API Key", "password",
-                   "API Key do Qdrant Cloud", sensitive=True),
+                   "API Key do Qdrant Cloud", sensitive=True,
+                   group="qdrant"),
             _field("qdrant_collection_name", "Colecao Qdrant", "text",
-                   "Nome da colecao no Qdrant"),
+                   "Nome da colecao no Qdrant",
+                   group="qdrant"),
             _field("qdrant_grpc_port", "Qdrant gRPC Port", "number",
-                   "Porta gRPC do Qdrant", min_value=1, max_value=65535, step=1),
+                   "Porta gRPC do Qdrant", min_value=1, max_value=65535, step=1,
+                   group="qdrant"),
             _field("qdrant_prefer_grpc", "Preferir gRPC", "boolean",
-                   "Usar gRPC ao inves de REST para comunicacao com Qdrant"),
+                   "Usar gRPC ao inves de REST para comunicacao com Qdrant",
+                   group="qdrant"),
         ],
     },
 

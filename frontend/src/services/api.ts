@@ -489,6 +489,16 @@ class ApiService {
     return response.data;
   }
 
+  async testVectorDBConnection(provider: string): Promise<any> {
+    const response = await this.api.post(`/v1/vectordb/test-connection/${provider}`, {}, { timeout: 15000 });
+    return response.data;
+  }
+
+  async getVectorDBProviders(): Promise<any> {
+    const response = await this.api.get('/v1/vectordb/providers');
+    return response.data;
+  }
+
   // ==================== Health ====================
   async healthCheck(): Promise<HealthCheck> {
     const response = await this.api.get<HealthCheck>('/health');
