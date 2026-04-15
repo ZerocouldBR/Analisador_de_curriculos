@@ -40,10 +40,10 @@ router = APIRouter(prefix="/batch-import", tags=["batch-import"])
 # Schemas
 # ============================================
 
-SUPPORTED_EXTENSIONS = {
-    ".pdf", ".doc", ".docx", ".txt", ".rtf", ".odt",
-    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff",
-}
+def _get_supported_extensions() -> set:
+    """Retorna extensoes suportadas da configuracao"""
+    from app.core.config import settings
+    return set(settings.supported_upload_extensions)
 
 
 class FolderScanRequest(BaseModel):
@@ -168,7 +168,7 @@ def _scan_files(
     extensions: Optional[List[str]] = None,
 ) -> List[Path]:
     """Escaneia pasta e retorna lista de arquivos suportados"""
-    allowed_ext = set(extensions) if extensions else SUPPORTED_EXTENSIONS
+    allowed_ext = set(extensions) if extensions else _get_supported_extensions()
 
     files = []
     if recursive:

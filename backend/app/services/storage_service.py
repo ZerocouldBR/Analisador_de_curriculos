@@ -212,7 +212,7 @@ class StorageService:
     @staticmethod
     def is_supported_format(filename: str) -> bool:
         """
-        Verifica se formato é suportado
+        Verifica se formato é suportado usando as extensoes configuradas.
 
         Args:
             filename: Nome do arquivo
@@ -220,14 +220,13 @@ class StorageService:
         Returns:
             True se formato é suportado
         """
-        supported_extensions = {
-            ".pdf", ".doc", ".docx", ".txt", ".rtf", ".odt",
-            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff",
-            ".html"
-        }
+        from app.core.config import settings
+        supported = set(settings.supported_upload_extensions)
+        # Sempre incluir .html como formato interno
+        supported.add(".html")
 
         extension = Path(filename).suffix.lower()
-        return extension in supported_extensions
+        return extension in supported
 
 
 # Instancia global do servico de storage

@@ -150,6 +150,13 @@ export interface SystemConfigField {
   max_value?: number;
   step?: number;
   placeholder?: string;
+  group?: string;
+}
+
+export interface SystemConfigGroup {
+  key: string;
+  label: string;
+  description: string;
 }
 
 export interface SystemConfigCategory {
@@ -158,6 +165,7 @@ export interface SystemConfigCategory {
   icon: string;
   description: string;
   fields: SystemConfigField[];
+  groups?: SystemConfigGroup[];
 }
 
 export interface SystemConfigResponse {

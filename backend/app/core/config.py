@@ -83,8 +83,14 @@ class Settings(BaseSettings):
     # ================================================================
     vector_db_provider: VectorDBProvider = Field(
         default=VectorDBProvider.PGVECTOR,
-        description="Provedor do banco vetorial: pgvector, supabase, qdrant"
+        description="Provedor do banco vetorial: pgvector, supabase, qdrant (legado)"
     )
+
+    # -- Habilitacao individual de provedores --
+    pgvector_enabled: bool = Field(default=True, description="Habilitar pgvector como provedor vetorial")
+    supabase_enabled: bool = Field(default=False, description="Habilitar Supabase como provedor vetorial")
+    qdrant_enabled: bool = Field(default=False, description="Habilitar Qdrant como provedor vetorial")
+    vector_db_primary: str = Field(default="pgvector", description="Provedor primario para buscas vetoriais")
 
     # -- pgvector (usa o mesmo PostgreSQL do database_url por padrao) --
     pgvector_database_url: Optional[str] = Field(
@@ -703,6 +709,10 @@ REGRAS:
     # Upload / Storage
     # ================================================================
     max_upload_size_mb: int = Field(default=20, description="Tamanho maximo de upload (MB)")
+    supported_upload_extensions: List[str] = Field(
+        default=[".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff"],
+        description="Extensoes de arquivo permitidas para upload de curriculos"
+    )
     storage_backend: str = Field(
         default="local",
         description="Backend de armazenamento: local, s3, minio"
@@ -744,6 +754,19 @@ REGRAS:
     # ================================================================
     # Helpers
     # ================================================================
+
+    @property
+    def enabled_vector_providers(self) -> list[str]:
+        """Retorna lista dos provedores vetoriais habilitados"""
+        providers = []
+        if self.pgvector_enabled:
+            providers.append("pgvector")
+        if self.supabase_enabled:
+            providers.append("supabase")
+        if self.qdrant_enabled:
+            providers.append("qdrant")
+        # Fallback legado: se nenhum habilitado, usa vector_db_provider
+        return providers or [self.vector_db_provider.value]
 
     @property
     def effective_pgvector_url(self) -> str:

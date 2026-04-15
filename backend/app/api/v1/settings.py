@@ -296,7 +296,8 @@ def admin_overview(
             "max_chars": app_settings.embedding_max_chars,
         },
         "vector_db": {
-            "provider": app_settings.vector_db_provider.value,
+            "primary_provider": app_settings.vector_db_primary,
+            "enabled_providers": app_settings.enabled_vector_providers,
             "available_providers": [p.value for p in VectorDBProvider],
             "distance_metric": app_settings.pgvector_distance_metric,
             "hnsw_enabled": app_settings.enable_hnsw_index,

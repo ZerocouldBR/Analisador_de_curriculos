@@ -318,16 +318,28 @@ class EmbeddingService:
         metadata: Optional[Dict[str, Any]] = None,
         content: Optional[str] = None,
     ) -> None:
-        """Armazena embedding no VectorStore configurado"""
-        store = get_vector_store()
+        """Armazena embedding em TODOS os VectorStores habilitados (fan-out)"""
+        from app.vectorstore.factory import get_all_enabled_stores
+
+        stores = get_all_enabled_stores()
         meta = metadata or {}
         meta["model"] = self.model
-        await store.upsert(
-            id=str(chunk_id),
-            vector=vector,
-            metadata=meta,
-            content=content,
-        )
+
+        errors = []
+        for name, store in stores.items():
+            try:
+                await store.upsert(
+                    id=str(chunk_id),
+                    vector=vector,
+                    metadata=meta,
+                    content=content,
+                )
+            except Exception as e:
+                logger.error(f"Erro ao gravar embedding em '{name}': {e}")
+                errors.append((name, str(e)))
+
+        if errors and len(errors) == len(stores):
+            raise RuntimeError(f"Todos os stores falharam ao gravar: {errors}")
 
     async def store_embeddings_batch(
         self,
@@ -336,11 +348,23 @@ class EmbeddingService:
         metadatas: Optional[List[Dict[str, Any]]] = None,
         contents: Optional[List[str]] = None,
     ) -> None:
-        """Armazena embeddings em lote"""
-        store = get_vector_store()
+        """Armazena embeddings em lote em TODOS os VectorStores habilitados (fan-out)"""
+        from app.vectorstore.factory import get_all_enabled_stores
+
+        stores = get_all_enabled_stores()
         ids = [str(cid) for cid in chunk_ids]
         metas = metadatas or [{"model": self.model} for _ in chunk_ids]
-        await store.upsert_batch(ids, vectors, metas, contents)
+
+        errors = []
+        for name, store in stores.items():
+            try:
+                await store.upsert_batch(ids, vectors, metas, contents)
+            except Exception as e:
+                logger.error(f"Erro ao gravar embeddings batch em '{name}': {e}")
+                errors.append((name, str(e)))
+
+        if errors and len(errors) == len(stores):
+            raise RuntimeError(f"Todos os stores falharam ao gravar batch: {errors}")
 
     async def search_vectors(
         self,

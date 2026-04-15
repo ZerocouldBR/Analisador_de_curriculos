@@ -216,13 +216,16 @@ class SettingsService:
                 }
                 fields.append(field_data)
 
-            categories.append({
+            cat_data = {
                 "category": cat_def["category"],
                 "label": cat_def["label"],
                 "icon": cat_def["icon"],
                 "description": cat_def["description"],
                 "fields": fields,
-            })
+            }
+            if "groups" in cat_def:
+                cat_data["groups"] = cat_def["groups"]
+            categories.append(cat_data)
 
         return {
             "categories": categories,

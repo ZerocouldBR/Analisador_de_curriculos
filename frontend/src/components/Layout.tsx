@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar,
@@ -42,6 +42,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useThemeMode } from '../contexts/ThemeContext';
+import { apiService } from '../services/api';
 
 const DRAWER_WIDTH = 260;
 
@@ -69,11 +70,18 @@ const menuItems: MenuItem_[] = [
 const Layout: React.FC = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [appVersion, setAppVersion] = useState<string>('');
   const navigate = useNavigate();
   const location = useLocation();
   const theme = useTheme();
   const { user, logout } = useAuth();
   const { mode, toggleTheme } = useThemeMode();
+
+  useEffect(() => {
+    apiService.healthCheck()
+      .then((data) => setAppVersion(data.version || ''))
+      .catch(() => {});
+  }, []);
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => setAnchorEl(event.currentTarget);
@@ -102,9 +110,11 @@ const Layout: React.FC = () => {
           <Typography variant="subtitle1" fontWeight={700} noWrap lineHeight={1.2}>
             Analisador RH
           </Typography>
-          <Typography variant="caption" color="text.secondary" lineHeight={1}>
-            v0.3.0
-          </Typography>
+          {appVersion && (
+            <Typography variant="caption" color="text.secondary" lineHeight={1}>
+              v{appVersion}
+            </Typography>
+          )}
         </Box>
       </Toolbar>
       <Divider />

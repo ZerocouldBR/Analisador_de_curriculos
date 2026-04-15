@@ -52,7 +52,8 @@ async def healthcheck() -> dict:
     # Config summary
     health["config"] = {
         "embedding_mode": settings.embedding_mode.value,
-        "vector_db_provider": settings.vector_db_provider.value,
+        "vector_db_primary": settings.vector_db_primary,
+        "vector_db_enabled": settings.enabled_vector_providers,
         "openai_configured": bool(settings.openai_api_key),
         "linkedin_enabled": settings.linkedin_api_enabled,
     }
