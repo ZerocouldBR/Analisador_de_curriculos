@@ -93,7 +93,7 @@ class QdrantVectorStore(VectorStore):
                 client.create_collection(
                     collection_name=collection,
                     vectors_config=VectorParams(
-                        size=settings.embedding_dimensions,
+                        size=settings.active_embedding_dimensions,
                         distance=self._get_distance(),
                     ),
                     optimizers_config=OptimizersConfigDiff(
@@ -327,7 +327,7 @@ class QdrantVectorStore(VectorStore):
                 "url": settings.qdrant_url,
                 "collection": settings.qdrant_collection_name,
                 "embeddings_count": collection_info.points_count,
-                "dimensions": settings.embedding_dimensions,
+                "dimensions": settings.active_embedding_dimensions,
                 "distance": settings.pgvector_distance_metric,
                 "indexed": collection_info.status.value if hasattr(collection_info.status, 'value') else str(collection_info.status),
             }

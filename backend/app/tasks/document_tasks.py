@@ -416,10 +416,40 @@ def process_document_task(
                 chunks_created += 1
 
         db.commit()
-        _update_document_status(db, document_id, "processing", 88, f"{chunks_created} chunks criados")
+        _update_document_status(db, document_id, "processing", 85, f"{chunks_created} chunks criados")
 
         # ============================================
-        # STEP 7: Save CandidateProfile Snapshot
+        # STEP 7: Generate Embeddings for Document
+        # ============================================
+        _update_document_status(db, document_id, "processing", 87, "Gerando embeddings vetoriais")
+
+        try:
+            import asyncio
+            from app.services.embedding_service import EmbeddingService
+            embedding_svc = EmbeddingService()
+
+            # Run async embedding generation from sync Celery task
+            loop = asyncio.new_event_loop()
+            try:
+                embeddings_result = loop.run_until_complete(
+                    embedding_svc.generate_embeddings_for_document(db, document.id)
+                )
+                embeddings_count = len(embeddings_result) if embeddings_result else 0
+                _update_document_status(
+                    db, document_id, "processing", 92,
+                    f"{embeddings_count} embeddings gerados"
+                )
+            finally:
+                loop.close()
+        except Exception as emb_err:
+            logger.error(f"Erro ao gerar embeddings para documento {document_id}: {emb_err}")
+            _update_document_status(
+                db, document_id, "processing", 92,
+                f"Chunks criados mas embeddings falharam: {emb_err}"
+            )
+
+        # ============================================
+        # STEP 8: Save CandidateProfile Snapshot
         # ============================================
         if candidate:
             # Determine next version number
@@ -442,7 +472,7 @@ def process_document_task(
         _update_document_status(db, document_id, "processing", 92, "Perfil do candidato salvo")
 
         # ============================================
-        # STEP 8: Audit Log
+        # STEP 9: Audit Log
         # ============================================
         audit_metadata = {
             "sections_created": chunks_created,

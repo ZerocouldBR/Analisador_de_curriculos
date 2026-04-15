@@ -237,7 +237,7 @@ class SupabaseVectorStore(VectorStore):
                 "url": settings.supabase_url,
                 "table": settings.supabase_table_name,
                 "embeddings_count": result.count or 0,
-                "dimensions": settings.embedding_dimensions,
+                "dimensions": settings.active_embedding_dimensions,
             }
         except Exception as e:
             return {"status": "unhealthy", "provider": "supabase", "error": str(e)}
