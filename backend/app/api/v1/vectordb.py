@@ -7,8 +7,10 @@ Permite:
 - Testar conexao individual por provedor
 - Obter estatisticas
 - Health check multi-provedor
+- Setup completo do pgvector (extensao, tabelas, indices)
 """
 import asyncio
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
@@ -16,6 +18,8 @@ from typing import Optional, Dict, Any, List
 from app.core.config import settings, VectorDBProvider
 from app.core.dependencies import require_permission
 from app.db.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/vectordb", tags=["vector-database"])
 
@@ -410,3 +414,300 @@ def list_providers(
         "enabled_providers": enabled_list,
         "providers": providers,
     }
+
+
+# ============================================
+# Setup completo do pgvector
+# ============================================
+
+class PgVectorSetupStepResult(BaseModel):
+    step: str
+    status: str  # "ok", "created", "already_exists", "error", "skipped"
+    detail: str = ""
+
+
+class PgVectorSetupResponse(BaseModel):
+    success: bool
+    message: str
+    steps: List[PgVectorSetupStepResult]
+    pgvector_version: Optional[str] = None
+    tables_exist: List[str] = []
+    indexes_exist: List[str] = []
+
+
+@router.post("/setup-pgvector", response_model=PgVectorSetupResponse)
+def setup_pgvector(
+    current_user: User = Depends(require_permission("settings.create"))
+):
+    """
+    Configura completamente o pgvector no PostgreSQL.
+
+    Executa todos os passos necessarios:
+    1. Cria extensao pgvector (CREATE EXTENSION IF NOT EXISTS vector)
+    2. Cria todas as tabelas do ORM (chunks, embeddings, etc.)
+    3. Cria indice HNSW para busca vetorial
+    4. Cria indice GIN para full-text search
+    5. Cria indice GIN para metadados JSON
+    6. Verifica versao do pgvector instalada
+
+    Seguro para executar multiplas vezes (idempotente).
+
+    **Requer permissao:** settings.create
+    """
+    from sqlalchemy import text
+    from app.db.database import engine, Base
+
+    steps: List[PgVectorSetupStepResult] = []
+    pgvector_version = None
+    tables_exist: List[str] = []
+    indexes_exist: List[str] = []
+    has_error = False
+
+    with engine.connect() as conn:
+        # --- Step 1: Create pgvector extension ---
+        try:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+            conn.commit()
+
+            # Check if it was created
+            result = conn.execute(text(
+                "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
+            ))
+            row = result.fetchone()
+            if row:
+                pgvector_version = row[0]
+                steps.append(PgVectorSetupStepResult(
+                    step="Extensao pgvector",
+                    status="ok",
+                    detail=f"pgvector v{pgvector_version} ativo",
+                ))
+            else:
+                steps.append(PgVectorSetupStepResult(
+                    step="Extensao pgvector",
+                    status="error",
+                    detail="Extensao vector nao encontrada. "
+                           "Verifique se a imagem Docker e pgvector/pgvector:pg16",
+                ))
+                has_error = True
+        except Exception as e:
+            steps.append(PgVectorSetupStepResult(
+                step="Extensao pgvector",
+                status="error",
+                detail=str(e),
+            ))
+            has_error = True
+            logger.error(f"Erro ao criar extensao pgvector: {e}")
+
+    # --- Step 2: Create all ORM tables ---
+    try:
+        Base.metadata.create_all(bind=engine)
+        steps.append(PgVectorSetupStepResult(
+            step="Tabelas do ORM",
+            status="ok",
+            detail="Todas as tabelas criadas/verificadas",
+        ))
+    except Exception as e:
+        steps.append(PgVectorSetupStepResult(
+            step="Tabelas do ORM",
+            status="error",
+            detail=str(e),
+        ))
+        has_error = True
+        logger.error(f"Erro ao criar tabelas: {e}")
+
+    # --- Step 3: Check which tables exist ---
+    with engine.connect() as conn:
+        try:
+            result = conn.execute(text(
+                "SELECT tablename FROM pg_tables "
+                "WHERE schemaname = 'public' ORDER BY tablename"
+            ))
+            tables_exist = [row[0] for row in result]
+        except Exception as e:
+            logger.warning(f"Erro ao listar tabelas: {e}")
+
+        # Verify critical tables
+        critical_tables = ["chunks", "embeddings", "candidates", "documents"]
+        missing_tables = [t for t in critical_tables if t not in tables_exist]
+        if missing_tables:
+            steps.append(PgVectorSetupStepResult(
+                step="Verificacao de tabelas criticas",
+                status="error",
+                detail=f"Tabelas ausentes: {', '.join(missing_tables)}",
+            ))
+            has_error = True
+        else:
+            steps.append(PgVectorSetupStepResult(
+                step="Verificacao de tabelas criticas",
+                status="ok",
+                detail=f"Tabelas criticas presentes: {', '.join(critical_tables)}",
+            ))
+
+        # --- Step 4: Verify embeddings.vector column type ---
+        try:
+            result = conn.execute(text(
+                "SELECT data_type, udt_name FROM information_schema.columns "
+                "WHERE table_name = 'embeddings' AND column_name = 'vector'"
+            ))
+            col_row = result.fetchone()
+            if col_row:
+                steps.append(PgVectorSetupStepResult(
+                    step="Coluna embeddings.vector",
+                    status="ok",
+                    detail=f"Tipo: {col_row[1]} (dimensao configurada: {settings.active_embedding_dimensions})",
+                ))
+            else:
+                steps.append(PgVectorSetupStepResult(
+                    step="Coluna embeddings.vector",
+                    status="error",
+                    detail="Coluna 'vector' nao encontrada na tabela embeddings",
+                ))
+                has_error = True
+        except Exception as e:
+            steps.append(PgVectorSetupStepResult(
+                step="Coluna embeddings.vector",
+                status="error",
+                detail=str(e),
+            ))
+
+        # --- Step 5: Create HNSW index ---
+        if settings.enable_hnsw_index:
+            try:
+                result = conn.execute(text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE indexname = 'idx_embeddings_vector_hnsw'"
+                ))
+                if result.fetchone() is None:
+                    conn.execute(text(
+                        f"CREATE INDEX idx_embeddings_vector_hnsw "
+                        f"ON embeddings USING hnsw (vector {settings.pgvector_distance_ops}) "
+                        f"WITH (m = {settings.pgvector_hnsw_m}, "
+                        f"ef_construction = {settings.pgvector_hnsw_ef_construction});"
+                    ))
+                    conn.commit()
+                    steps.append(PgVectorSetupStepResult(
+                        step="Indice HNSW",
+                        status="created",
+                        detail=f"Criado com m={settings.pgvector_hnsw_m}, "
+                               f"ef_construction={settings.pgvector_hnsw_ef_construction}, "
+                               f"metrica={settings.pgvector_distance_metric}",
+                    ))
+                else:
+                    steps.append(PgVectorSetupStepResult(
+                        step="Indice HNSW",
+                        status="already_exists",
+                        detail="Indice idx_embeddings_vector_hnsw ja existe",
+                    ))
+            except Exception as e:
+                steps.append(PgVectorSetupStepResult(
+                    step="Indice HNSW",
+                    status="error",
+                    detail=str(e),
+                ))
+                has_error = True
+                logger.error(f"Erro ao criar indice HNSW: {e}")
+        else:
+            steps.append(PgVectorSetupStepResult(
+                step="Indice HNSW",
+                status="skipped",
+                detail="HNSW desabilitado (ENABLE_HNSW_INDEX=false)",
+            ))
+
+        # --- Step 6: Create FTS index ---
+        try:
+            _VALID_FTS_LANGS = {
+                "portuguese", "english", "spanish", "french", "german",
+                "italian", "dutch", "russian", "simple",
+            }
+            fts_lang = settings.fts_language
+            if fts_lang not in _VALID_FTS_LANGS:
+                fts_lang = "portuguese"
+
+            result = conn.execute(text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE indexname = 'idx_chunks_content_fts'"
+            ))
+            if result.fetchone() is None:
+                conn.execute(text(
+                    f"CREATE INDEX idx_chunks_content_fts "
+                    f"ON chunks USING GIN ("
+                    f"to_tsvector('{fts_lang}', content));"
+                ))
+                conn.commit()
+                steps.append(PgVectorSetupStepResult(
+                    step="Indice Full-Text Search",
+                    status="created",
+                    detail=f"Criado com idioma '{fts_lang}'",
+                ))
+            else:
+                steps.append(PgVectorSetupStepResult(
+                    step="Indice Full-Text Search",
+                    status="already_exists",
+                    detail="Indice idx_chunks_content_fts ja existe",
+                ))
+        except Exception as e:
+            steps.append(PgVectorSetupStepResult(
+                step="Indice Full-Text Search",
+                status="error",
+                detail=str(e),
+            ))
+            has_error = True
+            logger.error(f"Erro ao criar indice FTS: {e}")
+
+        # --- Step 7: Create JSON metadata index ---
+        try:
+            result = conn.execute(text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE indexname = 'idx_chunks_meta_json'"
+            ))
+            if result.fetchone() is None:
+                conn.execute(text(
+                    "CREATE INDEX idx_chunks_meta_json "
+                    "ON chunks USING GIN (meta_json jsonb_path_ops);"
+                ))
+                conn.commit()
+                steps.append(PgVectorSetupStepResult(
+                    step="Indice JSON metadata",
+                    status="created",
+                    detail="Indice GIN para meta_json criado",
+                ))
+            else:
+                steps.append(PgVectorSetupStepResult(
+                    step="Indice JSON metadata",
+                    status="already_exists",
+                    detail="Indice idx_chunks_meta_json ja existe",
+                ))
+        except Exception as e:
+            steps.append(PgVectorSetupStepResult(
+                step="Indice JSON metadata",
+                status="error",
+                detail=str(e),
+            ))
+            has_error = True
+            logger.error(f"Erro ao criar indice JSON: {e}")
+
+        # --- Step 8: List all indexes ---
+        try:
+            result = conn.execute(text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE schemaname = 'public' "
+                "AND (tablename = 'embeddings' OR tablename = 'chunks') "
+                "ORDER BY indexname"
+            ))
+            indexes_exist = [row[0] for row in result]
+        except Exception as e:
+            logger.warning(f"Erro ao listar indices: {e}")
+
+    if has_error:
+        message = "Setup concluido com erros. Verifique os detalhes de cada passo."
+    else:
+        message = "pgvector configurado com sucesso! Extensao, tabelas e indices prontos."
+
+    return PgVectorSetupResponse(
+        success=not has_error,
+        message=message,
+        steps=steps,
+        pgvector_version=pgvector_version,
+        tables_exist=tables_exist,
+        indexes_exist=indexes_exist,
+    )

@@ -30,6 +30,10 @@ import {
   WorkOutline,
   Chat,
   History,
+  BuildCircle,
+  CheckCircle,
+  Error as ErrorIcon,
+  Info,
 } from '@mui/icons-material';
 import { apiService } from '../services/api';
 import { useNotification } from '../contexts/NotificationContext';
@@ -46,6 +50,21 @@ interface DatabaseStats {
   total_conversations: number;
   total_messages: number;
   storage_size_mb: number;
+}
+
+interface PgVectorSetupStep {
+  step: string;
+  status: 'ok' | 'created' | 'already_exists' | 'error' | 'skipped';
+  detail: string;
+}
+
+interface PgVectorSetupResult {
+  success: boolean;
+  message: string;
+  steps: PgVectorSetupStep[];
+  pgvector_version: string | null;
+  tables_exist: string[];
+  indexes_exist: string[];
 }
 
 const DatabasePage: React.FC = () => {
@@ -65,6 +84,9 @@ const DatabasePage: React.FC = () => {
     delete_audit_logs: false,
     reset_sequences: true,
   });
+  const [pgvectorSetupDialogOpen, setPgvectorSetupDialogOpen] = useState(false);
+  const [pgvectorSetupLoading, setPgvectorSetupLoading] = useState(false);
+  const [pgvectorSetupResult, setPgvectorSetupResult] = useState<PgVectorSetupResult | null>(null);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -103,6 +125,51 @@ const DatabasePage: React.FC = () => {
       showError(error.response?.data?.detail || 'Erro ao limpar banco de dados');
     } finally {
       setCleaning(false);
+    }
+  };
+
+  const handlePgvectorSetup = async () => {
+    try {
+      setPgvectorSetupLoading(true);
+      setPgvectorSetupResult(null);
+      const result = await apiService.setupPgvector();
+      setPgvectorSetupResult(result);
+      if (result.success) {
+        showSuccess('pgvector configurado com sucesso!');
+      } else {
+        showError('Setup concluido com erros. Verifique os detalhes.');
+      }
+    } catch (error: any) {
+      showError(error.response?.data?.detail || 'Erro ao configurar pgvector');
+      setPgvectorSetupResult(null);
+    } finally {
+      setPgvectorSetupLoading(false);
+    }
+  };
+
+  const getStepIcon = (status: string) => {
+    switch (status) {
+      case 'ok':
+      case 'created':
+      case 'already_exists':
+        return <CheckCircle sx={{ color: 'success.main', fontSize: 20 }} />;
+      case 'error':
+        return <ErrorIcon sx={{ color: 'error.main', fontSize: 20 }} />;
+      case 'skipped':
+        return <Info sx={{ color: 'text.secondary', fontSize: 20 }} />;
+      default:
+        return <Info sx={{ fontSize: 20 }} />;
+    }
+  };
+
+  const getStepLabel = (status: string) => {
+    switch (status) {
+      case 'ok': return 'OK';
+      case 'created': return 'Criado';
+      case 'already_exists': return 'Ja existe';
+      case 'error': return 'Erro';
+      case 'skipped': return 'Pulado';
+      default: return status;
     }
   };
 
@@ -240,10 +307,190 @@ const DatabasePage: React.FC = () => {
                   </CardContent>
                 </Card>
               </Grid>
+
+              <Grid item xs={12} md={6}>
+                <Card sx={{ border: '1px solid', borderColor: 'info.main', height: '100%' }}>
+                  <CardContent>
+                    <Box display="flex" alignItems="center" gap={1} mb={2}>
+                      <BuildCircle color="info" />
+                      <Typography variant="h6" fontWeight={600}>
+                        Configurar pgvector
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      Instala e configura a extensao pgvector no PostgreSQL.
+                      Cria extensao, tabelas, indices HNSW e Full-Text Search.
+                      Seguro para executar varias vezes.
+                    </Typography>
+                    <Button
+                      variant="contained"
+                      color="info"
+                      startIcon={pgvectorSetupLoading ? <CircularProgress size={16} color="inherit" /> : <BuildCircle />}
+                      onClick={() => {
+                        setPgvectorSetupResult(null);
+                        setPgvectorSetupDialogOpen(true);
+                      }}
+                      disabled={pgvectorSetupLoading}
+                    >
+                      {pgvectorSetupLoading ? 'Configurando...' : 'Configurar pgvector'}
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
             </Grid>
           </Paper>
         </>
       )}
+
+      {/* pgvector Setup Dialog */}
+      <Dialog
+        open={pgvectorSetupDialogOpen}
+        onClose={() => {
+          if (!pgvectorSetupLoading) {
+            setPgvectorSetupDialogOpen(false);
+          }
+        }}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <BuildCircle color="info" />
+            <Typography variant="h6">Configurar pgvector</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 3 }}>
+            Este processo instala a extensao pgvector, cria todas as tabelas necessarias
+            e configura os indices de busca vetorial (HNSW), Full-Text Search (FTS) e
+            metadados JSON. E seguro executar varias vezes.
+          </Alert>
+
+          {!pgvectorSetupResult && !pgvectorSetupLoading && (
+            <Typography variant="body2" color="text.secondary">
+              Clique em "Executar Setup" para iniciar a configuracao completa do pgvector.
+            </Typography>
+          )}
+
+          {pgvectorSetupLoading && (
+            <Box display="flex" flexDirection="column" alignItems="center" py={4}>
+              <CircularProgress size={48} />
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                Configurando pgvector... Aguarde.
+              </Typography>
+            </Box>
+          )}
+
+          {pgvectorSetupResult && (
+            <Box>
+              <Alert
+                severity={pgvectorSetupResult.success ? 'success' : 'warning'}
+                sx={{ mb: 2 }}
+              >
+                {pgvectorSetupResult.message}
+                {pgvectorSetupResult.pgvector_version && (
+                  <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                    pgvector v{pgvectorSetupResult.pgvector_version}
+                  </Typography>
+                )}
+              </Alert>
+
+              <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                Resultado de cada passo:
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
+                {pgvectorSetupResult.steps.map((step, index) => (
+                  <Box
+                    key={index}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 1,
+                      p: 1.5,
+                      borderRadius: 1,
+                      bgcolor: step.status === 'error' ? 'error.50' : 'action.hover',
+                      border: '1px solid',
+                      borderColor: step.status === 'error' ? 'error.light' : 'divider',
+                    }}
+                  >
+                    {getStepIcon(step.status)}
+                    <Box sx={{ flex: 1 }}>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Typography variant="body2" fontWeight={600}>
+                          {step.step}
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            px: 1,
+                            py: 0.25,
+                            borderRadius: 1,
+                            bgcolor: step.status === 'error' ? 'error.main' :
+                                     step.status === 'created' ? 'info.main' :
+                                     step.status === 'ok' || step.status === 'already_exists' ? 'success.main' :
+                                     'grey.500',
+                            color: 'white',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {getStepLabel(step.status)}
+                        </Typography>
+                      </Box>
+                      {step.detail && (
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                          {step.detail}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
+
+              {pgvectorSetupResult.indexes_exist.length > 0 && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                    Indices ativos (chunks/embeddings):
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {pgvectorSetupResult.indexes_exist.map((idx) => (
+                      <Typography
+                        key={idx}
+                        variant="caption"
+                        sx={{
+                          px: 1,
+                          py: 0.5,
+                          borderRadius: 1,
+                          bgcolor: 'action.selected',
+                          fontFamily: 'monospace',
+                        }}
+                      >
+                        {idx}
+                      </Typography>
+                    ))}
+                  </Box>
+                </Box>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setPgvectorSetupDialogOpen(false)}
+            disabled={pgvectorSetupLoading}
+          >
+            Fechar
+          </Button>
+          <Button
+            variant="contained"
+            color="info"
+            onClick={handlePgvectorSetup}
+            disabled={pgvectorSetupLoading}
+            startIcon={pgvectorSetupLoading ? <CircularProgress size={16} color="inherit" /> : <BuildCircle />}
+          >
+            {pgvectorSetupLoading ? 'Executando...' : 'Executar Setup'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Cleanup Dialog */}
       <Dialog
