@@ -706,6 +706,18 @@ REGRAS:
     )
 
     # ================================================================
+    # Esquema (Schema) do Banco de Dados
+    # ================================================================
+    database_schema: str = Field(
+        default="public",
+        description=(
+            "Schema do PostgreSQL onde as tabelas serao criadas. "
+            "Use 'public' (padrao) ou um schema customizado (ex: 'analisador'). "
+            "O schema sera criado automaticamente pelo init_db se nao existir."
+        )
+    )
+
+    # ================================================================
     # Upload / Storage
     # ================================================================
     max_upload_size_mb: int = Field(default=20, description="Tamanho maximo de upload (MB)")
@@ -754,6 +766,13 @@ REGRAS:
     # ================================================================
     # Helpers
     # ================================================================
+
+    @property
+    def database_schema_sql(self) -> str:
+        """Retorna o schema como prefixo SQL (ex: 'analisador.' ou '' para public)"""
+        if self.database_schema and self.database_schema != "public":
+            return f"{self.database_schema}."
+        return ""
 
     @property
     def enabled_vector_providers(self) -> list[str]:

@@ -18,6 +18,7 @@ from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 
 from app.db.database import Base
+from app.core.config import settings
 
 
 def _utcnow():
@@ -223,7 +224,7 @@ class Embedding(Base):
     id = Column(Integer, primary_key=True, index=True)
     chunk_id = Column(Integer, ForeignKey("chunks.id", ondelete="CASCADE"), nullable=False)
     model = Column(String)
-    vector = Column(Vector(1536))  # Dimensao configurada via EMBEDDING_DIMENSIONS
+    vector = Column(Vector(settings.active_embedding_dimensions))  # Dimensao configurada via EMBEDDING_DIMENSIONS/EMBEDDING_MODE
     created_at = Column(DateTime, default=_utcnow)
 
     # Relacionamentos

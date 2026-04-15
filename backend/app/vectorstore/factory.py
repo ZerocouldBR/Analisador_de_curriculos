@@ -8,6 +8,12 @@ Suporta multiplos provedores simultaneamente:
 
 Escritas sao enviadas a todos os provedores habilitados (fan-out).
 Buscas usam o provedor primario (vector_db_primary).
+
+Configuracao:
+    PGVECTOR_ENABLED=true/false
+    SUPABASE_ENABLED=true/false
+    QDRANT_ENABLED=true/false
+    VECTOR_DB_PRIMARY=pgvector  (qual provedor usar para buscas)
 """
 import logging
 from typing import Optional, Dict
@@ -19,6 +25,26 @@ logger = logging.getLogger(__name__)
 
 # Registry global de vector stores habilitados
 _vector_stores: Dict[str, VectorStore] = {}
+
+# Dependencias por provedor (para mensagem de erro clara)
+_PROVIDER_DEPENDENCIES = {
+    "pgvector": {
+        "package": "pgvector",
+        "install": "pip install pgvector sqlalchemy",
+        "config": ["DATABASE_URL ou PGVECTOR_DATABASE_URL"],
+    },
+    "supabase": {
+        "package": "supabase",
+        "install": "pip install supabase",
+        "config": ["SUPABASE_URL", "SUPABASE_KEY"],
+        "setup": "python -m app.db.init_db --supabase-sql",
+    },
+    "qdrant": {
+        "package": "qdrant-client",
+        "install": "pip install qdrant-client",
+        "config": ["QDRANT_URL"],
+    },
+}
 
 
 def _create_store(provider_name: str) -> VectorStore:
@@ -45,23 +71,52 @@ def _create_store(provider_name: str) -> VectorStore:
         from app.vectorstore.qdrant_store import QdrantVectorStore
         return QdrantVectorStore()
     else:
+        supported = ", ".join(_PROVIDER_DEPENDENCIES.keys())
         raise ValueError(
-            f"Provedor de vector store nao suportado: {provider_name}. "
-            f"Opcoes: pgvector, supabase, qdrant"
+            f"Provedor de vector store nao suportado: '{provider_name}'. "
+            f"Opcoes: {supported}"
         )
 
 
 def _ensure_stores_initialized() -> None:
     """Inicializa lazily todos os stores habilitados que ainda nao estao no registry"""
     global _vector_stores
-    for provider_name in settings.enabled_vector_providers:
+    providers = settings.enabled_vector_providers
+
+    if not providers:
+        logger.warning(
+            "Nenhum provedor vetorial habilitado. "
+            "Habilite pelo menos um: PGVECTOR_ENABLED, SUPABASE_ENABLED, ou QDRANT_ENABLED"
+        )
+        return
+
+    for provider_name in providers:
         if provider_name not in _vector_stores:
             try:
                 store = _create_store(provider_name)
                 _vector_stores[provider_name] = store
-                logger.info(f"Vector store initialized: {provider_name}")
+                logger.info(
+                    f"Vector store initialized: {provider_name} "
+                    f"(dimensions={settings.active_embedding_dimensions})"
+                )
+            except ImportError as e:
+                dep = _PROVIDER_DEPENDENCIES.get(provider_name, {})
+                logger.error(
+                    f"Falha ao inicializar vector store '{provider_name}': "
+                    f"pacote nao encontrado. "
+                    f"Execute: {dep.get('install', 'pip install <pacote>')}"
+                )
+            except ValueError as e:
+                dep = _PROVIDER_DEPENDENCIES.get(provider_name, {})
+                logger.error(
+                    f"Falha ao inicializar vector store '{provider_name}': "
+                    f"configuracao incompleta. "
+                    f"Configure: {', '.join(dep.get('config', []))}"
+                )
             except Exception as e:
-                logger.error(f"Falha ao inicializar vector store '{provider_name}': {e}")
+                logger.error(
+                    f"Falha ao inicializar vector store '{provider_name}': {e}"
+                )
 
 
 def get_vector_store() -> VectorStore:
@@ -83,7 +138,7 @@ def get_primary_store() -> VectorStore:
     """
     Retorna o VectorStore primario para operacoes de busca.
 
-    O provedor primario e definido por vector_db_primary.
+    O provedor primario e definido por VECTOR_DB_PRIMARY.
     Se o primario nao estiver habilitado, usa o primeiro habilitado.
 
     Returns:
@@ -103,13 +158,16 @@ def get_primary_store() -> VectorStore:
         fallback = next(iter(_vector_stores))
         logger.warning(
             f"Provedor primario '{primary}' nao habilitado. "
-            f"Usando fallback: '{fallback}'"
+            f"Usando fallback: '{fallback}'. "
+            f"Configure VECTOR_DB_PRIMARY={fallback} para silenciar este aviso."
         )
         return _vector_stores[fallback]
 
+    enabled = settings.enabled_vector_providers
     raise RuntimeError(
-        "Nenhum vector store habilitado. "
-        "Habilite pelo menos um provedor nas configuracoes."
+        f"Nenhum vector store habilitado ou acessivel. "
+        f"Provedores configurados: {enabled}. "
+        f"Verifique as dependencias e configuracoes de cada provedor."
     )
 
 
@@ -161,9 +219,32 @@ async def initialize_vector_store() -> None:
     loga o erro mas continua com os demais.
     """
     _ensure_stores_initialized()
+
+    if not _vector_stores:
+        logger.warning(
+            "Nenhum vector store para inicializar. "
+            "Verifique as configuracoes de provedores vetoriais."
+        )
+        return
+
+    logger.info(
+        f"Inicializando {len(_vector_stores)} vector store(s): "
+        f"{', '.join(_vector_stores.keys())}"
+    )
+
     for name, store in _vector_stores.items():
         try:
             await store.initialize()
             logger.info(f"Vector store '{name}' initialization complete")
         except Exception as e:
-            logger.error(f"Falha ao inicializar vector store '{name}': {e}")
+            dep = _PROVIDER_DEPENDENCIES.get(name, {})
+            setup_hint = dep.get("setup", "")
+            logger.error(
+                f"Falha ao inicializar vector store '{name}': {e}"
+                + (f". Setup: {setup_hint}" if setup_hint else "")
+            )
+
+    logger.info(
+        f"Vector stores ativos: {', '.join(_vector_stores.keys())} "
+        f"(primary={settings.vector_db_primary})"
+    )

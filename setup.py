@@ -48,6 +48,7 @@ DEBUG=true
 
 # Banco de Dados (localhost via Docker ou instalacao local)
 DATABASE_URL=postgresql+psycopg://analisador:analisador@localhost:5432/analisador_curriculos
+DATABASE_SCHEMA=public
 
 # Redis (localhost via Docker ou instalacao local)
 REDIS_URL=redis://localhost:6379/0
@@ -61,8 +62,14 @@ CORS_ORIGINS=["http://localhost:3000"]
 # OpenAI (descomente e preencha para usar embeddings e chat)
 # OPENAI_API_KEY=sk-your-api-key-here
 
-# Vector DB
+# Vector DB - Provedores (multiplos podem estar ativos)
 VECTOR_DB_PROVIDER=pgvector
+VECTOR_DB_PRIMARY=pgvector
+PGVECTOR_ENABLED=true
+SUPABASE_ENABLED=false
+QDRANT_ENABLED=false
+
+# Embeddings
 EMBEDDING_MODE=api
 """
     env_path = os.path.join(backend_dir, ".env")
@@ -85,6 +92,43 @@ def create_env_vps(backend_dir):
 
     # Dominio
     domain = prompt_input("Dominio (ex: curriculos.meusite.com.br)", "curriculos.seudominio.com.br")
+
+    # Database schema
+    print("\n  Schema do banco de dados:")
+    print("    public     = Schema padrao do PostgreSQL")
+    print("    <custom>   = Schema customizado (ex: analisador, app)")
+    db_schema = prompt_input("Schema do banco de dados", "public")
+
+    # Vector DB provider
+    print("\n  Provedor de banco vetorial:")
+    print("    pgvector  = PostgreSQL com pgvector (recomendado)")
+    print("    supabase  = Supabase gerenciado + pgvector")
+    print("    qdrant    = Qdrant dedicado (servidor separado)")
+    print("    multi     = Multiplos provedores simultaneos")
+    vector_provider = prompt_input("Provedor vetorial", "pgvector")
+
+    supabase_url = ""
+    supabase_key = ""
+    qdrant_url = ""
+    pgvector_enabled = "true"
+    supabase_enabled = "false"
+    qdrant_enabled = "false"
+
+    if vector_provider == "supabase" or vector_provider == "multi":
+        supabase_enabled = "true"
+        supabase_url = prompt_input("Supabase URL (https://xxx.supabase.co)", "")
+        supabase_key = prompt_input("Supabase Key", "", sensitive=True)
+
+    if vector_provider == "qdrant" or vector_provider == "multi":
+        qdrant_enabled = "true"
+        qdrant_url = prompt_input("Qdrant URL", "http://localhost:6333")
+
+    if vector_provider == "qdrant":
+        pgvector_enabled = "false"
+
+    vector_primary = "pgvector" if vector_provider != "qdrant" else "qdrant"
+    if vector_provider == "supabase":
+        vector_primary = "supabase"
 
     # Embeddings
     print("\n  Modo de vetorizacao:")
@@ -124,6 +168,21 @@ def create_env_vps(backend_dir):
     # OpenAI line
     openai_line = f"OPENAI_API_KEY={openai_key}" if openai_key else "# OPENAI_API_KEY=sk-your-api-key-here"
 
+    # Supabase lines
+    supabase_lines = ""
+    if supabase_enabled == "true" and supabase_url:
+        supabase_lines = f"""
+# Supabase
+SUPABASE_URL={supabase_url}
+SUPABASE_KEY={supabase_key}"""
+
+    # Qdrant lines
+    qdrant_lines = ""
+    if qdrant_enabled == "true" and qdrant_url:
+        qdrant_lines = f"""
+# Qdrant
+QDRANT_URL={qdrant_url}"""
+
     env_content = f"""# ================================================================
 # Analisador de Curriculos - Configuracao de Producao
 # Gerado automaticamente por setup.py
@@ -136,6 +195,7 @@ DEBUG=false
 
 # Banco de Dados (Docker)
 DATABASE_URL=postgresql+psycopg://analisador:{db_password}@db:5432/analisador_curriculos
+DATABASE_SCHEMA={db_schema}
 
 # Redis (Docker com senha)
 REDIS_URL=redis://:{redis_password}@redis:6379/0
@@ -159,8 +219,14 @@ EMBEDDING_MODEL=text-embedding-3-small
 # LLM / Chat
 CHAT_MODEL={chat_model}
 
-# Vector DB
-VECTOR_DB_PROVIDER=pgvector
+# Vector DB - Provedores
+VECTOR_DB_PROVIDER={vector_primary}
+VECTOR_DB_PRIMARY={vector_primary}
+PGVECTOR_ENABLED={pgvector_enabled}
+SUPABASE_ENABLED={supabase_enabled}
+QDRANT_ENABLED={qdrant_enabled}
+{supabase_lines}
+{qdrant_lines}
 
 # Upload / Storage
 MAX_UPLOAD_SIZE_MB={max_upload}
@@ -218,7 +284,15 @@ FRONTEND_WS_URL=wss://{domain}
     print(f"    JWT Secret:       {mask_secret(secret)}")
     print(f"    Embedding Mode:   {embedding_mode}")
     print(f"    Moeda:            {currency}")
+    if supabase_enabled == "true":
+        print(f"    Supabase:         {supabase_url or 'NAO CONFIGURADO'}")
+    if qdrant_enabled == "true":
+        print(f"    Qdrant:           {qdrant_url or 'NAO CONFIGURADO'}")
+    print(f"    DB Schema:        {db_schema}")
     print(f"\n  As senhas completas estao nos arquivos .env gerados.")
+    if supabase_enabled == "true":
+        print(f"\n  [SUPABASE] Execute o SQL de setup no Supabase SQL Editor:")
+        print(f"    cd backend && python -m app.db.init_db --supabase-sql")
     print(f"  ========================================")
     return secret, db_password, redis_password
 
@@ -254,7 +328,7 @@ def init_database(backend_dir):
     print("  Verificando conexao com PostgreSQL...")
     result = subprocess.run(
         [sys.executable, "-c", """
-import sys
+import os, sys
 sys.path.insert(0, '.')
 os.chdir('backend')
 from app.db.database import engine
