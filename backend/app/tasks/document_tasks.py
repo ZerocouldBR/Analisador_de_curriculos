@@ -123,10 +123,33 @@ def process_document_task(
         _update_document_status(db, document_id, "processing", 40, "Texto normalizado")
 
         # ============================================
-        # STEP 3: Parse Resume Structure
+        # STEP 3: Parse Resume Structure (Regex + AI Pipeline)
         # ============================================
         _update_document_status(db, document_id, "processing", 45, "Analisando estrutura do curriculo")
         resume_data = ResumeParserService.parse_resume(text)
+
+        # Run enrichment pipeline (regex + AI validation + confidence scoring)
+        enriched_result = None
+        try:
+            from app.services.resume_enrichment_pipeline import ResumeEnrichmentPipeline
+            _update_document_status(db, document_id, "processing", 48, "Executando pipeline de enriquecimento (IA + validacao)")
+            enriched_result = ResumeEnrichmentPipeline.process_sync(
+                text,
+                enable_ai=bool(settings.openai_api_key),
+                enable_career_advisory=False,
+            )
+        except Exception as enrich_err:
+            logger.warning(f"Pipeline de enriquecimento falhou, usando apenas regex: {enrich_err}")
+            enriched_result = None
+
+        # Use enriched data if available, otherwise fallback to regex
+        if enriched_result and enriched_result.get("data"):
+            enriched_data = enriched_result["data"]
+            enriched_personal = enriched_data.get("personal_info", {})
+        else:
+            enriched_data = None
+            enriched_personal = None
+
         _update_document_status(db, document_id, "processing", 55, "Curriculo analisado com sucesso")
 
         # ============================================
@@ -137,7 +160,12 @@ def process_document_task(
         ).first()
 
         if candidate:
-            personal = resume_data["personal_info"]
+            # Prefer enriched data (AI-validated) over raw regex
+            if enriched_personal:
+                personal = enriched_personal
+            else:
+                personal = resume_data["personal_info"]
+
             if personal.get("name"):
                 candidate.full_name = personal["name"]
             if personal.get("email"):
@@ -401,10 +429,12 @@ def process_document_task(
 
             next_version = (last_profile.version + 1) if last_profile else 1
 
+            # Store enriched data if available, otherwise raw regex data
+            profile_data = enriched_result if enriched_result and enriched_result.get("data") else resume_data
             profile = CandidateProfile(
                 candidate_id=candidate.id,
                 version=next_version,
-                profile_json=resume_data
+                profile_json=profile_data
             )
             db.add(profile)
             db.commit()
