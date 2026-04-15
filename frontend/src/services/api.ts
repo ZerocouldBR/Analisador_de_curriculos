@@ -21,6 +21,8 @@ import {
   HealthCheck,
   SystemConfigResponse,
   SystemConfigUpdateResult,
+  EnrichedResumeProfile,
+  CareerAdvisoryResponse,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -154,6 +156,16 @@ class ApiService {
 
   async getCandidateProfiles(candidateId: number): Promise<CandidateProfile[]> {
     const response = await this.api.get<CandidateProfile[]>(`/v1/candidates/${candidateId}/profiles`);
+    return response.data;
+  }
+
+  async getEnrichedProfile(candidateId: number): Promise<EnrichedResumeProfile> {
+    const response = await this.api.get<EnrichedResumeProfile>(`/v1/candidates/${candidateId}/enriched-profile`);
+    return response.data;
+  }
+
+  async getCareerAdvisory(candidateId: number): Promise<CareerAdvisoryResponse> {
+    const response = await this.api.post<CareerAdvisoryResponse>(`/v1/candidates/${candidateId}/career-advisory`);
     return response.data;
   }
 

@@ -415,3 +415,120 @@ export interface MergeSuggestion {
   similarity_score: number;
   matched_fields: string[];
 }
+
+// ==================== Enriched Resume ====================
+export interface EnrichedPersonalInfo {
+  name?: string;
+  name_confidence?: number;
+  name_source?: string;
+  email?: string;
+  email_confidence?: number;
+  phone?: string;
+  phone_confidence?: number;
+  location?: string;
+  location_confidence?: number;
+  full_address?: string;
+  linkedin?: string;
+  github?: string;
+  portfolio?: string;
+  cpf?: string;
+  rg?: string;
+  birth_date?: string;
+}
+
+export interface ProfessionalObjective {
+  title?: string;
+  summary?: string;
+  confidence?: number;
+}
+
+export interface EnrichedExperience {
+  company?: string;
+  title?: string;
+  start_date?: string;
+  end_date?: string;
+  location?: string;
+  description?: string;
+  achievements?: string[];
+}
+
+export interface EnrichedEducation {
+  institution?: string;
+  degree?: string;
+  field?: string;
+  start_year?: string;
+  end_year?: string;
+  status?: string;
+}
+
+export interface CategorizedSkills {
+  technical?: string[];
+  soft?: string[];
+  tools?: string[];
+  frameworks?: string[];
+}
+
+export interface EnrichedCertification {
+  name?: string;
+  institution?: string;
+  year?: string;
+  code?: string;
+}
+
+export interface ValidationAlert {
+  field: string;
+  type: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  message: string;
+  suggestion?: string;
+}
+
+export interface ValidationResult {
+  overall_confidence?: number;
+  quality_label?: string;
+  field_confidence?: Record<string, number>;
+  alerts?: ValidationAlert[];
+  alerts_count?: number;
+  fields_extracted?: number;
+  total_fields?: number;
+}
+
+export interface EnrichedResumeProfile {
+  candidate_id: number;
+  extraction_method: string;
+  ai_enhanced: boolean;
+  personal_info: EnrichedPersonalInfo;
+  professional_objective: ProfessionalObjective;
+  experiences: EnrichedExperience[];
+  education: EnrichedEducation[];
+  skills: CategorizedSkills;
+  languages: { language: string; level: string }[];
+  certifications: EnrichedCertification[];
+  licenses: { type: string; category?: string; description?: string }[];
+  additional_info: Record<string, any>;
+  validation: ValidationResult;
+  metadata: Record<string, any>;
+}
+
+export interface CareerAdvisoryData {
+  overall_score?: number;
+  score_breakdown?: Record<string, number>;
+  strengths?: { point: string; impact: string }[];
+  weaknesses?: { point: string; suggestion: string; priority: string }[];
+  suggested_summary?: string;
+  suggested_keywords?: string[];
+  presentation_gaps?: { gap: string; importance: string }[];
+  hr_recommendations?: { recommendation: string; context: string }[];
+  candidate_tips?: { tip: string; category: string }[];
+  suitable_areas?: { area: string; fit_score: number; reasoning: string }[];
+  improvement_priority?: string[];
+  quick_tips?: { tip: string; category: string; priority: string }[];
+}
+
+export interface CareerAdvisoryResponse {
+  candidate_id: number;
+  available: boolean;
+  advisory?: CareerAdvisoryData;
+  quick_tips?: { tip: string; category: string; priority: string }[];
+  error?: string;
+}

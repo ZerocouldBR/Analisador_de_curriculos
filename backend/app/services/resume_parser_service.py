@@ -136,8 +136,73 @@ class ResumeParserService:
                 info["birth_date"] = birth_match.group(1).strip()
                 break
 
-        # Nome - Estrategia melhorada com multiplas abordagens
+        # Nome - Estrategia robusta com protecao contra enderecos
         name = None
+
+        # Palavras que indicam ENDERECO (nunca devem estar em um nome)
+        _address_words = {
+            'rua', 'r.', 'avenida', 'av.', 'av', 'alameda', 'al.', 'al',
+            'travessa', 'tv.', 'tv', 'praca', 'praça', 'pca.', 'pca',
+            'estrada', 'estr.', 'estr', 'rodovia', 'rod.', 'rod',
+            'bairro', 'bro.', 'cep', 'endereco', 'endereço',
+            'quadra', 'lote', 'bloco', 'conjunto', 'condominio', 'condomínio',
+            'apartamento', 'apto', 'apto.', 'casa', 'sala', 'andar',
+            'nº', 'numero', 'número', 'n.',
+        }
+
+        # Palavras de cabecalho de secao
+        _section_headers = {
+            'experiencia', 'experiência', 'formacao', 'formação',
+            'habilidades', 'objetivo', 'resumo', 'certificacao',
+            'certificação', 'idioma', 'dados', 'curriculo', 'currículo',
+            'curriculum', 'vitae', 'perfil', 'profissional',
+            'contato', 'informacoes', 'informações', 'educacao',
+            'educação', 'competencias', 'competências', 'qualificacoes',
+            'qualificações', 'sobre', 'endereco', 'endereço',
+        }
+
+        def _looks_like_address(text_line: str) -> bool:
+            """Detecta se uma linha parece ser endereco."""
+            lower = text_line.lower().strip()
+            # Contem palavras tipicas de endereco
+            words_in_line = {w.rstrip('.,;:') for w in lower.split()}
+            if words_in_line & _address_words:
+                return True
+            # Contem CEP (00000-000)
+            if re.search(r'\b\d{5}[-.]?\d{3}\b', text_line):
+                return True
+            # Termina com UF (ex: ", SP" ou "- SP")
+            if re.search(r'[,\-–]\s*[A-Z]{2}\s*$', text_line):
+                return True
+            # Contem "nº" ou numero de endereco
+            if re.search(r'\bnº?\s*\d+', lower):
+                return True
+            # Contem virgula + cidade/estado pattern
+            if re.search(r',\s*\w+\s*[-–]\s*[A-Z]{2}', text_line):
+                return True
+            return False
+
+        def _is_valid_person_name(candidate_name: str) -> bool:
+            """Valida se parece nome de pessoa."""
+            if not candidate_name:
+                return False
+            words = candidate_name.split()
+            if len(words) < 2:
+                return False
+            if len(words) > 8:
+                return False
+            if re.search(r'\d', candidate_name):
+                return False
+            if re.search(r'[@#$%&*!?/\\|{}[\]<>]', candidate_name):
+                return False
+            if _looks_like_address(candidate_name):
+                return False
+            # Preposicoes aceitaveis em nomes
+            preps = {'de', 'da', 'do', 'dos', 'das', 'e', 'di', 'del'}
+            for word in words:
+                if word.lower() not in preps and not word[0].isalpha():
+                    return False
+            return True
 
         # 1. Tentar extrair nome de campos rotulados
         name_label_patterns = [
@@ -148,25 +213,17 @@ class ResumeParserService:
             name_match = re.search(pattern, text, re.IGNORECASE)
             if name_match:
                 candidate_name = name_match.group(1).strip()
-                # Validar que parece um nome (2+ palavras, sem numeros)
-                if len(candidate_name.split()) >= 2 and not re.search(r'\d', candidate_name):
+                if _is_valid_person_name(candidate_name):
                     name = candidate_name[:60]
                     break
 
         # 2. Se nao encontrou rotulado, tentar primeira linha significativa
         if not name:
             lines = [line.strip() for line in text.split('\n') if line.strip()]
-            section_headers = [
-                'experiencia', 'formacao', 'habilidades', 'objetivo',
-                'resumo', 'certificacao', 'idioma', 'dados pessoais',
-                'curriculo', 'curriculum', 'vitae', 'perfil', 'profissional',
-                'contato', 'informacoes', 'educacao', 'competencias',
-                'qualificacoes', 'sobre', 'endereco', 'rua', 'avenida',
-            ]
 
-            for line in lines[:10]:
+            for line in lines[:15]:
                 # Pular linhas muito curtas ou muito longas
-                if len(line) < 3 or len(line) > 60:
+                if len(line) < 5 or len(line) > 60:
                     continue
                 # Pular linhas com numeros (telefone, CPF, endereco)
                 if re.search(r'\d', line):
@@ -174,23 +231,23 @@ class ResumeParserService:
                 # Pular linhas com caracteres especiais
                 if re.search(r'[!@#$%^&*()=+\[\]{}<>|\\/:;]', line):
                     continue
+                # Pular enderecos (deteccao aprimorada)
+                if _looks_like_address(line):
+                    continue
                 # Pular cabecalhos de secao
-                line_lower = line.lower().strip()
-                if any(h in line_lower for h in section_headers):
+                line_words_lower = {w.lower().rstrip('.,;:') for w in line.split()}
+                if line_words_lower & _section_headers:
                     continue
                 # Pular linhas que sao emails ou URLs
                 if '@' in line or 'http' in line.lower() or '.com' in line.lower():
                     continue
-                # Pular linhas com virgula seguida de estado (provavelmente endereco)
-                if re.search(r',\s*[A-Z]{2}\s*$', line):
+                # Pular linhas com virgula (provavelmente endereco ou lista)
+                if ',' in line:
                     continue
-                # Verificar se parece um nome (maiuscula inicial, 2+ palavras)
-                words = line.split()
-                if len(words) >= 1 and words[0][0].isupper():
-                    # Nome com pelo menos 2 palavras e idealmente
-                    if len(words) >= 2 or len(line) > 5:
-                        name = line
-                        break
+                # Verificar se parece um nome valido
+                if _is_valid_person_name(line):
+                    name = line
+                    break
 
         if name:
             # Limpar nome: remover titulos e prefixos

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from pydantic import BaseModel
 
 from app.db.database import get_db
@@ -13,7 +13,7 @@ from app.schemas.candidate import (
 from app.services.candidate_service import CandidateService
 from app.core.config import settings
 from app.core.dependencies import get_current_user, require_permission
-from app.db.models import User, Candidate, Experience, CandidateProfile
+from app.db.models import User, Candidate, Experience, CandidateProfile, Chunk
 
 
 class ExperienceResponse(BaseModel):
@@ -288,3 +288,251 @@ def list_candidate_profiles(
         )
         for prof in profiles
     ]
+
+
+# ================================================================
+# Endpoints para dados enriquecidos do curriculo
+# ================================================================
+
+
+class EnrichedResumeResponse(BaseModel):
+    """Resposta enriquecida com todos os dados do curriculo"""
+    candidate_id: int
+    extraction_method: str = "regex"
+    ai_enhanced: bool = False
+    personal_info: Dict[str, Any] = {}
+    professional_objective: Dict[str, Any] = {}
+    experiences: list = []
+    education: list = []
+    skills: Dict[str, Any] = {}
+    languages: list = []
+    certifications: list = []
+    licenses: list = []
+    additional_info: Dict[str, Any] = {}
+    validation: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = {}
+
+    class Config:
+        from_attributes = True
+
+
+class CareerAdvisoryResponse(BaseModel):
+    """Resposta do modulo de consultoria de carreira"""
+    candidate_id: int
+    available: bool = False
+    advisory: Optional[Dict[str, Any]] = None
+    quick_tips: list = []
+    error: Optional[str] = None
+
+
+@router.get("/{candidate_id}/enriched-profile", response_model=EnrichedResumeResponse)
+def get_enriched_profile(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("candidates.read"))
+):
+    """
+    Retorna perfil enriquecido do candidato com dados completos.
+
+    Inclui:
+    - Dados pessoais com nivel de confianca por campo
+    - Objetivo/resumo profissional
+    - Experiencias detalhadas
+    - Formacao academica
+    - Skills categorizadas (tecnicas, soft, tools, frameworks)
+    - Idiomas com nivel
+    - Certificacoes
+    - Habilitacoes e licencas
+    - Informacoes adicionais (disponibilidade, equipamentos, ERP)
+    - Validacao com alertas e score de confianca
+    - Metadados da extracao
+
+    **Requer permissao:** candidates.read
+    """
+    candidate = CandidateService.get_candidate(db, candidate_id)
+    if not candidate:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Candidato {candidate_id} nao encontrado"
+        )
+
+    # Get latest profile with enriched data
+    latest_profile = db.query(CandidateProfile).filter(
+        CandidateProfile.candidate_id == candidate_id
+    ).order_by(CandidateProfile.version.desc()).first()
+
+    if not latest_profile or not latest_profile.profile_json:
+        # No enriched data yet - return basic info from candidate record
+        return EnrichedResumeResponse(
+            candidate_id=candidate_id,
+            extraction_method="none",
+            personal_info={
+                "name": candidate.full_name,
+                "name_confidence": 0.5,
+                "email": candidate.email,
+                "phone": candidate.phone,
+                "location": f"{candidate.city}, {candidate.state}" if candidate.city else None,
+                "cpf": candidate.doc_id,
+            },
+            validation={
+                "overall_confidence": 0.3,
+                "quality_label": "baixa",
+                "alerts": [{"field": "general", "type": "no_enriched_data", "severity": "medium",
+                           "message": "Dados enriquecidos nao disponiveis. Reprocesse o documento."}],
+            },
+        )
+
+    profile_data = latest_profile.profile_json
+
+    # Check if this is enriched format (has "data" key) or legacy format
+    if "data" in profile_data and "validation" in profile_data:
+        # Enriched pipeline format
+        enriched = profile_data.get("data", {})
+        return EnrichedResumeResponse(
+            candidate_id=candidate_id,
+            extraction_method=profile_data.get("extraction_method", "unknown"),
+            ai_enhanced=profile_data.get("ai_enhanced", False),
+            personal_info=enriched.get("personal_info", {}),
+            professional_objective=enriched.get("professional_objective", {}),
+            experiences=enriched.get("experiences", []),
+            education=enriched.get("education", []),
+            skills=enriched.get("skills", {}),
+            languages=enriched.get("languages", []),
+            certifications=enriched.get("certifications", []),
+            licenses=enriched.get("licenses", []),
+            additional_info=enriched.get("additional_info", {}),
+            validation=profile_data.get("validation", {}),
+            metadata=profile_data.get("metadata", {}),
+        )
+    else:
+        # Legacy format - convert to enriched response
+        personal = profile_data.get("personal_info", {})
+        return EnrichedResumeResponse(
+            candidate_id=candidate_id,
+            extraction_method="regex_legacy",
+            personal_info={
+                "name": personal.get("name"),
+                "email": personal.get("email"),
+                "phone": personal.get("phone"),
+                "location": personal.get("location"),
+                "linkedin": personal.get("linkedin"),
+                "github": personal.get("github"),
+                "cpf": personal.get("cpf"),
+                "rg": personal.get("rg"),
+                "birth_date": personal.get("birth_date"),
+            },
+            professional_objective={
+                "title": None,
+                "summary": profile_data.get("summary"),
+            },
+            experiences=profile_data.get("experiences", []),
+            education=profile_data.get("education", []),
+            skills={"technical": profile_data.get("skills", [])},
+            languages=profile_data.get("languages", []),
+            certifications=[
+                {"name": c} if isinstance(c, str) else c
+                for c in profile_data.get("certifications", [])
+            ],
+            licenses=profile_data.get("licenses", []),
+            additional_info={
+                "availability": profile_data.get("availability", {}),
+                "equipment": profile_data.get("equipment", []),
+                "erp_systems": profile_data.get("erp_systems", []),
+                "safety_certifications": profile_data.get("safety_certs", []),
+            },
+        )
+
+
+@router.post("/{candidate_id}/career-advisory", response_model=CareerAdvisoryResponse)
+async def get_career_advisory(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("candidates.read"))
+):
+    """
+    Gera analise e recomendacoes de carreira para o candidato.
+
+    Modulo OPCIONAL que fornece:
+    - Pontuacao geral do curriculo (0-100)
+    - Pontos fortes e fracos
+    - Sugestoes de melhoria
+    - Resumo profissional reescrito
+    - Palavras-chave sugeridas
+    - Gaps de apresentacao
+    - Recomendacoes para RH
+    - Dicas para o candidato
+    - Areas mais adequadas
+
+    Requer API OpenAI configurada para analise completa.
+    Sem API, retorna dicas rapidas baseadas em heuristicas.
+
+    **Requer permissao:** candidates.read
+    """
+    candidate = CandidateService.get_candidate(db, candidate_id)
+    if not candidate:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Candidato {candidate_id} nao encontrado"
+        )
+
+    # Get latest enriched profile
+    latest_profile = db.query(CandidateProfile).filter(
+        CandidateProfile.candidate_id == candidate_id
+    ).order_by(CandidateProfile.version.desc()).first()
+
+    if not latest_profile or not latest_profile.profile_json:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Candidato nao possui perfil processado. Faca upload de um curriculo primeiro."
+        )
+
+    profile_data = latest_profile.profile_json
+
+    # Extract enriched data
+    if "data" in profile_data:
+        resume_data = profile_data["data"]
+    else:
+        # Legacy format - convert
+        from app.services.resume_enrichment_pipeline import ResumeEnrichmentPipeline
+        resume_data = ResumeEnrichmentPipeline._convert_regex_to_enriched(profile_data)
+
+    # Get raw text from chunks
+    raw_text = ""
+    full_text_chunk = db.query(Chunk).filter(
+        Chunk.candidate_id == candidate_id,
+        Chunk.section == "full_text"
+    ).first()
+    if full_text_chunk:
+        raw_text = full_text_chunk.content or ""
+
+    # Generate advisory
+    from app.services.career_advisory_service import CareerAdvisoryService
+
+    try:
+        advisory_result = await CareerAdvisoryService.generate_advisory(
+            resume_data, raw_text
+        )
+
+        if advisory_result.get("available") and advisory_result.get("data"):
+            return CareerAdvisoryResponse(
+                candidate_id=candidate_id,
+                available=True,
+                advisory=advisory_result["data"],
+            )
+        else:
+            # Fallback to quick tips
+            quick_tips = CareerAdvisoryService.generate_quick_tips(resume_data)
+            return CareerAdvisoryResponse(
+                candidate_id=candidate_id,
+                available=False,
+                quick_tips=quick_tips,
+                error=advisory_result.get("error"),
+            )
+    except Exception as e:
+        quick_tips = CareerAdvisoryService.generate_quick_tips(resume_data)
+        return CareerAdvisoryResponse(
+            candidate_id=candidate_id,
+            available=False,
+            quick_tips=quick_tips,
+            error=str(e),
+        )
