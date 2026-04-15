@@ -84,12 +84,45 @@ users      1:N           audit_logs
 - `candidates.city`, `candidates.state` - B-tree para filtros geograficos
 - `audit_logs.created_at` - B-tree para queries temporais
 
+## Tabelas de Sourcing Hibrido
+
+### 15) **candidate_sources**
+- id (PK), company_id (FK companies), candidate_id (FK candidates)
+- provider_name, provider_type (api/file/manual/webhook)
+- external_id, external_url, sync_enabled, consent_status
+- source_priority (0-100), source_confidence (0.0-1.0)
+- last_sync_at, last_status, last_error, created_at, updated_at
+- Unique: (company_id, provider_name, external_id)
+
+### 16) **candidate_snapshots**
+- id (PK), company_id (FK), candidate_id (FK), source_id (FK candidate_sources, nullable)
+- snapshot_hash (SHA-256), canonical_json (JSONB), extracted_text, embedding_version
+- created_at
+
+### 17) **candidate_change_logs**
+- id (PK), company_id (FK), candidate_id (FK)
+- snapshot_from_id (FK nullable), snapshot_to_id (FK)
+- changed_fields_json (JSONB), diff_summary, created_at
+
+### 18) **sourcing_sync_runs**
+- id (PK), company_id (FK), provider_name
+- run_type (manual/scheduled/webhook), status (pending/running/completed/failed)
+- started_at, finished_at, total_scanned/created/updated/unchanged/failed
+- metadata_json, error_detail
+
+### 19) **provider_configs**
+- id (PK), company_id (FK), provider_name
+- is_enabled, config_json_encrypted, schedule_cron
+- rate_limit_rpm, rate_limit_daily, created_at, updated_at
+- Unique: (company_id, provider_name)
+
 ## Roles Padrao
 
 | Role | Descricao | Permissoes Principais |
 |------|-----------|----------------------|
-| admin | Acesso completo | Todas as permissoes |
-| recruiter | Gerencia candidatos | CRUD candidatos/docs (sem delete), LinkedIn, busca avancada |
+| admin | Acesso completo | Todas as permissoes (incl. sourcing.config, sourcing.merge) |
+| company_admin | Admin de empresa | Todas as permissoes (incl. sourcing.*) |
+| recruiter | Gerencia candidatos | CRUD candidatos/docs (sem delete), LinkedIn, busca avancada, sourcing.read, sourcing.sync |
 | viewer | Apenas leitura | Leitura de candidatos, docs e settings |
 
 ## Fluxo de Dados no Processamento

@@ -170,9 +170,26 @@ class CSVImportProvider(SourceProvider):
         return None
 
     def normalize_candidate(self, raw_data: Dict[str, Any]) -> CandidateCanonicalProfile:
-        column_map = {**DEFAULT_COLUMN_MAP}
-        profiles = _parse_csv_content("", column_map)
-        return profiles[0] if profiles else CandidateCanonicalProfile(full_name="N/A")
+        """Normaliza um dict (linha CSV) para perfil canonico."""
+        skills = raw_data.get("skills", [])
+        if isinstance(skills, str):
+            skills = [s.strip() for s in skills.split(",") if s.strip()]
+
+        return CandidateCanonicalProfile(
+            full_name=raw_data.get("full_name") or raw_data.get("nome") or "N/A",
+            email=raw_data.get("email"),
+            phone=raw_data.get("phone") or raw_data.get("telefone"),
+            city=raw_data.get("city") or raw_data.get("cidade"),
+            state=raw_data.get("state") or raw_data.get("estado"),
+            country=raw_data.get("country", "Brasil"),
+            linkedin_url=raw_data.get("linkedin_url") or raw_data.get("linkedin"),
+            github_url=raw_data.get("github_url") or raw_data.get("github"),
+            current_company=raw_data.get("current_company") or raw_data.get("empresa"),
+            current_role=raw_data.get("current_role") or raw_data.get("cargo"),
+            skills=skills,
+            confidence=0.6,
+            raw_data=raw_data,
+        )
 
 
 ProviderRegistry.register(CSVImportProvider())

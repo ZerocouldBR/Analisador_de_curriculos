@@ -45,8 +45,8 @@ const SnapshotTimelinePage: React.FC = () => {
   const fetchSnapshots = async () => {
     try {
       setLoading(true);
-      const response = await apiService.getCandidateSnapshots(candidateId);
-      setSnapshots(response.data);
+      const data = await apiService.getCandidateSnapshots(candidateId);
+      setSnapshots(data);
     } catch (error) {
       showError('Erro ao carregar snapshots');
     } finally {
@@ -72,8 +72,8 @@ const SnapshotTimelinePage: React.FC = () => {
     const [fromId, toId] = selectedIds.sort((a, b) => a - b);
     try {
       setLoadingDiff(true);
-      const response = await apiService.getSnapshotDiff(candidateId, fromId, toId);
-      setDiff(response.data);
+      const data = await apiService.getSnapshotDiff(candidateId, fromId, toId);
+      setDiff(data);
     } catch (error) {
       showError('Erro ao comparar snapshots');
     } finally {

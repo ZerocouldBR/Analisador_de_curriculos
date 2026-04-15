@@ -51,11 +51,12 @@ const SourcingProvidersPage: React.FC = () => {
   // Config dialog state
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [configProvider, setConfigProvider] = useState<SourcingProvider | null>(null);
+  // Default rate limits should match backend config defaults (see backend sourcing settings)
   const [configForm, setConfigForm] = useState({
     is_enabled: false,
     schedule_cron: '',
-    rate_limit_rpm: 60,
-    rate_limit_daily: 1000,
+    rate_limit_rpm: 60,       // default matches backend config
+    rate_limit_daily: 1000,   // default matches backend config
   });
   const [savingConfig, setSavingConfig] = useState(false);
 
@@ -66,8 +67,8 @@ const SourcingProvidersPage: React.FC = () => {
   const fetchProviders = async () => {
     try {
       setLoading(true);
-      const response = await apiService.getSourcingProviders();
-      setProviders(response.data);
+      const data = await apiService.getSourcingProviders();
+      setProviders(data);
     } catch (error) {
       showError('Erro ao carregar provedores de sourcing');
     } finally {
@@ -78,8 +79,7 @@ const SourcingProvidersPage: React.FC = () => {
   const handleTest = async (providerName: string) => {
     try {
       setTestingProvider(providerName);
-      const response = await apiService.testProvider(providerName);
-      const status: ProviderStatus = response.data;
+      const status: ProviderStatus = await apiService.testProvider(providerName);
       setTestResults((prev) => ({ ...prev, [providerName]: status }));
       if (status.healthy) {
         showSuccess(`${providerName}: Conexao bem-sucedida`);
@@ -115,8 +115,8 @@ const SourcingProvidersPage: React.FC = () => {
     setConfigForm({
       is_enabled: provider.is_enabled,
       schedule_cron: '',
-      rate_limit_rpm: 60,
-      rate_limit_daily: 1000,
+      rate_limit_rpm: 60,       // default matches backend config
+      rate_limit_daily: 1000,   // default matches backend config
     });
     setConfigDialogOpen(true);
   };

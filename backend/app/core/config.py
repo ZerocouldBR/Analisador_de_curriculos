@@ -544,6 +544,12 @@ REGRAS:
     sourcing_snapshot_retention_days: int = Field(
         default=365, description="Retencao de snapshots em dias"
     )
+    sourcing_dedup_name_fuzzy_threshold: float = Field(
+        default=0.85, description="Threshold minimo de similaridade fuzzy para nomes (0.0-1.0)"
+    )
+    sourcing_external_request_timeout: int = Field(
+        default=30, description="Timeout padrao para requisicoes a APIs externas de sourcing (s)"
+    )
 
     # ================================================================
     # LinkedIn

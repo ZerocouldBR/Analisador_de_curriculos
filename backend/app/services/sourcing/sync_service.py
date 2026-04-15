@@ -214,6 +214,7 @@ class SyncService:
                 db=db,
                 candidate_id=candidate_id,
                 merged_profile=profile,
+                company_id=company_id,
             )
 
             # Criar snapshot

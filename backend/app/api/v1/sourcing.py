@@ -3,7 +3,7 @@ Endpoints REST para o modulo de sourcing hibrido.
 """
 import json
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -36,6 +36,18 @@ from app.schemas.sourcing import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sourcing", tags=["sourcing"])
+
+
+def _decrypt_provider_config(encrypted: str) -> Dict[str, Any]:
+    """Decripta config_json_encrypted de um ProviderConfig."""
+    try:
+        from app.services.encryption_service import EncryptionService
+        return EncryptionService.decrypt_dict(encrypted)
+    except Exception:
+        try:
+            return json.loads(encrypted)
+        except Exception:
+            return {}
 
 
 # ================================================================
@@ -97,10 +109,7 @@ async def get_provider_status(
         ).first()
 
         if provider_config and provider_config.config_json_encrypted:
-            try:
-                config = json.loads(provider_config.config_json_encrypted)
-            except Exception:
-                config = {}
+            config = _decrypt_provider_config(provider_config.config_json_encrypted)
 
     health = await provider.health_check(config)
 
@@ -135,13 +144,16 @@ def upsert_provider_config(
             detail="Usuario sem empresa associada",
         )
 
-    # Criptografar config
-    config_encrypted = json.dumps(data.config_json)
+    # Criptografar config - tenta EncryptionService, fallback para JSON com log
     try:
         from app.services.encryption_service import EncryptionService
         config_encrypted = EncryptionService.encrypt_dict(data.config_json)
-    except Exception:
-        pass
+    except ImportError:
+        logger.warning("EncryptionService indisponivel, armazenando config como JSON")
+        config_encrypted = json.dumps(data.config_json)
+    except Exception as e:
+        logger.error(f"Erro ao encriptar config: {e}")
+        config_encrypted = json.dumps(data.config_json)
 
     existing = db.query(ProviderConfig).filter(
         ProviderConfig.company_id == company_id,
@@ -220,10 +232,7 @@ async def test_provider(
             ProviderConfig.provider_name == provider_name,
         ).first()
         if provider_config and provider_config.config_json_encrypted:
-            try:
-                config = json.loads(provider_config.config_json_encrypted)
-            except Exception:
-                config = {}
+            config = _decrypt_provider_config(provider_config.config_json_encrypted)
 
     health = await provider.health_check(config)
 

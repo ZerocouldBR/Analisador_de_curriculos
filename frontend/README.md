@@ -31,7 +31,10 @@ frontend/
 │   │   ├── SearchPage.tsx
 │   │   ├── UploadPage.tsx
 │   │   ├── SettingsPage.tsx
-│   │   └── RolesPage.tsx
+│   │   ├── RolesPage.tsx
+│   │   ├── SourcingProvidersPage.tsx
+│   │   ├── SyncRunsPage.tsx
+│   │   └── SnapshotTimelinePage.tsx
 │   ├── services/        # Serviços de API
 │   │   ├── api.ts       # Cliente HTTP para API REST
 │   │   └── websocket.ts # Cliente WebSocket
@@ -77,6 +80,15 @@ frontend/
 - ✅ Busca híbrida (semântica + texto completo)
 - ✅ Exibição de trechos relevantes
 - ✅ Score de relevância
+
+### Sourcing Hibrido
+- ✅ Painel de providers de sourcing (LinkedIn, CSV, XLSX, Manual, Webhook, Partner)
+- ✅ Configuracao de providers por tenant
+- ✅ Teste de conexao e sync manual
+- ✅ Historico de sincronizacoes com filtros
+- ✅ Timeline de snapshots com comparacao de versoes
+- ✅ Tab de fontes no detalhe do candidato
+- ✅ Sugestoes de merge de duplicatas
 
 ### Administração
 - ✅ Gerenciamento de funções (RBAC)
@@ -181,6 +193,9 @@ websocketService.on('document_progress', (message) => {
 | `/upload` | UploadPage | Upload de currículos |
 | `/settings` | SettingsPage | Configurações do sistema |
 | `/roles` | RolesPage | Gerenciamento de funções |
+| `/sourcing` | SourcingProvidersPage | Painel de providers de sourcing |
+| `/sourcing/runs` | SyncRunsPage | Historico de sincronizacoes |
+| `/candidates/:id/snapshots` | SnapshotTimelinePage | Timeline de snapshots do candidato |
 
 ## 🔐 Autenticação
 

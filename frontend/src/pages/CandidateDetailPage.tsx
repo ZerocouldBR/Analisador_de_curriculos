@@ -91,15 +91,17 @@ const CandidateDetailPage: React.FC = () => {
       try {
         const experiencesData = await apiService.getCandidateExperiences(candidateId);
         setExperiences(experiencesData);
-      } catch {
-        // Experiences endpoint might not exist yet
+      } catch (err) {
+        // Experiences endpoint might not exist for all deployments
+        console.warn('Failed to fetch candidate experiences:', err);
       }
 
       try {
-        const sourcesResponse = await apiService.getCandidateSources(candidateId);
-        setSources(sourcesResponse.data);
-      } catch {
-        // Sources endpoint might not exist yet
+        const sourcesData = await apiService.getCandidateSources(candidateId);
+        setSources(sourcesData);
+      } catch (err) {
+        // Sources endpoint might not exist for all deployments
+        console.warn('Failed to fetch candidate sources:', err);
       }
     } catch (error) {
       showError('Erro ao carregar dados do candidato');

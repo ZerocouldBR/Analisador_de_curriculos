@@ -63,8 +63,8 @@ const SyncRunsPage: React.FC = () => {
   const fetchRuns = async () => {
     try {
       setLoading(true);
-      const response = await apiService.getSyncRuns(providerFilter || undefined, 100);
-      setRuns(response.data);
+      const data = await apiService.getSyncRuns(providerFilter || undefined, 100);
+      setRuns(data);
     } catch (error) {
       showError('Erro ao carregar historico de sincronizacoes');
     } finally {
@@ -76,8 +76,8 @@ const SyncRunsPage: React.FC = () => {
     try {
       setLoadingDetail(true);
       setDetailDialogOpen(true);
-      const response = await apiService.getSyncRunDetail(run.id);
-      setDetailRun(response.data);
+      const data = await apiService.getSyncRunDetail(run.id);
+      setDetailRun(data);
     } catch (error) {
       setDetailRun(run);
     } finally {

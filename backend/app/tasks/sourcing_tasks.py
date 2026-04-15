@@ -58,21 +58,16 @@ def sync_provider_task(
     )
 
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            run = loop.run_until_complete(
-                SyncService.sync_provider(
-                    db=self.db,
-                    company_id=company_id,
-                    provider_name=provider_name,
-                    user_id=user_id,
-                    criteria=criteria,
-                    run_type=run_type,
-                )
+        run = asyncio.run(
+            SyncService.sync_provider(
+                db=self.db,
+                company_id=company_id,
+                provider_name=provider_name,
+                user_id=user_id,
+                criteria=criteria,
+                run_type=run_type,
             )
-        finally:
-            loop.close()
+        )
 
         logger.info(
             f"Sync concluido: provider={provider_name}, "
@@ -110,18 +105,13 @@ def sync_all_enabled_providers_task(
     logger.info(f"Sync all enabled providers: company_id={company_id}")
 
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            runs = loop.run_until_complete(
-                SyncService.sync_all_enabled(
-                    db=self.db,
-                    company_id=company_id,
-                    user_id=user_id,
-                )
+        runs = asyncio.run(
+            SyncService.sync_all_enabled(
+                db=self.db,
+                company_id=company_id,
+                user_id=user_id,
             )
-        finally:
-            loop.close()
+        )
 
         return {
             "company_id": company_id,

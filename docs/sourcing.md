@@ -168,8 +168,15 @@ from app.services.sourcing import meu_provider  # noqa: F401
 SOURCING_ENABLED=true
 SOURCING_SYNC_INTERVAL_DAYS=5
 SOURCING_DEDUP_THRESHOLD=0.7
+SOURCING_DEDUP_EMAIL_WEIGHT=0.4
+SOURCING_DEDUP_PHONE_WEIGHT=0.2
+SOURCING_DEDUP_NAME_WEIGHT=0.25
+SOURCING_DEDUP_LINKEDIN_WEIGHT=0.15
+SOURCING_DEDUP_NAME_FUZZY_THRESHOLD=0.85
 SOURCING_MAX_SYNC_CANDIDATES=500
 SOURCING_SNAPSHOT_RETENTION_DAYS=365
+SOURCING_EXTERNAL_REQUEST_TIMEOUT=30
+SOURCING_MERGE_PRIORITY_ORDER=["linkedin","manual","csv_import","xlsx_import","webhook","external_partner"]
 ```
 
 ### Configuracao por Tenant (via API)
@@ -210,7 +217,7 @@ O sistema detecta duplicatas usando scoring ponderado:
 | Campo        | Peso   | Tipo de Match     |
 |-------------|--------|-------------------|
 | Email       | 40%    | Exato (lowercase) |
-| Nome        | 25%    | Fuzzy (>85%)      |
+| Nome        | 25%    | Fuzzy (>85%, configuravel via SOURCING_DEDUP_NAME_FUZZY_THRESHOLD) |
 | Telefone    | 20%    | Digitos           |
 | LinkedIn URL| 15%    | Slug normalizado  |
 

@@ -122,11 +122,13 @@ class CandidateMergeService:
         candidate_id: int,
         merged_profile: CandidateCanonicalProfile,
         user_id: Optional[int] = None,
+        company_id: Optional[int] = None,
     ) -> Optional[Candidate]:
         """Aplica perfil mergeado ao registro do candidato no banco."""
-        candidate = db.query(Candidate).filter(
-            Candidate.id == candidate_id
-        ).first()
+        query = db.query(Candidate).filter(Candidate.id == candidate_id)
+        if company_id:
+            query = query.filter(Candidate.company_id == company_id)
+        candidate = query.first()
         if not candidate:
             return None
 

@@ -138,7 +138,7 @@ class DeduplicationService:
             name_score = DeduplicationService._fuzzy_name_score(
                 profile.full_name, candidate.full_name
             )
-            if name_score >= 0.85:
+            if name_score >= settings.sourcing_dedup_name_fuzzy_threshold:
                 score += settings.sourcing_dedup_name_weight * name_score
                 matched_fields.append(f"name ({name_score:.0%})")
 
@@ -185,7 +185,7 @@ class DeduplicationService:
             name_score = DeduplicationService._fuzzy_name_score(
                 cand_a.full_name, cand_b.full_name
             )
-            if name_score >= 0.85:
+            if name_score >= settings.sourcing_dedup_name_fuzzy_threshold:
                 score += settings.sourcing_dedup_name_weight * name_score
                 matched_fields.append(f"name ({name_score:.0%})")
 
