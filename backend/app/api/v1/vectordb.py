@@ -899,6 +899,12 @@ def create_index(
             )
 
     # Construir SQL do indice
+    # Nota: Todos os identificadores ja foram validados via regex (apenas [a-zA-Z0-9_])
+    # e whitelists. Aspas duplas adicionam defesa em profundidade.
+    qi = f'"{idx_name}"'  # quoted identifier
+    qt = f'"{request.table_name}"'
+    qc = f'"{request.column_name}"'
+
     if request.index_type in ("hnsw", "ivfflat"):
         dist_ops = request.distance_ops or settings.pgvector_distance_ops
         VALID_OPS = {"vector_cosine_ops", "vector_l2_ops", "vector_ip_ops"}
@@ -912,27 +918,27 @@ def create_index(
             m = request.hnsw_m or settings.pgvector_hnsw_m
             ef = request.hnsw_ef_construction or settings.pgvector_hnsw_ef_construction
             index_sql = (
-                f"CREATE INDEX IF NOT EXISTS {idx_name} "
-                f"ON {request.table_name} "
-                f"USING hnsw ({request.column_name} {dist_ops}) "
+                f"CREATE INDEX IF NOT EXISTS {qi} "
+                f"ON {qt} "
+                f"USING hnsw ({qc} {dist_ops}) "
                 f"WITH (m = {int(m)}, ef_construction = {int(ef)})"
             )
         else:  # ivfflat
             index_sql = (
-                f"CREATE INDEX IF NOT EXISTS {idx_name} "
-                f"ON {request.table_name} "
-                f"USING ivfflat ({request.column_name} {dist_ops})"
+                f"CREATE INDEX IF NOT EXISTS {qi} "
+                f"ON {qt} "
+                f"USING ivfflat ({qc} {dist_ops})"
             )
     elif request.index_type == "gin":
         index_sql = (
-            f"CREATE INDEX IF NOT EXISTS {idx_name} "
-            f"ON {request.table_name} "
-            f"USING gin ({request.column_name})"
+            f"CREATE INDEX IF NOT EXISTS {qi} "
+            f"ON {qt} "
+            f"USING gin ({qc})"
         )
     else:  # btree
         index_sql = (
-            f"CREATE INDEX IF NOT EXISTS {idx_name} "
-            f"ON {request.table_name} ({request.column_name})"
+            f"CREATE INDEX IF NOT EXISTS {qi} "
+            f"ON {qt} ({qc})"
         )
 
     # Executar criacao
@@ -1000,7 +1006,7 @@ def delete_index(
                     detail=f"Indice '{index_name}' nao encontrado",
                 )
 
-            conn.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
+            conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
             conn.commit()
             logger.info(f"Indice removido: {index_name}")
 

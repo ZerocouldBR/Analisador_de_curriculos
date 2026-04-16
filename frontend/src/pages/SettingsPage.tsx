@@ -28,8 +28,6 @@ import {
   FormControl,
   FormHelperText,
   InputAdornment,
-  useTheme,
-  Snackbar,
   CircularProgress,
 } from '@mui/material';
 import {
@@ -70,7 +68,6 @@ import {
   SystemConfigResponse,
   SystemConfigCategory,
   SystemConfigField,
-  SystemConfigGroup,
 } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
 import { TableSkeleton } from '../components/LoadingSkeleton';
@@ -944,7 +941,6 @@ const HealthTab: React.FC<{
 
 
 const SettingsPage: React.FC = () => {
-  const theme = useTheme();
   const { showSuccess, showError } = useNotification();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
