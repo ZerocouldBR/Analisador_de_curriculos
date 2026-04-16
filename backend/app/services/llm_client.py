@@ -140,7 +140,7 @@ class LLMClient:
         _provider = provider or self.provider
         _model = model or self.model
         _temperature = temperature if temperature is not None else settings.llm_temperature
-        _max_tokens = max_tokens or settings.llm_max_tokens
+        _max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
 
         if _provider == LLMProvider.ANTHROPIC:
             return await self._call_anthropic(messages, _model, _temperature, _max_tokens)
@@ -204,6 +204,20 @@ class LLMClient:
         if not user_messages:
             user_messages = [{"role": "user", "content": ""}]
 
+        # Anthropic exige que a primeira mensagem seja 'user' e que as mensagens
+        # alternem entre 'user' e 'assistant'. Consolidar mensagens consecutivas
+        # do mesmo role e garantir que comeca com 'user'.
+        if user_messages and user_messages[0]["role"] != "user":
+            user_messages.insert(0, {"role": "user", "content": "..."})
+
+        consolidated = []
+        for msg in user_messages:
+            if consolidated and consolidated[-1]["role"] == msg["role"]:
+                consolidated[-1]["content"] += "\n\n" + msg["content"]
+            else:
+                consolidated.append(dict(msg))
+        user_messages = consolidated
+
         kwargs: Dict[str, Any] = {
             "model": model,
             "messages": user_messages,
@@ -219,9 +233,19 @@ class LLMClient:
         if response.content:
             content = response.content[0].text
 
+        # Normalizar stop_reason para formato compativel com OpenAI
+        # Anthropic: "end_turn" -> "stop", "max_tokens" -> "length"
+        raw_reason = response.stop_reason or "end_turn"
+        finish_reason_map = {
+            "end_turn": "stop",
+            "max_tokens": "length",
+            "stop_sequence": "stop",
+        }
+        finish_reason = finish_reason_map.get(raw_reason, raw_reason)
+
         return LLMResponse(
             content=content,
-            finish_reason=response.stop_reason or "end_turn",
+            finish_reason=finish_reason,
             tokens_used=response.usage.input_tokens + response.usage.output_tokens,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
@@ -263,22 +287,12 @@ class LLMClient:
         _provider = provider or self.provider
 
         try:
-            if _provider == LLMProvider.ANTHROPIC:
-                response = await self.chat_completion(
-                    messages=[{"role": "user", "content": "Responda apenas: OK"}],
-                    model=settings.chat_model,
-                    temperature=0,
-                    max_tokens=10,
-                    provider=_provider,
-                )
-            else:
-                response = await self.chat_completion(
-                    messages=[{"role": "user", "content": "Responda apenas: OK"}],
-                    model=settings.chat_model,
-                    temperature=0,
-                    max_tokens=10,
-                    provider=_provider,
-                )
+            response = await self.chat_completion(
+                messages=[{"role": "user", "content": "Responda apenas: OK"}],
+                temperature=0,
+                max_tokens=10,
+                provider=_provider,
+            )
 
             return {
                 "status": "ok",

@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
     # Log configuracao ativa
     logger.info(f"Embedding mode: {settings.embedding_mode.value}")
     logger.info(f"Vector DB provider: {settings.vector_db_provider.value}")
-    logger.info(f"OpenAI API key: {'configurada' if settings.openai_api_key else 'NAO CONFIGURADA'}")
+    logger.info(f"LLM Provider: {settings.llm_provider.value} | API key: {'configurada' if settings.active_llm_api_key else 'NAO CONFIGURADA'}")
     logger.info(f"LinkedIn API: {'habilitada' if settings.linkedin_api_enabled else 'desabilitada'}")
     logger.info(f"CORS origins: {settings.cors_origins}")
 

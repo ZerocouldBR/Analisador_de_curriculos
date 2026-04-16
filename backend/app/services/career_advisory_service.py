@@ -112,10 +112,10 @@ class CareerAdvisoryService:
         Returns:
             Dict com analise completa e recomendacoes
         """
-        if not settings.openai_api_key:
+        if not settings.active_llm_api_key:
             return {
                 "available": False,
-                "error": "API key OpenAI nao configurada",
+                "error": f"API key do {settings.llm_provider.value} nao configurada",
                 "data": None,
             }
 

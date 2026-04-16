@@ -168,11 +168,13 @@ const ConfigFieldRenderer: React.FC<{
 
     case 'select': {
       const options = resolveOptions();
+      const isCustomValue = value && !options.includes(value);
+      const allOptions = isCustomValue ? [...options, value] : options;
       return (
         <FormControl fullWidth size="small">
           <InputLabel>{field.label}</InputLabel>
           <Select
-            value={options.includes(value) ? value : (value ?? '')}
+            value={allOptions.includes(value) ? value : (value ?? '')}
             label={field.label}
             onChange={(e) => handleChange(e.target.value)}
           >
@@ -182,8 +184,8 @@ const ConfigFieldRenderer: React.FC<{
               </MenuItem>
             ))}
             {/* Show current value even if not in options list (custom/legacy model) */}
-            {value && !options.includes(value) && (
-              <MenuItem value={value}>
+            {isCustomValue && (
+              <MenuItem key={value} value={value}>
                 {value} (personalizado)
               </MenuItem>
             )}
