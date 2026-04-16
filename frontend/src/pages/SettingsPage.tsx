@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -27,8 +28,6 @@ import {
   FormControl,
   FormHelperText,
   InputAdornment,
-  useTheme,
-  Snackbar,
   CircularProgress,
 } from '@mui/material';
 import {
@@ -58,6 +57,10 @@ import {
   FiberManualRecord,
   SmartToy,
   Label,
+  BuildCircle,
+  Delete,
+  Add,
+  TableChart,
 } from '@mui/icons-material';
 import { apiService } from '../services/api';
 import {
@@ -65,7 +68,6 @@ import {
   SystemConfigResponse,
   SystemConfigCategory,
   SystemConfigField,
-  SystemConfigGroup,
 } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
 import { TableSkeleton } from '../components/LoadingSkeleton';
@@ -302,6 +304,276 @@ const StatusDot: React.FC<{
   );
 };
 
+// Index management component for pgvector
+const IndexManager: React.FC = () => {
+  const [indexes, setIndexes] = useState<any[]>([]);
+  const [loadingIndexes, setLoadingIndexes] = useState(false);
+  const [creatingIndex, setCreatingIndex] = useState(false);
+  const [deletingIndex, setDeletingIndex] = useState<string | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [indexAlert, setIndexAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Create index form state
+  const [newIndex, setNewIndex] = useState({
+    table_name: 'embeddings',
+    column_name: 'vector',
+    index_type: 'hnsw',
+    distance_ops: 'vector_cosine_ops',
+    index_name: '',
+    hnsw_m: 16,
+    hnsw_ef_construction: 64,
+  });
+
+  const fetchIndexes = useCallback(async () => {
+    setLoadingIndexes(true);
+    try {
+      const data = await apiService.listIndexes();
+      setIndexes(data.indexes || []);
+    } catch (e: any) {
+      setIndexAlert({ type: 'error', message: 'Erro ao carregar indices: ' + (e.response?.data?.detail || String(e)) });
+    } finally {
+      setLoadingIndexes(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchIndexes(); }, [fetchIndexes]);
+
+  const handleCreateIndex = async () => {
+    setCreatingIndex(true);
+    setIndexAlert(null);
+    try {
+      const payload: any = {
+        table_name: newIndex.table_name,
+        column_name: newIndex.column_name,
+        index_type: newIndex.index_type,
+      };
+      if (newIndex.index_type === 'hnsw' || newIndex.index_type === 'ivfflat') {
+        payload.distance_ops = newIndex.distance_ops;
+      }
+      if (newIndex.index_type === 'hnsw') {
+        payload.hnsw_m = newIndex.hnsw_m;
+        payload.hnsw_ef_construction = newIndex.hnsw_ef_construction;
+      }
+      if (newIndex.index_name.trim()) {
+        payload.index_name = newIndex.index_name.trim();
+      }
+
+      const result = await apiService.createIndex(payload);
+      if (result.success) {
+        setIndexAlert({ type: 'success', message: result.message });
+        setShowCreateForm(false);
+        setNewIndex({ table_name: 'embeddings', column_name: 'vector', index_type: 'hnsw', distance_ops: 'vector_cosine_ops', index_name: '', hnsw_m: 16, hnsw_ef_construction: 64 });
+        await fetchIndexes();
+      } else {
+        setIndexAlert({ type: 'error', message: result.message });
+      }
+    } catch (e: any) {
+      setIndexAlert({ type: 'error', message: 'Erro: ' + (e.response?.data?.detail || String(e)) });
+    } finally {
+      setCreatingIndex(false);
+    }
+  };
+
+  const handleDeleteIndex = async (indexName: string) => {
+    setDeletingIndex(indexName);
+    setIndexAlert(null);
+    try {
+      await apiService.deleteIndex(indexName);
+      setIndexAlert({ type: 'success', message: `Indice '${indexName}' removido com sucesso` });
+      await fetchIndexes();
+    } catch (e: any) {
+      setIndexAlert({ type: 'error', message: 'Erro: ' + (e.response?.data?.detail || String(e)) });
+    } finally {
+      setDeletingIndex(null);
+    }
+  };
+
+  const isVectorIndex = newIndex.index_type === 'hnsw' || newIndex.index_type === 'ivfflat';
+
+  return (
+    <Box sx={{ mt: 3 }}>
+      <Divider sx={{ mb: 3 }} />
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+        <Box>
+          <Typography variant="subtitle1" fontWeight={600}>
+            <TableChart fontSize="small" sx={{ mr: 1, verticalAlign: 'middle' }} />
+            Gerenciamento de Indices
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Visualize, crie e gerencie indices do banco vetorial
+          </Typography>
+        </Box>
+        <Box display="flex" gap={1}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={fetchIndexes}
+            disabled={loadingIndexes}
+            startIcon={loadingIndexes ? <CircularProgress size={16} /> : <Refresh />}
+          >
+            Atualizar
+          </Button>
+          <Button
+            variant="contained"
+            size="small"
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            startIcon={<Add />}
+            color={showCreateForm ? 'inherit' : 'primary'}
+          >
+            {showCreateForm ? 'Cancelar' : 'Novo Indice'}
+          </Button>
+        </Box>
+      </Box>
+
+      {indexAlert && (
+        <Alert severity={indexAlert.type} sx={{ mb: 2 }} onClose={() => setIndexAlert(null)}>
+          {indexAlert.message}
+        </Alert>
+      )}
+
+      {/* Create index form */}
+      {showCreateForm && (
+        <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: 'action.hover' }}>
+          <Typography variant="subtitle2" fontWeight={600} mb={2}>
+            Criar Novo Indice
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={4}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Tabela</InputLabel>
+                <Select value={newIndex.table_name} label="Tabela"
+                  onChange={(e) => setNewIndex((p) => ({ ...p, table_name: e.target.value }))}
+                >
+                  <MenuItem value="embeddings">embeddings</MenuItem>
+                  <MenuItem value="chunks">chunks</MenuItem>
+                  <MenuItem value="candidates">candidates</MenuItem>
+                  <MenuItem value="documents">documents</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <TextField fullWidth size="small" label="Coluna"
+                value={newIndex.column_name}
+                onChange={(e) => setNewIndex((p) => ({ ...p, column_name: e.target.value }))}
+                helperText="Ex: vector, embedding, content"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Tipo de Indice</InputLabel>
+                <Select value={newIndex.index_type} label="Tipo de Indice"
+                  onChange={(e) => setNewIndex((p) => ({ ...p, index_type: e.target.value }))}
+                >
+                  <MenuItem value="hnsw">HNSW (vetorial - recomendado)</MenuItem>
+                  <MenuItem value="ivfflat">IVFFlat (vetorial)</MenuItem>
+                  <MenuItem value="gin">GIN (full-text / JSON)</MenuItem>
+                  <MenuItem value="btree">B-Tree (geral)</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {isVectorIndex && (
+              <Grid item xs={12} md={4}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Operador de Distancia</InputLabel>
+                  <Select value={newIndex.distance_ops} label="Operador de Distancia"
+                    onChange={(e) => setNewIndex((p) => ({ ...p, distance_ops: e.target.value }))}
+                  >
+                    <MenuItem value="vector_cosine_ops">Cosine (vector_cosine_ops)</MenuItem>
+                    <MenuItem value="vector_l2_ops">L2 / Euclidean (vector_l2_ops)</MenuItem>
+                    <MenuItem value="vector_ip_ops">Inner Product (vector_ip_ops)</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
+
+            {newIndex.index_type === 'hnsw' && (
+              <>
+                <Grid item xs={6} md={4}>
+                  <TextField fullWidth size="small" label="HNSW M" type="number"
+                    value={newIndex.hnsw_m}
+                    onChange={(e) => setNewIndex((p) => ({ ...p, hnsw_m: parseInt(e.target.value) || 16 }))}
+                    helperText="Conexoes por no (padrao: 16)"
+                    inputProps={{ min: 2, max: 100 }}
+                  />
+                </Grid>
+                <Grid item xs={6} md={4}>
+                  <TextField fullWidth size="small" label="EF Construction" type="number"
+                    value={newIndex.hnsw_ef_construction}
+                    onChange={(e) => setNewIndex((p) => ({ ...p, hnsw_ef_construction: parseInt(e.target.value) || 64 }))}
+                    helperText="Qualidade da construcao (padrao: 64)"
+                    inputProps={{ min: 16, max: 500 }}
+                  />
+                </Grid>
+              </>
+            )}
+
+            <Grid item xs={12} md={isVectorIndex ? 12 : 4}>
+              <TextField fullWidth size="small" label="Nome do Indice (opcional)"
+                value={newIndex.index_name}
+                onChange={(e) => setNewIndex((p) => ({ ...p, index_name: e.target.value }))}
+                helperText="Deixe vazio para gerar automaticamente"
+              />
+            </Grid>
+
+            <Grid item xs={12}>
+              <Button
+                variant="contained"
+                onClick={handleCreateIndex}
+                disabled={creatingIndex || !newIndex.column_name}
+                startIcon={creatingIndex ? <CircularProgress size={16} /> : <Add />}
+              >
+                {creatingIndex ? 'Criando...' : 'Criar Indice'}
+              </Button>
+            </Grid>
+          </Grid>
+        </Paper>
+      )}
+
+      {/* Existing indexes list */}
+      {loadingIndexes ? (
+        <Box display="flex" justifyContent="center" p={3}>
+          <CircularProgress size={24} />
+        </Box>
+      ) : indexes.length === 0 ? (
+        <Alert severity="info">Nenhum indice encontrado. Use o botao "Instalar e Configurar" acima para criar os indices automaticamente.</Alert>
+      ) : (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {indexes.map((idx) => (
+            <Paper key={idx.indexname} variant="outlined" sx={{ p: 1.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                  <Typography variant="body2" fontWeight={600}>{idx.indexname}</Typography>
+                  <Chip label={idx.tablename} size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 18 }} />
+                  {idx.indexdef?.includes('hnsw') && <Chip label="HNSW" size="small" color="primary" variant="outlined" sx={{ fontSize: '0.65rem', height: 18 }} />}
+                  {idx.indexdef?.includes('gin') && <Chip label="GIN" size="small" color="secondary" variant="outlined" sx={{ fontSize: '0.65rem', height: 18 }} />}
+                  {idx.indexdef?.includes('btree') && <Chip label="B-Tree" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 18 }} />}
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: '0.7rem', wordBreak: 'break-all' }}>
+                  {idx.indexdef}
+                </Typography>
+              </Box>
+              {!idx.indexname.endsWith('_pkey') && (
+                <Tooltip title="Remover indice">
+                  <IconButton
+                    size="small"
+                    color="error"
+                    onClick={() => handleDeleteIndex(idx.indexname)}
+                    disabled={deletingIndex === idx.indexname}
+                  >
+                    {deletingIndex === idx.indexname ? <CircularProgress size={16} /> : <Delete fontSize="small" />}
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Paper>
+          ))}
+        </Box>
+      )}
+    </Box>
+  );
+};
+
+
 // Grouped category renderer for categories with sub-groups (e.g., vector_db)
 const GroupedCategoryRenderer: React.FC<{
   category: SystemConfigCategory;
@@ -315,6 +587,8 @@ const GroupedCategoryRenderer: React.FC<{
   const [activeGroup, setActiveGroup] = useState(0);
   const [testResults, setTestResults] = useState<Record<string, any>>({});
   const [testing, setTesting] = useState<string | null>(null);
+  const [settingUp, setSettingUp] = useState(false);
+  const [setupResult, setSetupResult] = useState<any>(null);
 
   const groups = category.groups || [];
   const globalFields = category.fields.filter((f) => !f.group);
@@ -338,6 +612,29 @@ const GroupedCategoryRenderer: React.FC<{
       setTesting(null);
     }
   };
+
+  const handleSetupPgvector = async () => {
+    setSettingUp(true);
+    setSetupResult(null);
+    try {
+      const result = await apiService.setupPgvector();
+      setSetupResult(result);
+      // Refresh test status after setup
+      if (result.success) {
+        handleTestConnection('pgvector');
+      }
+    } catch (e: any) {
+      setSetupResult({
+        success: false,
+        message: e.response?.data?.detail || String(e),
+        steps: [],
+      });
+    } finally {
+      setSettingUp(false);
+    }
+  };
+
+  const isSuccessStatus = (s: string) => ['ok', 'healthy', 'connected'].includes(s);
 
   return (
     <>
@@ -390,7 +687,7 @@ const GroupedCategoryRenderer: React.FC<{
       {groups.map((g, idx) =>
         activeGroup === idx ? (
           <Paper key={g.key} variant="outlined" sx={{ p: 3 }}>
-            {/* Group header with test button */}
+            {/* Group header with test button and setup button */}
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
               <Box>
                 <Typography variant="subtitle1" fontWeight={600}>
@@ -400,25 +697,43 @@ const GroupedCategoryRenderer: React.FC<{
                   {g.description}
                 </Typography>
               </Box>
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => handleTestConnection(g.key)}
-                disabled={testing === g.key}
-                startIcon={
-                  testing === g.key
-                    ? <CircularProgress size={16} />
-                    : <NetworkCheck />
-                }
-              >
-                Testar Conexao
-              </Button>
+              <Box display="flex" gap={1}>
+                {g.key === 'pgvector' && (
+                  <Button
+                    variant="contained"
+                    size="small"
+                    color="success"
+                    onClick={handleSetupPgvector}
+                    disabled={settingUp}
+                    startIcon={
+                      settingUp
+                        ? <CircularProgress size={16} color="inherit" />
+                        : <BuildCircle />
+                    }
+                  >
+                    {settingUp ? 'Configurando...' : 'Instalar e Configurar'}
+                  </Button>
+                )}
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => handleTestConnection(g.key)}
+                  disabled={testing === g.key}
+                  startIcon={
+                    testing === g.key
+                      ? <CircularProgress size={16} />
+                      : <NetworkCheck />
+                  }
+                >
+                  Testar Conexao
+                </Button>
+              </Box>
             </Box>
 
             {/* Connection test result */}
             {testResults[g.key] && (
               <Alert
-                severity={testResults[g.key].status === 'ok' ? 'success' : 'error'}
+                severity={isSuccessStatus(testResults[g.key].status) ? 'success' : 'error'}
                 sx={{ mb: 2 }}
                 onClose={() =>
                   setTestResults((prev) => {
@@ -428,9 +743,62 @@ const GroupedCategoryRenderer: React.FC<{
                   })
                 }
               >
-                {testResults[g.key].status === 'ok'
-                  ? 'Conexao bem-sucedida!'
-                  : `Erro: ${testResults[g.key].details?.error || 'Falha na conexao'}`}
+                {isSuccessStatus(testResults[g.key].status) ? (
+                  <Box>
+                    <strong>Conexao bem-sucedida!</strong>
+                    {testResults[g.key].details?.pgvector_version && (
+                      <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                        pgvector v{testResults[g.key].details.pgvector_version}
+                        {' | '}{testResults[g.key].details.embeddings_count ?? 0} embeddings
+                        {' | '}{testResults[g.key].details.distance_metric ?? 'cosine'}
+                        {' | '}{testResults[g.key].details.dimensions ?? '?'} dimensoes
+                      </Typography>
+                    )}
+                  </Box>
+                ) : (
+                  `Erro: ${testResults[g.key].details?.error || 'Falha na conexao'}`
+                )}
+              </Alert>
+            )}
+
+            {/* Setup result */}
+            {setupResult && (
+              <Alert
+                severity={setupResult.success ? 'success' : 'warning'}
+                sx={{ mb: 2 }}
+                onClose={() => setSetupResult(null)}
+              >
+                <Box>
+                  <strong>{setupResult.message}</strong>
+                  {setupResult.pgvector_version && (
+                    <Typography variant="caption" display="block">
+                      pgvector v{setupResult.pgvector_version}
+                    </Typography>
+                  )}
+                  {setupResult.steps && setupResult.steps.length > 0 && (
+                    <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                      {setupResult.steps.map((step: any, i: number) => (
+                        <Box key={i} display="flex" alignItems="center" gap={0.5}>
+                          {step.status === 'ok' || step.status === 'created' || step.status === 'already_exists' ? (
+                            <CheckCircle sx={{ fontSize: 14, color: 'success.main' }} />
+                          ) : step.status === 'skipped' ? (
+                            <Info sx={{ fontSize: 14, color: 'text.secondary' }} />
+                          ) : (
+                            <Warning sx={{ fontSize: 14, color: 'error.main' }} />
+                          )}
+                          <Typography variant="caption">
+                            {step.step}: {step.detail}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+                  {setupResult.indexes_exist && setupResult.indexes_exist.length > 0 && (
+                    <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                      Indices ativos: {setupResult.indexes_exist.join(', ')}
+                    </Typography>
+                  )}
+                </Box>
               </Alert>
             )}
 
@@ -447,6 +815,9 @@ const GroupedCategoryRenderer: React.FC<{
                 </Grid>
               ))}
             </Grid>
+
+            {/* Index management - only for pgvector */}
+            {g.key === 'pgvector' && <IndexManager />}
           </Paper>
         ) : null
       )}
@@ -468,8 +839,108 @@ const GroupedCategoryRenderer: React.FC<{
   );
 };
 
+// Health tab with diagnostics integration
+const HealthTab: React.FC<{
+  health: HealthCheck | null;
+  categories: SystemConfigCategory[];
+  overrideCount: number;
+}> = ({ health, categories, overrideCount }) => {
+  const navigate = useNavigate();
+
+  const StatusChip = ({ status }: { status?: string }) => {
+    if (!status) return null;
+    const isOk = status === 'ok' || status === 'healthy' || status === 'connected';
+    return (
+      <Chip
+        icon={isOk ? <CheckCircle /> : <Warning />}
+        label={status}
+        size="small"
+        color={isOk ? 'success' : 'warning'}
+        variant="outlined"
+      />
+    );
+  };
+
+  const services = [
+    { label: 'Banco de Dados', icon: <Storage fontSize="small" color="primary" />, status: health?.database },
+    { label: 'Redis', icon: <Memory fontSize="small" color="primary" />, status: health?.redis },
+    { label: 'Celery', icon: <SettingsIcon fontSize="small" color="primary" />, status: health?.celery },
+    { label: 'Vector DB', icon: <Security fontSize="small" color="primary" />, status: health?.vector_db },
+  ];
+
+  return (
+    <Grid container spacing={3}>
+      <Grid item xs={12} md={6}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" fontWeight={600} gutterBottom>
+              Status dos Servicos
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+              {services.map((svc, i) => (
+                <React.Fragment key={svc.label}>
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Box display="flex" alignItems="center" gap={1}>
+                      {svc.icon}
+                      <Typography variant="body2">{svc.label}</Typography>
+                    </Box>
+                    <StatusChip status={svc.status} />
+                  </Box>
+                  {i < services.length - 1 && <Divider />}
+                </React.Fragment>
+              ))}
+            </Box>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12} md={6}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" fontWeight={600} gutterBottom>
+              Informacoes do Sistema
+            </Typography>
+            <Box sx={{ mt: 2 }}>
+              <Box display="flex" justifyContent="space-between" py={1}>
+                <Typography variant="body2" color="text.secondary">Versao</Typography>
+                <Typography variant="body2" fontWeight={600}>
+                  {health?.version || '-'}
+                </Typography>
+              </Box>
+              <Divider />
+              <Box display="flex" justifyContent="space-between" py={1}>
+                <Typography variant="body2" color="text.secondary">Status Geral</Typography>
+                <StatusChip status={health?.status} />
+              </Box>
+              <Divider />
+              <Box display="flex" justifyContent="space-between" py={1}>
+                <Typography variant="body2" color="text.secondary">Categorias de Config</Typography>
+                <Typography variant="body2" fontWeight={600}>{categories.length}</Typography>
+              </Box>
+              <Divider />
+              <Box display="flex" justifyContent="space-between" py={1}>
+                <Typography variant="body2" color="text.secondary">Overrides Ativos</Typography>
+                <Typography variant="body2" fontWeight={600}>{overrideCount}</Typography>
+              </Box>
+            </Box>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12}>
+        <Alert severity="info" action={
+          <Button color="inherit" size="small" onClick={() => navigate('/diagnostics')}>
+            Abrir Diagnostico
+          </Button>
+        }>
+          Para testes detalhados de cada componente (PostgreSQL, Redis, OpenAI, Celery, Embeddings),
+          visualizacao de logs e diagnostico completo do sistema, acesse a pagina de Diagnostico.
+        </Alert>
+      </Grid>
+    </Grid>
+  );
+};
+
+
 const SettingsPage: React.FC = () => {
-  const theme = useTheme();
   const { showSuccess, showError } = useNotification();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -600,20 +1071,6 @@ const SettingsPage: React.FC = () => {
     } catch (error) {
       showError('Erro ao restaurar configuracoes');
     }
-  };
-
-  const StatusChip = ({ status }: { status?: string }) => {
-    if (!status) return null;
-    const isOk = status === 'ok' || status === 'healthy' || status === 'connected';
-    return (
-      <Chip
-        icon={isOk ? <CheckCircle /> : <Warning />}
-        label={status}
-        size="small"
-        color={isOk ? 'success' : 'warning'}
-        variant="outlined"
-      />
-    );
   };
 
   if (loading) return <TableSkeleton />;
@@ -760,86 +1217,7 @@ const SettingsPage: React.FC = () => {
 
       {/* Health Tab */}
       {tab === healthTabIndex && (
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={6}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" fontWeight={600} gutterBottom>
-                  Status dos Servicos
-                </Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Storage fontSize="small" color="primary" />
-                      <Typography variant="body2">Banco de Dados</Typography>
-                    </Box>
-                    <StatusChip status={health?.database} />
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Memory fontSize="small" color="primary" />
-                      <Typography variant="body2">Redis</Typography>
-                    </Box>
-                    <StatusChip status={health?.redis} />
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <SettingsIcon fontSize="small" color="primary" />
-                      <Typography variant="body2">Celery</Typography>
-                    </Box>
-                    <StatusChip status={health?.celery} />
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Security fontSize="small" color="primary" />
-                      <Typography variant="body2">Vector DB</Typography>
-                    </Box>
-                    <StatusChip status={health?.vector_db} />
-                  </Box>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" fontWeight={600} gutterBottom>
-                  Informacoes do Sistema
-                </Typography>
-                <Box sx={{ mt: 2 }}>
-                  <Box display="flex" justifyContent="space-between" py={1}>
-                    <Typography variant="body2" color="text.secondary">Versao</Typography>
-                    <Typography variant="body2" fontWeight={600}>
-                      {health?.version || '-'}
-                    </Typography>
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" py={1}>
-                    <Typography variant="body2" color="text.secondary">Status Geral</Typography>
-                    <StatusChip status={health?.status} />
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" py={1}>
-                    <Typography variant="body2" color="text.secondary">Categorias</Typography>
-                    <Typography variant="body2" fontWeight={600}>
-                      {categories.length}
-                    </Typography>
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" py={1}>
-                    <Typography variant="body2" color="text.secondary">Overrides Ativos</Typography>
-                    <Typography variant="body2" fontWeight={600}>
-                      {config?.override_keys.length || 0}
-                    </Typography>
-                  </Box>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+        <HealthTab health={health} categories={categories} overrideCount={config?.override_keys.length || 0} />
       )}
 
       {/* Restart Warning Dialog */}
