@@ -188,11 +188,16 @@ async def check_vectordb_health(
     for name, store in stores.items():
         try:
             health = await asyncio.wait_for(store.health_check(), timeout=10)
+            # Normalizar status para "ok"/"error"
+            raw_status = health.get("status", "unknown")
+            normalized = "ok" if raw_status in ("healthy", "ok") else "error"
             providers_health[name] = {
-                "status": health.get("status", "unknown"),
+                "status": normalized,
                 "primary": name == settings.vector_db_primary,
                 "details": health,
             }
+            if normalized == "error":
+                overall_status = "degraded"
         except asyncio.TimeoutError:
             providers_health[name] = {
                 "status": "timeout",
@@ -241,9 +246,19 @@ async def test_provider_connection(
         temp_store = create_temporary_store(provider_name)
         health = await asyncio.wait_for(temp_store.health_check(), timeout=10)
 
+        # Normalizar status: health_check retorna "healthy"/"unhealthy",
+        # mas o frontend espera "ok"/"error"
+        raw_status = health.get("status", "unknown")
+        if raw_status in ("healthy", "ok"):
+            normalized_status = "ok"
+        elif raw_status in ("unhealthy", "error"):
+            normalized_status = "error"
+        else:
+            normalized_status = raw_status
+
         return VectorDBTestConnectionResponse(
             provider=provider_name,
-            status=health.get("status", "unknown"),
+            status=normalized_status,
             details=health,
         )
     except asyncio.TimeoutError:
@@ -253,6 +268,7 @@ async def test_provider_connection(
             details={"error": "Timeout ao testar conexao (10s)"},
         )
     except Exception as e:
+        logger.error(f"Erro ao testar conexao com {provider_name}: {e}")
         return VectorDBTestConnectionResponse(
             provider=provider_name,
             status="error",
@@ -711,3 +727,289 @@ def setup_pgvector(
         tables_exist=tables_exist,
         indexes_exist=indexes_exist,
     )
+
+
+# ============================================
+# Gerenciamento de Indices
+# ============================================
+
+class IndexInfoResponse(BaseModel):
+    """Informacao de um indice do banco"""
+    indexname: str
+    tablename: str
+    indexdef: str
+
+
+class ListIndexesResponse(BaseModel):
+    """Lista de indices existentes"""
+    indexes: List[IndexInfoResponse]
+    total: int
+
+
+class CreateIndexRequest(BaseModel):
+    """Request para criar um indice customizado"""
+    table_name: str = Field(
+        ...,
+        description="Tabela alvo (embeddings, chunks, etc.)",
+        pattern=r'^[a-zA-Z_][a-zA-Z0-9_]{0,62}$',
+    )
+    column_name: str = Field(
+        ...,
+        description="Coluna alvo (vector, embedding, content, etc.)",
+        pattern=r'^[a-zA-Z_][a-zA-Z0-9_]{0,62}$',
+    )
+    index_type: str = Field(
+        default="hnsw",
+        description="Tipo do indice: hnsw, ivfflat, gin, btree",
+    )
+    distance_ops: Optional[str] = Field(
+        default=None,
+        description="Operador de distancia para indices vetoriais "
+                    "(vector_cosine_ops, vector_l2_ops, vector_ip_ops). "
+                    "Se nao informado, usa a configuracao atual.",
+    )
+    index_name: Optional[str] = Field(
+        default=None,
+        description="Nome customizado para o indice. Se nao informado, gera automaticamente.",
+        pattern=r'^[a-zA-Z_][a-zA-Z0-9_]{0,62}$',
+    )
+    hnsw_m: Optional[int] = Field(
+        default=None,
+        description="HNSW: conexoes por no (default: usa config global)",
+    )
+    hnsw_ef_construction: Optional[int] = Field(
+        default=None,
+        description="HNSW: qualidade da construcao (default: usa config global)",
+    )
+
+
+class CreateIndexResponse(BaseModel):
+    """Resultado da criacao de indice"""
+    success: bool
+    index_name: str
+    message: str
+    index_definition: str = ""
+
+
+@router.get("/indexes", response_model=ListIndexesResponse)
+def list_indexes(
+    table_name: Optional[str] = None,
+    current_user: User = Depends(require_permission("settings.read"))
+):
+    """
+    Lista todos os indices das tabelas do sistema vetorial.
+
+    Filtra por tabela se especificado. Mostra definicao completa de cada indice.
+
+    **Requer permissao:** settings.read
+    """
+    from sqlalchemy import text
+    from app.db.database import engine
+
+    with engine.connect() as conn:
+        if table_name:
+            result = conn.execute(text(
+                "SELECT indexname, tablename, indexdef "
+                "FROM pg_indexes "
+                "WHERE schemaname = 'public' "
+                "AND tablename = :table_name "
+                "ORDER BY indexname"
+            ), {"table_name": table_name})
+        else:
+            result = conn.execute(text(
+                "SELECT indexname, tablename, indexdef "
+                "FROM pg_indexes "
+                "WHERE schemaname = 'public' "
+                "AND tablename IN ('embeddings', 'chunks', 'candidates', 'documents') "
+                "ORDER BY tablename, indexname"
+            ))
+
+        indexes = [
+            IndexInfoResponse(
+                indexname=row[0],
+                tablename=row[1],
+                indexdef=row[2],
+            )
+            for row in result
+        ]
+
+    return ListIndexesResponse(indexes=indexes, total=len(indexes))
+
+
+@router.post("/indexes", response_model=CreateIndexResponse)
+def create_index(
+    request: CreateIndexRequest,
+    current_user: User = Depends(require_permission("settings.create"))
+):
+    """
+    Cria um indice customizado no banco de dados.
+
+    Suporta tipos: hnsw, ivfflat, gin, btree.
+    Para indices vetoriais (hnsw, ivfflat), configura automaticamente
+    os operadores de distancia.
+
+    Seguro para executar multiplas vezes (usa IF NOT EXISTS).
+
+    **Requer permissao:** settings.create
+    """
+    import re
+    from sqlalchemy import text
+    from app.db.database import engine
+
+    # Validar tabela
+    ALLOWED_TABLES = {"embeddings", "chunks", "candidates", "documents"}
+    if request.table_name not in ALLOWED_TABLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Tabela invalida: '{request.table_name}'. "
+                   f"Permitidas: {', '.join(sorted(ALLOWED_TABLES))}",
+        )
+
+    # Validar tipo de indice
+    ALLOWED_INDEX_TYPES = {"hnsw", "ivfflat", "gin", "btree"}
+    if request.index_type not in ALLOWED_INDEX_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Tipo de indice invalido: '{request.index_type}'. "
+                   f"Permitidos: {', '.join(sorted(ALLOWED_INDEX_TYPES))}",
+        )
+
+    # Gerar nome do indice
+    idx_name = request.index_name or f"idx_{request.table_name}_{request.column_name}_{request.index_type}"
+
+    # Validar nome do indice
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]{0,62}$', idx_name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Nome de indice invalido: '{idx_name}'",
+        )
+
+    # Verificar se coluna existe
+    with engine.connect() as conn:
+        col_check = conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' "
+            "AND table_name = :table_name "
+            "AND column_name = :column_name"
+        ), {"table_name": request.table_name, "column_name": request.column_name})
+        if col_check.fetchone() is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Coluna '{request.column_name}' nao existe na tabela '{request.table_name}'",
+            )
+
+    # Construir SQL do indice
+    if request.index_type in ("hnsw", "ivfflat"):
+        dist_ops = request.distance_ops or settings.pgvector_distance_ops
+        VALID_OPS = {"vector_cosine_ops", "vector_l2_ops", "vector_ip_ops"}
+        if dist_ops not in VALID_OPS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Operador invalido: '{dist_ops}'. Permitidos: {', '.join(sorted(VALID_OPS))}",
+            )
+
+        if request.index_type == "hnsw":
+            m = request.hnsw_m or settings.pgvector_hnsw_m
+            ef = request.hnsw_ef_construction or settings.pgvector_hnsw_ef_construction
+            index_sql = (
+                f"CREATE INDEX IF NOT EXISTS {idx_name} "
+                f"ON {request.table_name} "
+                f"USING hnsw ({request.column_name} {dist_ops}) "
+                f"WITH (m = {int(m)}, ef_construction = {int(ef)})"
+            )
+        else:  # ivfflat
+            index_sql = (
+                f"CREATE INDEX IF NOT EXISTS {idx_name} "
+                f"ON {request.table_name} "
+                f"USING ivfflat ({request.column_name} {dist_ops})"
+            )
+    elif request.index_type == "gin":
+        index_sql = (
+            f"CREATE INDEX IF NOT EXISTS {idx_name} "
+            f"ON {request.table_name} "
+            f"USING gin ({request.column_name})"
+        )
+    else:  # btree
+        index_sql = (
+            f"CREATE INDEX IF NOT EXISTS {idx_name} "
+            f"ON {request.table_name} ({request.column_name})"
+        )
+
+    # Executar criacao
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(index_sql))
+            conn.commit()
+            logger.info(f"Indice criado: {idx_name} -> {index_sql}")
+
+        return CreateIndexResponse(
+            success=True,
+            index_name=idx_name,
+            message=f"Indice '{idx_name}' criado com sucesso",
+            index_definition=index_sql,
+        )
+    except Exception as e:
+        logger.error(f"Erro ao criar indice {idx_name}: {e}")
+        return CreateIndexResponse(
+            success=False,
+            index_name=idx_name,
+            message=f"Erro ao criar indice: {str(e)}",
+            index_definition=index_sql,
+        )
+
+
+@router.delete("/indexes/{index_name}")
+def delete_index(
+    index_name: str,
+    current_user: User = Depends(require_permission("settings.create"))
+):
+    """
+    Remove um indice do banco de dados.
+
+    Nao permite remover indices primarios (PKs).
+
+    **Requer permissao:** settings.create
+    """
+    import re
+    from sqlalchemy import text
+    from app.db.database import engine
+
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]{0,62}$', index_name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nome de indice invalido",
+        )
+
+    # Nao permitir dropar PKs
+    if index_name.endswith("_pkey"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nao e permitido remover indices de chave primaria",
+        )
+
+    try:
+        with engine.connect() as conn:
+            # Verificar se existe
+            check = conn.execute(text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE schemaname = 'public' AND indexname = :name"
+            ), {"name": index_name})
+            if check.fetchone() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Indice '{index_name}' nao encontrado",
+                )
+
+            conn.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
+            conn.commit()
+            logger.info(f"Indice removido: {index_name}")
+
+        return {"success": True, "message": f"Indice '{index_name}' removido com sucesso"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao remover indice {index_name}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao remover indice: {str(e)}",
+        )

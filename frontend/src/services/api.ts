@@ -538,6 +538,30 @@ class ApiService {
     return response.data;
   }
 
+  async listIndexes(tableName?: string): Promise<any> {
+    const params = tableName ? { table_name: tableName } : {};
+    const response = await this.api.get('/v1/vectordb/indexes', { params });
+    return response.data;
+  }
+
+  async createIndex(data: {
+    table_name: string;
+    column_name: string;
+    index_type: string;
+    distance_ops?: string;
+    index_name?: string;
+    hnsw_m?: number;
+    hnsw_ef_construction?: number;
+  }): Promise<any> {
+    const response = await this.api.post('/v1/vectordb/indexes', data, { timeout: 120000 });
+    return response.data;
+  }
+
+  async deleteIndex(indexName: string): Promise<any> {
+    const response = await this.api.delete(`/v1/vectordb/indexes/${indexName}`);
+    return response.data;
+  }
+
   // ==================== Health ====================
   async healthCheck(): Promise<HealthCheck> {
     const response = await this.api.get<HealthCheck>('/health');
