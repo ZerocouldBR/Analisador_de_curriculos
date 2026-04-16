@@ -28,6 +28,8 @@ import DatabasePage from './pages/DatabasePage';
 import SourcingProvidersPage from './pages/SourcingProvidersPage';
 import SyncRunsPage from './pages/SyncRunsPage';
 import SnapshotTimelinePage from './pages/SnapshotTimelinePage';
+import DiagnosticsPage from './pages/DiagnosticsPage';
+import BatchImportPage from './pages/BatchImportPage';
 
 interface ProtectedRouteProps {
   children: React.ReactElement;
@@ -113,6 +115,8 @@ function App() {
                   <Route path="sourcing" element={<SourcingProvidersPage />} />
                   <Route path="sourcing/runs" element={<SyncRunsPage />} />
                   <Route path="candidates/:id/snapshots" element={<SnapshotTimelinePage />} />
+                  <Route path="diagnostics" element={<AdminGuard><DiagnosticsPage /></AdminGuard>} />
+                  <Route path="batch-import" element={<BatchImportPage />} />
                 </Route>
 
                 {/* Catch-all */}

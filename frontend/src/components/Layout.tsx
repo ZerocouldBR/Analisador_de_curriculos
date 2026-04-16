@@ -39,6 +39,8 @@ import {
   ChevronLeft,
   Storage,
   Hub,
+  BugReport,
+  FolderCopy,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useThemeMode } from '../contexts/ThemeContext';
@@ -59,11 +61,13 @@ const menuItems: MenuItem_[] = [
   { text: 'Candidatos', icon: <People />, path: '/candidates' },
   { text: 'Busca Inteligente', icon: <Search />, path: '/search' },
   { text: 'Upload de Curriculos', icon: <CloudUpload />, path: '/upload' },
+  { text: 'Importacao em Lote', icon: <FolderCopy />, path: '/batch-import' },
   { text: 'LinkedIn', icon: <LinkedIn />, path: '/linkedin' },
   { text: 'Sourcing', icon: <Hub />, path: '/sourcing', dividerAfter: true },
   { text: 'Empresas', icon: <Business />, path: '/companies' },
   { text: 'Configuracoes', icon: <Settings />, path: '/settings' },
   { text: 'Banco de Dados', icon: <Storage />, path: '/database' },
+  { text: 'Diagnostico', icon: <BugReport />, path: '/diagnostics' },
   { text: 'Funcoes e Permissoes', icon: <AdminPanelSettings />, path: '/roles' },
 ];
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -841,6 +842,107 @@ const GroupedCategoryRenderer: React.FC<{
   );
 };
 
+// Health tab with diagnostics integration
+const HealthTab: React.FC<{
+  health: HealthCheck | null;
+  categories: SystemConfigCategory[];
+  overrideCount: number;
+}> = ({ health, categories, overrideCount }) => {
+  const navigate = useNavigate();
+
+  const StatusChip = ({ status }: { status?: string }) => {
+    if (!status) return null;
+    const isOk = status === 'ok' || status === 'healthy' || status === 'connected';
+    return (
+      <Chip
+        icon={isOk ? <CheckCircle /> : <Warning />}
+        label={status}
+        size="small"
+        color={isOk ? 'success' : 'warning'}
+        variant="outlined"
+      />
+    );
+  };
+
+  const services = [
+    { label: 'Banco de Dados', icon: <Storage fontSize="small" color="primary" />, status: health?.database },
+    { label: 'Redis', icon: <Memory fontSize="small" color="primary" />, status: health?.redis },
+    { label: 'Celery', icon: <SettingsIcon fontSize="small" color="primary" />, status: health?.celery },
+    { label: 'Vector DB', icon: <Security fontSize="small" color="primary" />, status: health?.vector_db },
+  ];
+
+  return (
+    <Grid container spacing={3}>
+      <Grid item xs={12} md={6}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" fontWeight={600} gutterBottom>
+              Status dos Servicos
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+              {services.map((svc, i) => (
+                <React.Fragment key={svc.label}>
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Box display="flex" alignItems="center" gap={1}>
+                      {svc.icon}
+                      <Typography variant="body2">{svc.label}</Typography>
+                    </Box>
+                    <StatusChip status={svc.status} />
+                  </Box>
+                  {i < services.length - 1 && <Divider />}
+                </React.Fragment>
+              ))}
+            </Box>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12} md={6}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" fontWeight={600} gutterBottom>
+              Informacoes do Sistema
+            </Typography>
+            <Box sx={{ mt: 2 }}>
+              <Box display="flex" justifyContent="space-between" py={1}>
+                <Typography variant="body2" color="text.secondary">Versao</Typography>
+                <Typography variant="body2" fontWeight={600}>
+                  {health?.version || '-'}
+                </Typography>
+              </Box>
+              <Divider />
+              <Box display="flex" justifyContent="space-between" py={1}>
+                <Typography variant="body2" color="text.secondary">Status Geral</Typography>
+                <StatusChip status={health?.status} />
+              </Box>
+              <Divider />
+              <Box display="flex" justifyContent="space-between" py={1}>
+                <Typography variant="body2" color="text.secondary">Categorias de Config</Typography>
+                <Typography variant="body2" fontWeight={600}>{categories.length}</Typography>
+              </Box>
+              <Divider />
+              <Box display="flex" justifyContent="space-between" py={1}>
+                <Typography variant="body2" color="text.secondary">Overrides Ativos</Typography>
+                <Typography variant="body2" fontWeight={600}>{overrideCount}</Typography>
+              </Box>
+            </Box>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12}>
+        <Alert severity="info" action={
+          <Button color="inherit" size="small" onClick={() => navigate('/diagnostics')}>
+            Abrir Diagnostico
+          </Button>
+        }>
+          Para testes detalhados de cada componente (PostgreSQL, Redis, OpenAI, Celery, Embeddings),
+          visualizacao de logs e diagnostico completo do sistema, acesse a pagina de Diagnostico.
+        </Alert>
+      </Grid>
+    </Grid>
+  );
+};
+
+
 const SettingsPage: React.FC = () => {
   const theme = useTheme();
   const { showSuccess, showError } = useNotification();
@@ -973,20 +1075,6 @@ const SettingsPage: React.FC = () => {
     } catch (error) {
       showError('Erro ao restaurar configuracoes');
     }
-  };
-
-  const StatusChip = ({ status }: { status?: string }) => {
-    if (!status) return null;
-    const isOk = status === 'ok' || status === 'healthy' || status === 'connected';
-    return (
-      <Chip
-        icon={isOk ? <CheckCircle /> : <Warning />}
-        label={status}
-        size="small"
-        color={isOk ? 'success' : 'warning'}
-        variant="outlined"
-      />
-    );
   };
 
   if (loading) return <TableSkeleton />;
@@ -1133,86 +1221,7 @@ const SettingsPage: React.FC = () => {
 
       {/* Health Tab */}
       {tab === healthTabIndex && (
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={6}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" fontWeight={600} gutterBottom>
-                  Status dos Servicos
-                </Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Storage fontSize="small" color="primary" />
-                      <Typography variant="body2">Banco de Dados</Typography>
-                    </Box>
-                    <StatusChip status={health?.database} />
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Memory fontSize="small" color="primary" />
-                      <Typography variant="body2">Redis</Typography>
-                    </Box>
-                    <StatusChip status={health?.redis} />
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <SettingsIcon fontSize="small" color="primary" />
-                      <Typography variant="body2">Celery</Typography>
-                    </Box>
-                    <StatusChip status={health?.celery} />
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Security fontSize="small" color="primary" />
-                      <Typography variant="body2">Vector DB</Typography>
-                    </Box>
-                    <StatusChip status={health?.vector_db} />
-                  </Box>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" fontWeight={600} gutterBottom>
-                  Informacoes do Sistema
-                </Typography>
-                <Box sx={{ mt: 2 }}>
-                  <Box display="flex" justifyContent="space-between" py={1}>
-                    <Typography variant="body2" color="text.secondary">Versao</Typography>
-                    <Typography variant="body2" fontWeight={600}>
-                      {health?.version || '-'}
-                    </Typography>
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" py={1}>
-                    <Typography variant="body2" color="text.secondary">Status Geral</Typography>
-                    <StatusChip status={health?.status} />
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" py={1}>
-                    <Typography variant="body2" color="text.secondary">Categorias</Typography>
-                    <Typography variant="body2" fontWeight={600}>
-                      {categories.length}
-                    </Typography>
-                  </Box>
-                  <Divider />
-                  <Box display="flex" justifyContent="space-between" py={1}>
-                    <Typography variant="body2" color="text.secondary">Overrides Ativos</Typography>
-                    <Typography variant="body2" fontWeight={600}>
-                      {config?.override_keys.length || 0}
-                    </Typography>
-                  </Box>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+        <HealthTab health={health} categories={categories} overrideCount={config?.override_keys.length || 0} />
       )}
 
       {/* Restart Warning Dialog */}

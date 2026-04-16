@@ -628,6 +628,74 @@ class ApiService {
     const response = await this.api.post('/v1/sourcing/merge', { primary_candidate_id: primaryId, secondary_candidate_id: secondaryId });
     return response.data;
   }
+
+  // ==================== Diagnostics ====================
+  async runFullDiagnostics(): Promise<any> {
+    const response = await this.api.get('/v1/diagnostics/full', { timeout: 60000 });
+    return response.data;
+  }
+
+  async testDatabaseConnection(): Promise<any> {
+    const response = await this.api.get('/v1/diagnostics/test/database', { timeout: 15000 });
+    return response.data;
+  }
+
+  async testRedisConnection(): Promise<any> {
+    const response = await this.api.get('/v1/diagnostics/test/redis', { timeout: 15000 });
+    return response.data;
+  }
+
+  async testOpenAIConnection(): Promise<any> {
+    const response = await this.api.get('/v1/diagnostics/test/openai', { timeout: 30000 });
+    return response.data;
+  }
+
+  async testVectorStoreConnection(): Promise<any> {
+    const response = await this.api.get('/v1/diagnostics/test/vectorstore', { timeout: 15000 });
+    return response.data;
+  }
+
+  async testCeleryConnection(): Promise<any> {
+    const response = await this.api.get('/v1/diagnostics/test/celery', { timeout: 15000 });
+    return response.data;
+  }
+
+  async testEmbeddingPipeline(): Promise<any> {
+    const response = await this.api.get('/v1/diagnostics/test/embedding', { timeout: 30000 });
+    return response.data;
+  }
+
+  async getRecentLogs(lines: number = 100, level: string = 'all'): Promise<any> {
+    const response = await this.api.get('/v1/diagnostics/logs', { params: { lines, level } });
+    return response.data;
+  }
+
+  // ==================== Batch Import ====================
+  async scanFolder(data: { folder_path: string; recursive?: boolean; extensions?: string[] }): Promise<any> {
+    const response = await this.api.post('/v1/batch-import/scan', data, { timeout: 60000 });
+    return response.data;
+  }
+
+  async batchImport(data: {
+    folder_path: string;
+    recursive?: boolean;
+    extensions?: string[];
+    skip_duplicates?: boolean;
+    candidate_id?: number;
+  }): Promise<any> {
+    const response = await this.api.post('/v1/batch-import/import', data, { timeout: 300000 });
+    return response.data;
+  }
+
+  async validateFolderPath(folder_path: string): Promise<any> {
+    const response = await this.api.post('/v1/batch-import/validate-path', { folder_path });
+    return response.data;
+  }
+
+  async getImportHistory(limit: number = 20): Promise<any> {
+    const response = await this.api.get('/v1/batch-import/history', { params: { limit } });
+    return response.data;
+  }
 }
 
 export const apiService = new ApiService();
