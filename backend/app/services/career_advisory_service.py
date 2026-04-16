@@ -221,8 +221,8 @@ class CareerAdvisoryService:
             return {
                 "available": True,
                 "data": advisory_data,
-                "tokens_used": response.usage.total_tokens if response.usage else 0,
-                "model_used": settings.chat_model,
+                "tokens_used": getattr(response, "tokens_used", 0) or 0,
+                "model_used": getattr(response, "model", None) or settings.chat_model,
             }
 
         except json.JSONDecodeError as e:

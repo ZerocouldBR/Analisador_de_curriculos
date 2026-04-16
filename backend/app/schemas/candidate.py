@@ -13,6 +13,10 @@ class CandidateBase(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     country: str = "Brasil"
+    professional_title: Optional[str] = None
+    professional_summary: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    photo_url: Optional[str] = None
 
 
 class CandidateCreate(CandidateBase):
@@ -29,6 +33,10 @@ class CandidateUpdate(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     country: Optional[str] = None
+    professional_title: Optional[str] = None
+    professional_summary: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    photo_url: Optional[str] = None
 
 
 class CandidateResponse(CandidateBase):

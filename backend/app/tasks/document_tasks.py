@@ -24,6 +24,7 @@ from app.services.text_extraction_service import TextExtractionService
 from app.services.resume_parser_service import ResumeParserService
 from app.services.keyword_extraction_service import KeywordExtractionService
 from app.services.embedding_service import SemanticChunker
+from app.services.photo_extraction_service import PhotoExtractionService
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -200,9 +201,54 @@ def process_document_task(
                     candidate.city = loc_match.group(1).strip()
                     candidate.state = loc_match.group(2).strip()
 
+            # Endereco completo
+            if personal.get("full_address"):
+                candidate.address = personal["full_address"]
+
+            # LinkedIn canonico
+            if personal.get("linkedin") and hasattr(candidate, "linkedin_url"):
+                candidate.linkedin_url = personal["linkedin"]
+
+            # Headline / titulo profissional
+            professional_obj = (
+                enriched_data.get("professional_objective", {}) if enriched_data else {}
+            )
+            if professional_obj.get("title") and hasattr(candidate, "professional_title"):
+                candidate.professional_title = professional_obj["title"][:255]
+            if professional_obj.get("summary") and hasattr(candidate, "professional_summary"):
+                candidate.professional_summary = professional_obj["summary"]
+
             db.commit()
 
         _update_document_status(db, document_id, "processing", 58, "Dados do candidato atualizados")
+
+        # ============================================
+        # STEP 4c: Extract Profile Photo
+        # ============================================
+        if candidate:
+            try:
+                _update_document_status(
+                    db, document_id, "processing", 59, "Extraindo foto do candidato"
+                )
+                photo_bytes = PhotoExtractionService.extract_photo(
+                    file_path, document.mime_type
+                )
+                if photo_bytes:
+                    relative_photo_path = PhotoExtractionService.save_photo(
+                        photo_bytes,
+                        candidate_id=candidate.id,
+                        storage_base=storage_service.base_path,
+                    )
+                    if relative_photo_path and hasattr(candidate, "photo_url"):
+                        candidate.photo_url = relative_photo_path
+                        db.commit()
+                        logger.info(
+                            f"Foto extraida para candidato {candidate.id}: {relative_photo_path}"
+                        )
+            except Exception as photo_err:
+                logger.warning(
+                    f"Extracao de foto falhou para documento {document_id}: {photo_err}"
+                )
 
         # ============================================
         # STEP 4b: Populate Experience Table

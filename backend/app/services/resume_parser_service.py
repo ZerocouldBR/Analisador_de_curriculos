@@ -89,14 +89,34 @@ class ResumeParserService:
                 info["phone"] = phone_match.group().strip()
                 break
 
-        # LinkedIn
-        linkedin_pattern = r'(?:https?://)?(?:www\.)?linkedin\.com/in/[\w-]+'
-        linkedin_match = re.search(linkedin_pattern, text, re.IGNORECASE)
-        if linkedin_match:
-            url = linkedin_match.group()
-            if not url.startswith('http'):
-                url = f"https://{url}"
-            info["linkedin"] = url
+        # LinkedIn - com varias variacoes e correcao de quebras de linha
+        # Primeiro normaliza o texto unindo URLs quebradas
+        ln_normalized = re.sub(
+            r'(linkedin\.com/in/[A-Za-z0-9\-_]*)\s*\n\s*([A-Za-z0-9\-_]+)',
+            r'\1\2', text, flags=re.IGNORECASE,
+        )
+        linkedin_patterns = [
+            r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/[A-Za-z0-9\-_%]+',
+            r'(?:[a-z]{2,3}\.)?linkedin\.com/in/[A-Za-z0-9\-_%]+',
+            r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/pub/[A-Za-z0-9\-_%]+',
+        ]
+        for pattern in linkedin_patterns:
+            linkedin_match = re.search(pattern, ln_normalized, re.IGNORECASE)
+            if linkedin_match:
+                url = linkedin_match.group().rstrip('/,;.)')
+                # Extrair slug canonico
+                slug_match = re.search(
+                    r'linkedin\.com/(?:in|pub)/([A-Za-z0-9\-_%]+)', url, re.IGNORECASE,
+                )
+                if slug_match:
+                    slug = slug_match.group(1).rstrip('-_')
+                    if len(slug) >= 3:
+                        info["linkedin"] = f"https://www.linkedin.com/in/{slug}"
+                        break
+                if not url.startswith('http'):
+                    url = f"https://{url}"
+                info["linkedin"] = url
+                break
 
         # GitHub
         github_pattern = r'(?:https?://)?(?:www\.)?github\.com/[\w-]+'
@@ -136,7 +156,7 @@ class ResumeParserService:
                 info["birth_date"] = birth_match.group(1).strip()
                 break
 
-        # Nome - Estrategia robusta com protecao contra enderecos
+        # Nome - Estrategia robusta com protecao contra enderecos e competencias
         name = None
 
         # Palavras que indicam ENDERECO (nunca devem estar em um nome)
@@ -154,12 +174,35 @@ class ResumeParserService:
         _section_headers = {
             'experiencia', 'experiência', 'formacao', 'formação',
             'habilidades', 'objetivo', 'resumo', 'certificacao',
-            'certificação', 'idioma', 'dados', 'curriculo', 'currículo',
-            'curriculum', 'vitae', 'perfil', 'profissional',
-            'contato', 'informacoes', 'informações', 'educacao',
-            'educação', 'competencias', 'competências', 'qualificacoes',
-            'qualificações', 'sobre', 'endereco', 'endereço',
+            'certificação', 'idioma', 'idiomas', 'languages',
+            'dados', 'curriculo', 'currículo',
+            'curriculum', 'vitae', 'perfil', 'profissional', 'resume',
+            'contato', 'contact', 'informacoes', 'informações',
+            'educacao', 'educação', 'education',
+            'competencias', 'competências', 'competences', 'skills',
+            'qualificacoes', 'qualificações',
+            'sobre', 'endereco', 'endereço',
+            'certifications', 'certificações', 'certificacoes',
+            'summary',
         }
+
+        # Padroes que indicam competencias/titulos (nunca sao nomes)
+        _competency_patterns = [
+            r'\bgest[aã]o\s+d[eo]\b',
+            r'\b(?:gerenciamento|administra[çc][aã]o)\s+d[eo]\b',
+            r'\b(?:especialista|especializado)\s+em\b',
+            r'\b(?:lideran[çc]a|coordena[çc][aã]o)\s+(?:de|em)\b',
+            r'\b(?:project|product|program)\s+manager\b',
+            r'\b(?:active\s+directory|workspace\s+one|data\s+center)\b',
+            r'\bsenior\s+(?:project|software|data|product)\b',
+            r'\b(?:desenvolvedor|engenheiro|analista|gerente|diretor|coordenador)\s+(?:de|em)\b',
+        ]
+
+        def _looks_like_competency(text_line: str) -> bool:
+            for pattern in _competency_patterns:
+                if re.search(pattern, text_line, re.IGNORECASE):
+                    return True
+            return False
 
         def _looks_like_address(text_line: str) -> bool:
             """Detecta se uma linha parece ser endereco."""
@@ -197,6 +240,11 @@ class ResumeParserService:
                 return False
             if _looks_like_address(candidate_name):
                 return False
+            if _looks_like_competency(candidate_name):
+                return False
+            # Pipe tipico em headline profissional
+            if '|' in candidate_name:
+                return False
             # Preposicoes aceitaveis em nomes
             preps = {'de', 'da', 'do', 'dos', 'das', 'e', 'di', 'del'}
             for word in words:
@@ -221,7 +269,7 @@ class ResumeParserService:
         if not name:
             lines = [line.strip() for line in text.split('\n') if line.strip()]
 
-            for line in lines[:15]:
+            for line in lines[:25]:
                 # Pular linhas muito curtas ou muito longas
                 if len(line) < 5 or len(line) > 60:
                     continue
@@ -229,20 +277,27 @@ class ResumeParserService:
                 if re.search(r'\d', line):
                     continue
                 # Pular linhas com caracteres especiais
-                if re.search(r'[!@#$%^&*()=+\[\]{}<>|\\/:;]', line):
+                if re.search(r'[!@#$%^&*()=+\[\]{}<>\\/:;]', line):
                     continue
                 # Pular enderecos (deteccao aprimorada)
                 if _looks_like_address(line):
+                    continue
+                # Pular competencias/titulos profissionais
+                if _looks_like_competency(line):
                     continue
                 # Pular cabecalhos de secao
                 line_words_lower = {w.lower().rstrip('.,;:') for w in line.split()}
                 if line_words_lower & _section_headers:
                     continue
                 # Pular linhas que sao emails ou URLs
-                if '@' in line or 'http' in line.lower() or '.com' in line.lower():
+                low = line.lower()
+                if '@' in line or 'http' in low or '.com' in low or 'linkedin' in low:
                     continue
                 # Pular linhas com virgula (provavelmente endereco ou lista)
                 if ',' in line:
+                    continue
+                # Pular headline com pipe "|"
+                if '|' in line:
                     continue
                 # Verificar se parece um nome valido
                 if _is_valid_person_name(line):

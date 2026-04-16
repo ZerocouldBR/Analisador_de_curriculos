@@ -145,6 +145,14 @@ class Candidate(Base):
     city = Column(String, index=True)
     state = Column(String, index=True)
     country = Column(String, default="Brasil")
+    # Headline / titulo profissional (ex: "Senior Project Manager")
+    professional_title = Column(String, nullable=True)
+    # Resumo profissional completo (Sobre/Resumo)
+    professional_summary = Column(Text, nullable=True)
+    # URL do LinkedIn canonico
+    linkedin_url = Column(String, nullable=True)
+    # Caminho relativo da foto de perfil salva no storage
+    photo_url = Column(String, nullable=True)
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
