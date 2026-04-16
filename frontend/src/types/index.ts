@@ -151,6 +151,8 @@ export interface SystemConfigField {
   step?: number;
   placeholder?: string;
   group?: string;
+  depends_on?: string;
+  options_map?: Record<string, string[]>;
 }
 
 export interface SystemConfigGroup {

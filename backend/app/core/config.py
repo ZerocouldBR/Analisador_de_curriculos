@@ -39,6 +39,12 @@ class VectorDBProvider(str, Enum):
     QDRANT = "qdrant"
 
 
+class LLMProvider(str, Enum):
+    """Provedores de LLM suportados"""
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+
+
 class EmbeddingProvider(str, Enum):
     """Provedores de embeddings suportados"""
     OPENAI = "openai"
@@ -171,6 +177,12 @@ class Settings(BaseSettings):
     # ================================================================
     # APIs Externas
     # ================================================================
+    # -- Provedor de LLM --
+    llm_provider: LLMProvider = Field(
+        default=LLMProvider.OPENAI,
+        description="Provedor de LLM: openai ou anthropic"
+    )
+
     # -- OpenAI --
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     openai_base_url: Optional[str] = Field(
@@ -178,6 +190,13 @@ class Settings(BaseSettings):
         description="URL base da API OpenAI (para proxies ou alternativas compativeis)"
     )
     openai_organization: Optional[str] = Field(default=None, description="Organization ID da OpenAI")
+
+    # -- Anthropic --
+    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
+    anthropic_base_url: Optional[str] = Field(
+        default=None,
+        description="URL base da API Anthropic (para proxies)"
+    )
 
     # -- LinkedIn --
     linkedin_api_enabled: bool = Field(default=False, description="Habilitar integracao LinkedIn API")
@@ -193,7 +212,7 @@ class Settings(BaseSettings):
     # ================================================================
     # LLM e Chat
     # ================================================================
-    chat_model: str = Field(default="gpt-4-turbo-preview", description="Modelo do chat LLM")
+    chat_model: str = Field(default="gpt-4o", description="Modelo do chat LLM")
     llm_max_retries: int = Field(default=5, description="Maximo de tentativas para consultas LLM")
     llm_max_tokens: int = Field(default=4096, description="Maximo de tokens na resposta LLM")
     llm_temperature: float = Field(default=0.7, description="Temperatura do LLM (0.0-2.0)")
@@ -766,6 +785,13 @@ REGRAS:
     # ================================================================
     # Helpers
     # ================================================================
+
+    @property
+    def active_llm_api_key(self) -> Optional[str]:
+        """Retorna a API key do provedor de LLM ativo"""
+        if self.llm_provider == LLMProvider.ANTHROPIC:
+            return self.anthropic_api_key
+        return self.openai_api_key
 
     @property
     def database_schema_sql(self) -> str:

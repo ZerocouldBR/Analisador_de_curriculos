@@ -17,8 +17,8 @@ import logging
 import re
 from typing import Dict, Any, Optional, List
 
-import openai
 from app.core.config import settings
+from app.services.llm_client import llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -194,13 +194,7 @@ class CareerAdvisoryService:
                 certifications=cert_text,
             )
 
-            client = openai.AsyncOpenAI(
-                api_key=settings.openai_api_key,
-                base_url=settings.openai_base_url or None,
-            )
-
-            response = await client.chat.completions.create(
-                model=settings.chat_model,
+            response = await llm_client.chat_completion(
                 messages=[
                     {
                         "role": "system",
@@ -215,7 +209,7 @@ class CareerAdvisoryService:
                 max_tokens=4000,
             )
 
-            raw = response.choices[0].message.content.strip()
+            raw = response.content.strip()
 
             # Limpar possivel markdown
             if raw.startswith("```"):

@@ -35,8 +35,17 @@ def _field(
     step: float | None = None,
     placeholder: str = "",
     group: str | None = None,
+    depends_on: str | None = None,
+    options_map: dict[str, list] | None = None,
 ) -> dict[str, Any]:
-    """Cria definicao de um campo de configuracao"""
+    """Cria definicao de um campo de configuracao
+
+    Args:
+        depends_on: Chave de outro campo do qual este depende.
+                    Quando definido, as opcoes mudam conforme o valor do campo pai.
+        options_map: Mapa de valor_do_pai -> lista_de_opcoes.
+                     Usado com depends_on para opcoes condicionais.
+    """
     field = {
         "key": key,
         "label": label,
@@ -57,6 +66,10 @@ def _field(
         field["placeholder"] = placeholder
     if group is not None:
         field["group"] = group
+    if depends_on is not None:
+        field["depends_on"] = depends_on
+    if options_map is not None:
+        field["options_map"] = options_map
     return field
 
 
@@ -140,33 +153,87 @@ CONFIG_MANIFEST: list[dict[str, Any]] = [
     },
 
     # ================================================================
-    # IA & Embeddings
+    # Provedor de IA & APIs
+    # ================================================================
+    {
+        "category": "ai_provider",
+        "label": "Provedor de IA",
+        "icon": "Psychology",
+        "description": "Selecao do provedor de IA (OpenAI ou Anthropic), chaves de API e modelo LLM",
+        "fields": [
+            _field("llm_provider", "Provedor LLM", "select",
+                   "Provedor de inteligencia artificial para chat e analise de curriculos",
+                   options=["openai", "anthropic"]),
+            _field("chat_model", "Modelo LLM", "select",
+                   "Modelo de linguagem para chat e analise. As opcoes mudam conforme o provedor.",
+                   depends_on="llm_provider",
+                   options_map={
+                       "openai": [
+                           "gpt-4o",
+                           "gpt-4o-mini",
+                           "gpt-4-turbo",
+                           "gpt-4",
+                           "gpt-3.5-turbo",
+                           "o3-mini",
+                       ],
+                       "anthropic": [
+                           "claude-sonnet-4-20250514",
+                           "claude-opus-4-20250514",
+                           "claude-3-5-sonnet-20241022",
+                           "claude-3-5-haiku-20241022",
+                           "claude-3-opus-20240229",
+                       ],
+                   }),
+            _field("openai_api_key", "OpenAI API Key", "password",
+                   "Chave da API OpenAI (necessaria para LLM OpenAI e embeddings via API)",
+                   sensitive=True, placeholder="sk-..."),
+            _field("openai_base_url", "OpenAI Base URL", "text",
+                   "URL alternativa para API compativel com OpenAI (deixe vazio para padrao)",
+                   placeholder="https://api.openai.com/v1"),
+            _field("openai_organization", "OpenAI Organization ID", "text",
+                   "ID da organizacao OpenAI (opcional, necessario apenas para contas enterprise)",
+                   placeholder="org-..."),
+            _field("anthropic_api_key", "Anthropic API Key", "password",
+                   "Chave da API Anthropic (necessaria quando o provedor LLM e Anthropic)",
+                   sensitive=True, placeholder="sk-ant-..."),
+            _field("anthropic_base_url", "Anthropic Base URL", "text",
+                   "URL alternativa para API Anthropic (deixe vazio para padrao)",
+                   placeholder="https://api.anthropic.com"),
+        ],
+    },
+
+    # ================================================================
+    # Embeddings & Vetorizacao
     # ================================================================
     {
         "category": "embeddings",
-        "label": "IA & Embeddings",
-        "icon": "Psychology",
+        "label": "Embeddings",
+        "icon": "Hub",
         "description": "Vetorizacao de curriculos: modo API (OpenAI) ou local (sentence-transformers)",
         "fields": [
             _field("embedding_mode", "Modo de Vetorizacao", "select",
                    "api = OpenAI (pago, melhor qualidade) | code = local (gratis, mais lento)",
                    restart_required=True,
                    options=["api", "code"]),
-            _field("openai_api_key", "OpenAI API Key", "password",
-                   "Chave da API OpenAI (necessaria apenas no modo 'api')",
-                   sensitive=True, placeholder="sk-..."),
-            _field("openai_base_url", "OpenAI Base URL", "text",
-                   "URL alternativa para API compativel com OpenAI (deixe vazio para padrao)",
-                   placeholder="https://api.openai.com/v1"),
-            _field("embedding_model", "Modelo API", "text",
-                   "Modelo de embeddings via API (ex: text-embedding-3-small)",
-                   placeholder="text-embedding-3-small"),
+            _field("embedding_model", "Modelo de Embedding", "select",
+                   "Modelo de embeddings via API OpenAI",
+                   options=[
+                       "text-embedding-3-small",
+                       "text-embedding-3-large",
+                       "text-embedding-ada-002",
+                   ]),
             _field("embedding_dimensions", "Dimensoes API", "number",
-                   "Dimensoes do vetor do modelo API",
+                   "Dimensoes do vetor do modelo API (3-small=1536, 3-large=3072, ada-002=1536)",
                    min_value=128, max_value=4096, step=1),
-            _field("embedding_local_model", "Modelo Local", "text",
+            _field("embedding_local_model", "Modelo Local", "select",
                    "Modelo sentence-transformers para modo local",
-                   placeholder="all-MiniLM-L6-v2"),
+                   options=[
+                       "all-MiniLM-L6-v2",
+                       "all-MiniLM-L12-v2",
+                       "all-mpnet-base-v2",
+                       "paraphrase-multilingual-MiniLM-L12-v2",
+                       "multi-qa-MiniLM-L6-cos-v1",
+                   ]),
             _field("embedding_local_dimensions", "Dimensoes Local", "number",
                    "Dimensoes do vetor do modelo local",
                    min_value=128, max_value=4096, step=1),
@@ -179,9 +246,6 @@ CONFIG_MANIFEST: list[dict[str, Any]] = [
             _field("embedding_max_chars", "Max Caracteres", "number",
                    "Limite de caracteres por texto para embedding",
                    min_value=1000, max_value=100000, step=1000),
-            _field("openai_organization", "OpenAI Organization ID", "text",
-                   "ID da organizacao OpenAI (opcional, necessario apenas para contas enterprise)",
-                   placeholder="org-..."),
         ],
     },
 
@@ -278,11 +342,8 @@ CONFIG_MANIFEST: list[dict[str, Any]] = [
         "category": "llm_chat",
         "label": "LLM & Chat",
         "icon": "Chat",
-        "description": "Modelo de linguagem e configuracoes do chat",
+        "description": "Parametros de temperatura, tokens e limites do chat",
         "fields": [
-            _field("chat_model", "Modelo LLM", "text",
-                   "Modelo do chat (ex: gpt-4-turbo-preview, gpt-3.5-turbo)",
-                   placeholder="gpt-4-turbo-preview"),
             _field("llm_temperature", "Temperatura", "number",
                    "Criatividade das respostas (0.0 = determinístico, 2.0 = muito criativo)",
                    min_value=0.0, max_value=2.0, step=0.1),
