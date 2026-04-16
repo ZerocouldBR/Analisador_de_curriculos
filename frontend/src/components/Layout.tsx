@@ -44,6 +44,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useThemeMode } from '../contexts/ThemeContext';
+import { useCompany } from '../contexts/CompanyContext';
 import { apiService } from '../services/api';
 
 const DRAWER_WIDTH = 260;
@@ -80,6 +81,7 @@ const Layout: React.FC = () => {
   const theme = useTheme();
   const { user, logout } = useAuth();
   const { mode, toggleTheme } = useThemeMode();
+  const { company, logoUrl } = useCompany();
 
   useEffect(() => {
     apiService.healthCheck()
@@ -108,11 +110,28 @@ const Layout: React.FC = () => {
 
   const drawer = (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Toolbar sx={{ px: 2, gap: 1.5 }}>
-        <SmartToy sx={{ color: 'primary.main', fontSize: 28 }} />
-        <Box>
+      <Toolbar sx={{ px: 2, gap: 1.5, minHeight: 64 }}>
+        {logoUrl ? (
+          <Box
+            component="img"
+            src={logoUrl}
+            alt={company?.name || 'Logo'}
+            sx={{
+              maxHeight: 40,
+              maxWidth: 40,
+              borderRadius: 1,
+              objectFit: 'contain',
+            }}
+            onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        ) : (
+          <SmartToy sx={{ color: 'primary.main', fontSize: 28 }} />
+        )}
+        <Box sx={{ minWidth: 0 }}>
           <Typography variant="subtitle1" fontWeight={700} noWrap lineHeight={1.2}>
-            Analisador RH
+            {company?.name || 'Analisador RH'}
           </Typography>
           {appVersion && (
             <Typography variant="caption" color="text.secondary" lineHeight={1}>

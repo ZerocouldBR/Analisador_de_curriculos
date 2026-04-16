@@ -128,6 +128,9 @@ const componentIcons: Record<string, React.ReactElement> = {
   'PostgreSQL Database': <Storage />,
   'Redis': <Memory />,
   'OpenAI API': <Psychology />,
+  'Openai API': <Psychology />,
+  'Anthropic API': <Psychology />,
+  'LLM': <Psychology />,
   'Celery Task Queue': <Settings />,
   'Embedding Pipeline': <DataArray />,
   'Configuracoes': <Settings />,
@@ -144,7 +147,7 @@ const getComponentIcon = (name: string): React.ReactElement => {
 const individualTests = [
   { key: 'database', label: 'PostgreSQL', icon: <Storage fontSize="small" />, fn: () => apiService.testDatabaseConnection() },
   { key: 'redis', label: 'Redis', icon: <Memory fontSize="small" />, fn: () => apiService.testRedisConnection() },
-  { key: 'openai', label: 'OpenAI API', icon: <Psychology fontSize="small" />, fn: () => apiService.testOpenAIConnection() },
+  { key: 'openai', label: 'LLM API', icon: <Psychology fontSize="small" />, fn: () => apiService.testOpenAIConnection() },
   { key: 'vectorstore', label: 'Vector Store', icon: <Hub fontSize="small" />, fn: () => apiService.testVectorStoreConnection() },
   { key: 'celery', label: 'Celery', icon: <Settings fontSize="small" />, fn: () => apiService.testCeleryConnection() },
   { key: 'embedding', label: 'Embedding Pipeline', icon: <DataArray fontSize="small" />, fn: () => apiService.testEmbeddingPipeline() },

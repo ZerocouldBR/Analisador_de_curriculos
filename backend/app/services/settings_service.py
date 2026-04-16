@@ -348,6 +348,19 @@ class SettingsService:
         if runtime_applied:
             logger.info(f"Configuracoes aplicadas em runtime: {runtime_applied}")
 
+        # Reset LLM client se configuracoes de provedor mudaram
+        llm_keys = {
+            "llm_provider", "openai_api_key", "openai_base_url",
+            "openai_organization", "anthropic_api_key", "anthropic_base_url",
+        }
+        if llm_keys.intersection(updated_keys):
+            try:
+                from app.services.llm_client import llm_client
+                llm_client.reset()
+                logger.info("LLM client resetado apos mudanca de configuracao")
+            except ImportError:
+                pass
+
         # Reset vector store registry se configuracoes de vector DB mudaram
         vector_keys = {
             "pgvector_enabled", "supabase_enabled", "qdrant_enabled",

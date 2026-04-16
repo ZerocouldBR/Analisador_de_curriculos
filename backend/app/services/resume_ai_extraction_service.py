@@ -16,8 +16,8 @@ import logging
 import re
 from typing import Dict, Any, Optional
 
-import openai
 from app.core.config import settings
+from app.services.llm_client import llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +144,8 @@ class ResumeAIExtractionService:
         Returns:
             Dict com dados extraidos e confianca
         """
-        if not settings.openai_api_key:
-            logger.warning("OpenAI API key nao configurada - pulando extracao por IA")
+        if not settings.active_llm_api_key:
+            logger.warning(f"{settings.llm_provider.value} API key nao configurada - pulando extracao por IA")
             return {"ai_available": False, "data": None}
 
         try:
@@ -154,13 +154,7 @@ class ResumeAIExtractionService:
 
             prompt = RESUME_EXTRACTION_PROMPT.format(resume_text=truncated)
 
-            client = openai.AsyncOpenAI(
-                api_key=settings.openai_api_key,
-                base_url=settings.openai_base_url or None,
-            )
-
-            response = await client.chat.completions.create(
-                model=settings.chat_model,
+            response = await llm_client.chat_completion(
                 messages=[
                     {
                         "role": "system",
@@ -175,7 +169,7 @@ class ResumeAIExtractionService:
                 max_tokens=4000,
             )
 
-            raw = response.choices[0].message.content.strip()
+            raw = response.content.strip()
 
             # Limpar possivel markdown wrapping
             if raw.startswith("```"):

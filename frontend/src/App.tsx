@@ -4,6 +4,7 @@ import { CssBaseline, CircularProgress, Box } from '@mui/material';
 import { ThemeContextProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext';
+import { CompanyProvider } from './contexts/CompanyContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import AdminGuard from './components/AdminGuard';
 
@@ -70,6 +71,7 @@ function App() {
       <NotificationProvider>
         <ErrorBoundary>
           <AuthProvider>
+            <CompanyProvider>
             <Router>
               <Routes>
                 {/* Public routes */}
@@ -123,6 +125,7 @@ function App() {
                 <Route path="*" element={<Navigate to="/dashboard" />} />
               </Routes>
             </Router>
+            </CompanyProvider>
           </AuthProvider>
         </ErrorBoundary>
       </NotificationProvider>

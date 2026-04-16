@@ -92,16 +92,53 @@ const iconMap: Record<string, React.ReactElement> = {
   Label: <Label />,
 };
 
+// Model label map for better display in dropdowns
+const MODEL_LABELS: Record<string, string> = {
+  // OpenAI LLM
+  'gpt-4o': 'GPT-4o (recomendado)',
+  'gpt-4o-mini': 'GPT-4o Mini (economico)',
+  'gpt-4-turbo': 'GPT-4 Turbo',
+  'gpt-4': 'GPT-4',
+  'gpt-3.5-turbo': 'GPT-3.5 Turbo',
+  'o3-mini': 'o3-mini (raciocinio)',
+  // Anthropic LLM
+  'claude-sonnet-4-20250514': 'Claude Sonnet 4 (recomendado)',
+  'claude-opus-4-20250514': 'Claude Opus 4',
+  'claude-3-5-sonnet-20241022': 'Claude 3.5 Sonnet',
+  'claude-3-5-haiku-20241022': 'Claude 3.5 Haiku (economico)',
+  'claude-3-opus-20240229': 'Claude 3 Opus',
+  // OpenAI Embeddings
+  'text-embedding-3-small': 'text-embedding-3-small (1536 dims)',
+  'text-embedding-3-large': 'text-embedding-3-large (3072 dims)',
+  'text-embedding-ada-002': 'text-embedding-ada-002 (legado)',
+  // Local Embeddings
+  'all-MiniLM-L6-v2': 'all-MiniLM-L6-v2 (384 dims, rapido)',
+  'all-MiniLM-L12-v2': 'all-MiniLM-L12-v2 (384 dims)',
+  'all-mpnet-base-v2': 'all-mpnet-base-v2 (768 dims, melhor qualidade)',
+  'paraphrase-multilingual-MiniLM-L12-v2': 'multilingual-MiniLM-L12-v2 (384 dims, multi-idioma)',
+  'multi-qa-MiniLM-L6-cos-v1': 'multi-qa-MiniLM-L6 (384 dims, Q&A)',
+};
+
 // Field renderer component
 const ConfigFieldRenderer: React.FC<{
   field: SystemConfigField;
   value: any;
   onChange: (key: string, value: any) => void;
-}> = ({ field, value, onChange }) => {
+  allValues?: Record<string, any>;
+}> = ({ field, value, onChange, allValues }) => {
   const [showPassword, setShowPassword] = useState(false);
 
   const handleChange = (newValue: any) => {
     onChange(field.key, newValue);
+  };
+
+  // Resolve options: use options_map if depends_on is set
+  const resolveOptions = (): string[] => {
+    if (field.depends_on && field.options_map && allValues) {
+      const depValue = allValues[field.depends_on];
+      return field.options_map[depValue] || field.options || [];
+    }
+    return field.options || [];
   };
 
   switch (field.type) {
@@ -129,24 +166,34 @@ const ConfigFieldRenderer: React.FC<{
         />
       );
 
-    case 'select':
+    case 'select': {
+      const options = resolveOptions();
+      const isCustomValue = value && !options.includes(value);
+      const allOptions = isCustomValue ? [...options, value] : options;
       return (
         <FormControl fullWidth size="small">
           <InputLabel>{field.label}</InputLabel>
           <Select
-            value={value ?? ''}
+            value={allOptions.includes(value) ? value : (value ?? '')}
             label={field.label}
             onChange={(e) => handleChange(e.target.value)}
           >
-            {(field.options || []).map((opt) => (
+            {options.map((opt) => (
               <MenuItem key={opt} value={opt}>
-                {opt}
+                {MODEL_LABELS[opt] || opt}
               </MenuItem>
             ))}
+            {/* Show current value even if not in options list (custom/legacy model) */}
+            {isCustomValue && (
+              <MenuItem key={value} value={value}>
+                {value} (personalizado)
+              </MenuItem>
+            )}
           </Select>
           <FormHelperText>{field.description}</FormHelperText>
         </FormControl>
       );
+    }
 
     case 'password':
       return (
@@ -281,6 +328,7 @@ const FieldWrapper: React.FC<{
       field={field}
       value={editedValues[field.key]}
       onChange={onChange}
+      allValues={editedValues}
     />
   </Box>
 );
@@ -993,7 +1041,29 @@ const SettingsPage: React.FC = () => {
   }, [fetchConfig, fetchHealth]);
 
   const handleFieldChange = (key: string, value: any) => {
-    setEditedValues((prev) => ({ ...prev, [key]: value }));
+    setEditedValues((prev) => {
+      const next = { ...prev, [key]: value };
+
+      // When llm_provider changes, auto-select a default model for the new provider
+      if (key === 'llm_provider') {
+        const defaultModels: Record<string, string> = {
+          openai: 'gpt-4o',
+          anthropic: 'claude-sonnet-4-20250514',
+        };
+        const currentModel = prev['chat_model'] || '';
+        // Only reset if current model doesn't match the new provider
+        const providerModels: Record<string, string[]> = {
+          openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo', 'o3-mini'],
+          anthropic: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229'],
+        };
+        const validModels = providerModels[value] || [];
+        if (!validModels.includes(currentModel)) {
+          next['chat_model'] = defaultModels[value] || currentModel;
+        }
+      }
+
+      return next;
+    });
     setHasChanges(true);
   };
 

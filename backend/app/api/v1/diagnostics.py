@@ -224,100 +224,104 @@ async def test_openai_connection(
     current_user: User = Depends(require_permission("settings.read")),
 ):
     """
-    Testa a conexao com a API da OpenAI
+    Testa a conexao com o provedor LLM configurado (OpenAI ou Anthropic)
+    e tambem testa embeddings se OpenAI key estiver configurada.
 
     Verifica:
-    - API key configurada
-    - Conexao ativa
-    - Modelo de embedding acessivel
+    - API key configurada para o provedor ativo
+    - Conexao ativa com LLM
+    - Modelo de embedding acessivel (sempre OpenAI)
     - Modelo de chat acessivel
     """
-    start = time.time()
-    details: Dict[str, Any] = {}
+    from app.services.llm_client import llm_client as _llm_client
 
-    if not settings.openai_api_key:
+    start = time.time()
+    provider_name = settings.llm_provider.value.capitalize()
+    details: Dict[str, Any] = {
+        "llm_provider": settings.llm_provider.value,
+        "chat_model": settings.chat_model,
+    }
+
+    if not settings.active_llm_api_key:
         elapsed = (time.time() - start) * 1000
         return ConnectionTestResponse(
-            component="OpenAI API",
+            component=f"{provider_name} API",
             status="not_configured",
-            message="OPENAI_API_KEY nao configurada. Configure no .env",
+            message=f"API key do {provider_name} nao configurada. Configure no .env ou nas configuracoes.",
             elapsed_ms=round(elapsed, 1),
             details={
+                "llm_provider": settings.llm_provider.value,
                 "embedding_mode": settings.embedding_mode.value,
                 "note": "Se usar EMBEDDING_MODE=code, OpenAI nao e necessaria para embeddings",
             },
         )
 
     try:
-        from openai import AsyncOpenAI
-
-        kwargs = {"api_key": settings.openai_api_key}
-        if settings.openai_base_url:
-            kwargs["base_url"] = settings.openai_base_url
-        if settings.openai_organization:
-            kwargs["organization"] = settings.openai_organization
-
-        client = AsyncOpenAI(**kwargs)
-
-        # Teste de embedding com texto curto
-        details["embedding_model"] = settings.embedding_model
+        # Teste de chat com mensagem curta via cliente centralizado
         try:
-            response = await client.embeddings.create(
-                model=settings.embedding_model,
-                input="teste de conexao"
-            )
-            details["embedding_test"] = "ok"
-            details["embedding_dimensions"] = len(response.data[0].embedding)
-            details["embedding_usage_tokens"] = response.usage.total_tokens
-        except Exception as e:
-            details["embedding_test"] = f"erro: {str(e)}"
-
-        # Teste de chat com mensagem curta
-        details["chat_model"] = settings.chat_model
-        try:
-            response = await client.chat.completions.create(
-                model=settings.chat_model,
+            response = await _llm_client.chat_completion(
                 messages=[{"role": "user", "content": "Responda apenas: ok"}],
-                max_tokens=5,
+                max_tokens=10,
                 temperature=0,
             )
             details["chat_test"] = "ok"
-            details["chat_response"] = response.choices[0].message.content
+            details["chat_response"] = response.content[:50]
             details["chat_usage"] = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
+                "input_tokens": response.input_tokens,
+                "output_tokens": response.output_tokens,
+                "total_tokens": response.tokens_used,
             }
+            details["model_used"] = response.model
         except Exception as e:
             details["chat_test"] = f"erro: {str(e)}"
 
-        # Listar modelos disponiveis (primeiros)
-        try:
-            models = await client.models.list()
-            model_names = sorted([m.id for m in models.data])
-            details["models_available"] = len(model_names)
-            details["models_sample"] = model_names[:10]
-        except Exception as e:
-            details["models_list"] = f"erro: {str(e)}"
+        # Teste de embedding (sempre via OpenAI, se key disponivel)
+        if settings.openai_api_key and settings.embedding_mode.value == "api":
+            details["embedding_model"] = settings.embedding_model
+            try:
+                from openai import AsyncOpenAI
+                kwargs: Dict[str, Any] = {"api_key": settings.openai_api_key}
+                if settings.openai_base_url:
+                    kwargs["base_url"] = settings.openai_base_url
+                if settings.openai_organization:
+                    kwargs["organization"] = settings.openai_organization
+                client = AsyncOpenAI(**kwargs)
 
-        await client.close()
+                emb_response = await client.embeddings.create(
+                    model=settings.embedding_model,
+                    input="teste de conexao"
+                )
+                details["embedding_test"] = "ok"
+                details["embedding_dimensions"] = len(emb_response.data[0].embedding)
+                details["embedding_usage_tokens"] = emb_response.usage.total_tokens
+                await client.close()
+            except Exception as e:
+                details["embedding_test"] = f"erro: {str(e)}"
+        elif settings.embedding_mode.value == "code":
+            details["embedding_test"] = "modo local (code) - nao requer API"
+        else:
+            details["embedding_test"] = "OpenAI API key necessaria para embeddings via API"
 
-        all_ok = details.get("embedding_test") == "ok" and details.get("chat_test") == "ok"
+        chat_ok = details.get("chat_test") == "ok"
+        emb_ok = details.get("embedding_test") in ("ok", "modo local (code) - nao requer API")
+        all_ok = chat_ok and emb_ok
+
         elapsed = (time.time() - start) * 1000
-        logger.info(f"OpenAI connection test: {'OK' if all_ok else 'PARTIAL'} ({elapsed:.1f}ms)")
+        logger.info(f"{provider_name} connection test: {'OK' if all_ok else 'PARTIAL'} ({elapsed:.1f}ms)")
 
         return ConnectionTestResponse(
-            component="OpenAI API",
+            component=f"{provider_name} API",
             status="ok" if all_ok else "warning",
-            message="Conexao com OpenAI OK" if all_ok else "Conexao parcial - verifique detalhes",
+            message=f"Conexao com {provider_name} OK" if all_ok else "Conexao parcial - verifique detalhes",
             elapsed_ms=round(elapsed, 1),
             details=details,
         )
 
     except Exception as e:
         elapsed = (time.time() - start) * 1000
-        logger.error(f"OpenAI connection test failed: {e}")
+        logger.error(f"{provider_name} connection test failed: {e}")
         return ConnectionTestResponse(
-            component="OpenAI API",
+            component=f"{provider_name} API",
             status="error",
             message=f"Erro na conexao: {str(e)}",
             elapsed_ms=round(elapsed, 1),
@@ -588,11 +592,11 @@ async def full_system_diagnostics(
             message=str(e),
         ))
 
-    # 3. OpenAI
+    # 3. LLM Provider (OpenAI ou Anthropic)
     try:
         result = await test_openai_connection(current_user=current_user)
         components.append(ComponentStatus(
-            name="OpenAI API",
+            name=f"LLM ({settings.llm_provider.value.capitalize()})",
             status=result.status,
             message=result.message,
             elapsed_ms=result.elapsed_ms,
@@ -600,7 +604,7 @@ async def full_system_diagnostics(
         ))
     except Exception as e:
         components.append(ComponentStatus(
-            name="OpenAI API",
+            name=f"LLM ({settings.llm_provider.value.capitalize()})",
             status="error",
             message=str(e),
         ))
@@ -659,9 +663,12 @@ async def full_system_diagnostics(
     # 7. Configuration check
     config_details: Dict[str, Any] = {
         "app_version": settings.app_version,
+        "llm_provider": settings.llm_provider.value,
+        "chat_model": settings.chat_model,
         "embedding_mode": settings.embedding_mode.value,
         "vector_db_provider": settings.vector_db_provider.value,
         "openai_configured": bool(settings.openai_api_key),
+        "anthropic_configured": bool(settings.anthropic_api_key),
         "linkedin_enabled": settings.linkedin_api_enabled,
         "pii_encryption": settings.enable_pii_encryption,
         "multi_tenant": settings.multi_tenant_enabled,
@@ -671,6 +678,8 @@ async def full_system_diagnostics(
     config_warnings = []
     if not settings.openai_api_key and settings.embedding_mode.value == "api":
         config_warnings.append("OPENAI_API_KEY nao configurada mas EMBEDDING_MODE=api")
+    if not settings.active_llm_api_key:
+        config_warnings.append(f"API key do {settings.llm_provider.value} nao configurada")
     if settings.secret_key and len(settings.secret_key) < 32:
         config_warnings.append("SECRET_KEY muito curta (minimo 32 chars)")
 

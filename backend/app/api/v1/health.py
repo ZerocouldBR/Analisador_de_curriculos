@@ -54,6 +54,8 @@ async def healthcheck() -> dict:
         "embedding_mode": settings.embedding_mode.value,
         "vector_db_primary": settings.vector_db_primary,
         "vector_db_enabled": settings.enabled_vector_providers,
+        "llm_provider": settings.llm_provider.value,
+        "llm_api_configured": bool(settings.active_llm_api_key),
         "openai_configured": bool(settings.openai_api_key),
         "linkedin_enabled": settings.linkedin_api_enabled,
     }

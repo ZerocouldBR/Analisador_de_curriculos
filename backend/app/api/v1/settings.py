@@ -317,6 +317,7 @@ def admin_overview(
             },
         },
         "llm": {
+            "provider": app_settings.llm_provider.value,
             "chat_model": app_settings.chat_model,
             "temperature": app_settings.llm_temperature,
             "max_tokens": app_settings.llm_max_tokens,

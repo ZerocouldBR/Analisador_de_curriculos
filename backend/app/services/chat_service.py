@@ -13,7 +13,6 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass, field
-from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 from sqlalchemy import text as sql_text, desc
 
@@ -21,6 +20,7 @@ from app.db.models import (
     ChatConversation, ChatMessage, Candidate, Chunk, Embedding, AuditLog
 )
 from app.core.config import settings
+from app.services.llm_client import llm_client
 from app.services.embedding_service import embedding_service
 from app.services.keyword_extraction_service import KeywordExtractionService
 from app.services.prompt_service import PromptService
@@ -51,23 +51,12 @@ class ChatService:
     Todas as configuracoes vem de settings.
     """
 
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or settings.openai_api_key
-        self.chat_model = settings.chat_model
-        self._client: Optional[AsyncOpenAI] = None
+    def __init__(self):
+        pass
 
     @property
-    def client(self) -> AsyncOpenAI:
-        if self._client is None:
-            if not self.api_key:
-                raise ValueError("OpenAI API key nao configurada")
-            kwargs = {"api_key": self.api_key}
-            if settings.openai_base_url:
-                kwargs["base_url"] = settings.openai_base_url
-            if settings.openai_organization:
-                kwargs["organization"] = settings.openai_organization
-            self._client = AsyncOpenAI(**kwargs)
-        return self._client
+    def chat_model(self) -> str:
+        return settings.chat_model
 
     # ================================================================
     # Conversation Management
@@ -229,16 +218,15 @@ class ChatService:
 
             messages.append({"role": "user", "content": user_content})
 
-            # Chamar LLM
-            response = await self.client.chat.completions.create(
-                model=self.chat_model,
+            # Chamar LLM (via cliente centralizado)
+            response = await llm_client.chat_completion(
                 messages=messages,
                 temperature=settings.chat_temperature,
                 max_tokens=settings.chat_max_tokens,
             )
 
-            assistant_content = response.choices[0].message.content
-            tokens_used = response.usage.total_tokens if response.usage else 0
+            assistant_content = response.content
+            tokens_used = response.tokens_used
 
             # Extrair candidatos mencionados e fontes
             candidates_found = self._extract_candidates_from_chunks(relevant_chunks)

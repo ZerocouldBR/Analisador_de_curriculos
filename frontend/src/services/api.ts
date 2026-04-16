@@ -476,6 +476,16 @@ class ApiService {
   }
 
   // ==================== Companies ====================
+  async getMyCompany(): Promise<Company> {
+    const response = await this.api.get<Company>('/v1/companies/me');
+    return response.data;
+  }
+
+  async updateMyCompany(data: Partial<Company>): Promise<Company> {
+    const response = await this.api.put<Company>('/v1/companies/me', data);
+    return response.data;
+  }
+
   async getCompanies(): Promise<Company[]> {
     const response = await this.api.get<Company[]>('/v1/companies/');
     return response.data;

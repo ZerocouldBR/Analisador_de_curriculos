@@ -135,7 +135,7 @@ def process_document_task(
             _update_document_status(db, document_id, "processing", 48, "Executando pipeline de enriquecimento (IA + validacao)")
             enriched_result = ResumeEnrichmentPipeline.process_sync(
                 text,
-                enable_ai=bool(settings.openai_api_key),
+                enable_ai=bool(settings.active_llm_api_key),
                 enable_career_advisory=False,
             )
         except Exception as enrich_err:

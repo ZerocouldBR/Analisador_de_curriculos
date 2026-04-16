@@ -13,12 +13,12 @@ import re
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-import openai
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.db.models import Chunk, Candidate, Embedding
 from app.core.config import settings
+from app.services.llm_client import llm_client
 from app.services.keyword_extraction_service import KeywordExtractionService
 from app.services.prompt_service import PromptService
 
@@ -69,13 +69,12 @@ class LLMQueryService:
     # Prompts agora sao carregados dinamicamente via PromptService
     # Os defaults estao em config.py e podem ser editados via DB/API
 
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or settings.openai_api_key
-        self.embedding_model = settings.embedding_model
-        self.chat_model = settings.chat_model
+    def __init__(self):
+        pass
 
-        if self.api_key:
-            openai.api_key = self.api_key
+    @property
+    def chat_model(self) -> str:
+        return settings.chat_model
 
     def _detect_query_domain(self, question: str, db: Session = None) -> str:
         """Detecta o dominio da pergunta para selecionar prompt adequado.
@@ -131,10 +130,10 @@ class LLMQueryService:
         Returns:
             QueryResult com resposta e metadados
         """
-        if not self.api_key:
+        if not settings.active_llm_api_key:
             return QueryResult(
                 status=QueryStatus.ERROR,
-                answer="API key do OpenAI nao configurada",
+                answer=f"API key do {settings.llm_provider.value} nao configurada",
                 chunks_used=0,
                 total_chunks_available=0,
                 tokens_used=0,
@@ -481,7 +480,7 @@ Por favor, complete ou refine a resposta se necessario."""
         messages: List[Dict[str, str]],
         retry_number: int
     ) -> Dict[str, Any]:
-        """Chama o LLM com os parametros apropriados"""
+        """Chama o LLM com os parametros apropriados (via cliente centralizado)"""
         temperature = max(
             settings.llm_min_temperature,
             settings.llm_temperature - (retry_number * settings.llm_temperature_decay)
@@ -491,17 +490,20 @@ Por favor, complete ou refine a resposta se necessario."""
             settings.llm_max_tokens - (retry_number * settings.llm_token_decay)
         )
 
-        response = await openai.ChatCompletion.acreate(
-            model=self.chat_model,
+        response = await llm_client.chat_completion(
             messages=messages,
             temperature=temperature,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
         )
 
         return {
-            "content": response.choices[0].message.content,
-            "finish_reason": response.choices[0].finish_reason,
-            "usage": dict(response.usage)
+            "content": response.content,
+            "finish_reason": response.finish_reason,
+            "usage": {
+                "prompt_tokens": response.input_tokens,
+                "completion_tokens": response.output_tokens,
+                "total_tokens": response.tokens_used,
+            }
         }
 
     def _check_response_completeness(
