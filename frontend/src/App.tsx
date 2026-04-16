@@ -31,6 +31,7 @@ import SyncRunsPage from './pages/SyncRunsPage';
 import SnapshotTimelinePage from './pages/SnapshotTimelinePage';
 import DiagnosticsPage from './pages/DiagnosticsPage';
 import BatchImportPage from './pages/BatchImportPage';
+import CandidatePortalPage from './pages/CandidatePortalPage';
 
 interface ProtectedRouteProps {
   children: React.ReactElement;
@@ -91,6 +92,9 @@ function App() {
                     </PublicRoute>
                   }
                 />
+
+                {/* Portal publico do candidato (magic link) */}
+                <Route path="/me/:token" element={<CandidatePortalPage />} />
 
                 {/* Protected routes */}
                 <Route

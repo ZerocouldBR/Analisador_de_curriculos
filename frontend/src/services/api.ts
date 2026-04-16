@@ -706,6 +706,75 @@ class ApiService {
     const response = await this.api.get('/v1/batch-import/history', { params: { limit } });
     return response.data;
   }
+
+  // ==================== Candidate Access Tokens (HR) ====================
+  async generateCandidateAccessToken(
+    candidateId: number,
+    expiresInHours: number = 72,
+  ): Promise<import('../types').CandidateAccessToken> {
+    const response = await this.api.post<import('../types').CandidateAccessToken>(
+      `/v1/candidates/${candidateId}/access-tokens`,
+      { expires_in_hours: expiresInHours, purpose: 'self_edit' },
+    );
+    return response.data;
+  }
+
+  async listCandidateAccessTokens(
+    candidateId: number,
+  ): Promise<import('../types').AccessTokenListItem[]> {
+    const response = await this.api.get<import('../types').AccessTokenListItem[]>(
+      `/v1/candidates/${candidateId}/access-tokens`,
+    );
+    return response.data;
+  }
+
+  async revokeCandidateAccessToken(candidateId: number, tokenId: number): Promise<void> {
+    await this.api.delete(`/v1/candidates/${candidateId}/access-tokens/${tokenId}`);
+  }
+
+  // ==================== Candidate Portal (public) ====================
+  async getPortalProfile(token: string): Promise<import('../types').PortalProfile> {
+    const response = await this.api.get<import('../types').PortalProfile>(
+      `/v1/public/me/${token}`,
+    );
+    return response.data;
+  }
+
+  async patchPortalProfile(
+    token: string,
+    data: import('../types').PortalPatchRequest,
+  ): Promise<import('../types').PortalProfile> {
+    const response = await this.api.patch<import('../types').PortalProfile>(
+      `/v1/public/me/${token}`,
+      data,
+    );
+    return response.data;
+  }
+
+  async improvePortalField(
+    token: string,
+    field: 'summary' | 'headline' | 'experience',
+    experience_index?: number,
+  ): Promise<import('../types').ImproveResponse> {
+    const response = await this.api.post<import('../types').ImproveResponse>(
+      `/v1/public/me/${token}/improve`,
+      { field, experience_index },
+    );
+    return response.data;
+  }
+
+  async applyPortalSuggestion(
+    token: string,
+    field: 'summary' | 'headline' | 'experience',
+    value: any,
+    experience_index?: number,
+  ): Promise<import('../types').PortalProfile> {
+    const response = await this.api.post<import('../types').PortalProfile>(
+      `/v1/public/me/${token}/apply-suggestion`,
+      { field, value, experience_index },
+    );
+    return response.data;
+  }
 }
 
 export const apiService = new ApiService();

@@ -522,6 +522,43 @@ class ProviderConfig(Base):
     # Relacionamentos
     company = relationship("Company", back_populates="sourcing_configs")
 
+
+# ================================================================
+# Portal do Candidato (Magic Link) - PR2
+# ================================================================
+
+class CandidateAccessToken(Base):
+    """
+    Token de acesso do candidato (magic link).
+
+    O candidato recebe um link com este token e pode ver/editar seu
+    proprio perfil sem precisar criar conta. Cada token tem validade
+    limitada e pode ser revogado pelo RH.
+    """
+    __tablename__ = "candidate_access_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(
+        Integer,
+        ForeignKey("candidates.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    token = Column(String, unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+    use_count = Column(Integer, default=0)
+    revoked_at = Column(DateTime, nullable=True)
+    purpose = Column(String, default="self_edit")  # self_edit, apply_with_profile
+
+    candidate = relationship("Candidate")
+
+    __table_args__ = (
+        Index("idx_access_token_candidate", "candidate_id"),
+    )
+
     __table_args__ = (
         Index("idx_provider_config_unique", "company_id", "provider_name", unique=True),
     )

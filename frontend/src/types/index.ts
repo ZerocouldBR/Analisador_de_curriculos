@@ -534,3 +534,105 @@ export interface CareerAdvisoryResponse {
   quick_tips?: { tip: string; category: string; priority: string }[];
   error?: string;
 }
+
+// ==================== Candidate Portal (Magic Link) ====================
+export interface CandidateAccessToken {
+  id: number;
+  candidate_id: number;
+  token: string;
+  url: string;
+  expires_at: string;
+  created_at: string;
+  revoked_at?: string;
+  last_used_at?: string;
+  use_count: number;
+  purpose: string;
+}
+
+export interface AccessTokenListItem {
+  id: number;
+  expires_at: string;
+  created_at: string;
+  revoked_at?: string;
+  last_used_at?: string;
+  use_count: number;
+  purpose: string;
+}
+
+export interface PortalExperience {
+  company?: string;
+  title?: string;
+  start_date?: string;
+  end_date?: string;
+  location?: string;
+  description?: string;
+  achievements?: string[];
+}
+
+export interface PortalEducation {
+  institution?: string;
+  degree?: string;
+  field?: string;
+  start_year?: string;
+  end_year?: string;
+  status?: string;
+}
+
+export interface PortalCompanyBrand {
+  name: string;
+  slug?: string;
+  logo_url?: string;
+  brand_color?: string;
+}
+
+export interface PortalProfile {
+  candidate_id: number;
+  full_name: string;
+  email?: string;
+  phone?: string;
+  location?: string;
+  linkedin?: string;
+  github?: string;
+  portfolio?: string;
+  photo_url?: string;
+  headline?: string;
+  summary?: string;
+  experiences: PortalExperience[];
+  education: PortalEducation[];
+  skills_technical: string[];
+  skills_soft: string[];
+  languages: { language: string; level: string }[];
+  certifications: any[];
+  company?: PortalCompanyBrand;
+  token_expires_at?: string;
+}
+
+export interface PortalPatchRequest {
+  full_name?: string;
+  email?: string;
+  phone?: string;
+  location?: string;
+  linkedin?: string;
+  github?: string;
+  portfolio?: string;
+  headline?: string;
+  summary?: string;
+  experiences?: PortalExperience[];
+  skills_technical?: string[];
+}
+
+export interface ImproveResponse {
+  field: string;
+  experience_index?: number;
+  original?: string;
+  suggestion?: {
+    improved_summary?: string;
+    improved_headline?: string;
+    improved_bullets?: string[];
+    improved_description?: string;
+    rationale?: string;
+  };
+  rationale?: string;
+  ai_available: boolean;
+  error?: string;
+}

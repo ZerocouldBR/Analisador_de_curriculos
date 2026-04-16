@@ -42,6 +42,7 @@ from app.db.models import (
     CandidateChangeLog,
     SourcingSyncRun,
     ProviderConfig,
+    CandidateAccessToken,
 )
 
 

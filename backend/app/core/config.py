@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     app_version: str = Field(default="0.3.0")
     log_level: str = Field(default="INFO")
     debug: bool = Field(default=False, description="Modo debug")
+    public_base_url: Optional[str] = Field(
+        default=None,
+        description="URL publica do frontend (ex: https://curriculos.empresa.com.br). "
+                    "Usada para gerar magic links de candidatos. Se nulo, usa host da request.",
+    )
 
     # ================================================================
     # Banco de Dados Relacional (PostgreSQL)
