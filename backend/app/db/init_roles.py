@@ -45,6 +45,10 @@ def create_default_roles(db: Session):
                 "sourcing.config": True,
                 "sourcing.sync": True,
                 "sourcing.merge": True,
+                "jobs.create": True,
+                "jobs.read": True,
+                "jobs.update": True,
+                "jobs.delete": True,
             }
         },
         {
@@ -73,6 +77,10 @@ def create_default_roles(db: Session):
                 "sourcing.config": True,
                 "sourcing.sync": True,
                 "sourcing.merge": True,
+                "jobs.create": True,
+                "jobs.read": True,
+                "jobs.update": True,
+                "jobs.delete": True,
             }
         },
         {
@@ -82,11 +90,11 @@ def create_default_roles(db: Session):
                 "candidates.create": True,
                 "candidates.read": True,
                 "candidates.update": True,
-                "candidates.delete": False,  # Não pode deletar
+                "candidates.delete": False,
                 "documents.create": True,
                 "documents.read": True,
                 "documents.update": True,
-                "documents.delete": False,  # Não pode deletar
+                "documents.delete": False,
                 "settings.read": True,
                 "settings.create": False,
                 "settings.update": False,
@@ -98,6 +106,10 @@ def create_default_roles(db: Session):
                 "sourcing.config": False,
                 "sourcing.sync": True,
                 "sourcing.merge": False,
+                "jobs.create": True,
+                "jobs.read": True,
+                "jobs.update": True,
+                "jobs.delete": False,
             }
         },
         {
@@ -119,6 +131,10 @@ def create_default_roles(db: Session):
                 "linkedin.enrich": False,
                 "search.advanced": False,
                 "users.manage": False,
+                "jobs.read": True,
+                "jobs.create": False,
+                "jobs.update": False,
+                "jobs.delete": False,
             }
         }
     ]
@@ -130,7 +146,22 @@ def create_default_roles(db: Session):
         existing_role = db.query(Role).filter(Role.name == role_data["name"]).first()
 
         if existing_role:
-            print(f"✓ Role '{role_data['name']}' já existe")
+            # Merge de permissoes: adicionar permissoes novas sem sobrescrever
+            # as ja configuradas manualmente pelo admin
+            current_perms = dict(existing_role.permissions or {})
+            new_perms = role_data["permissions"]
+            updated = False
+            for key, value in new_perms.items():
+                if key not in current_perms:
+                    current_perms[key] = value
+                    updated = True
+            if updated:
+                existing_role.permissions = current_perms
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(existing_role, "permissions")
+                print(f"↻ Role '{role_data['name']}': permissoes novas adicionadas")
+            else:
+                print(f"✓ Role '{role_data['name']}' ja existe")
             created_roles.append(existing_role)
         else:
             # Criar role

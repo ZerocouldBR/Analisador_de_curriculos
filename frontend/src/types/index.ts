@@ -329,6 +329,139 @@ export interface PaginatedResponse<T> {
   total_pages: number;
 }
 
+// ==================== Jobs ====================
+export interface Job {
+  id: number;
+  company_id: number;
+  slug: string;
+  title: string;
+  description: string;
+  requirements?: string;
+  responsibilities?: string;
+  benefits?: string;
+  location?: string;
+  employment_type?: string; // CLT, PJ, Estagio
+  seniority_level?: string; // Junior, Pleno, Senior
+  work_mode?: string; // presencial, remoto, hibrido
+  salary_range_min?: number;
+  salary_range_max?: number;
+  salary_currency?: string;
+  salary_visible?: boolean;
+  skills_required: string[];
+  skills_desired: string[];
+  is_active: boolean;
+  published_at?: string;
+  closes_at?: string;
+  created_at: string;
+  updated_at: string;
+  applications_count?: number;
+}
+
+export interface JobCreate {
+  title: string;
+  description: string;
+  requirements?: string;
+  responsibilities?: string;
+  benefits?: string;
+  location?: string;
+  employment_type?: string;
+  seniority_level?: string;
+  work_mode?: string;
+  salary_range_min?: number;
+  salary_range_max?: number;
+  salary_currency?: string;
+  salary_visible?: boolean;
+  skills_required?: string[];
+  skills_desired?: string[];
+  is_active?: boolean;
+  closes_at?: string;
+}
+
+export interface JobFitAnalysis {
+  score?: number;
+  summary?: string;
+  strengths?: string[];
+  gaps?: string[];
+  matched_skills?: string[];
+  missing_skills?: string[];
+  experience_match?: string;
+  recommendation?: 'strong_match' | 'good_match' | 'weak_match' | 'no_match';
+}
+
+export interface JobApplication {
+  id: number;
+  job_id: number;
+  candidate_id: number;
+  document_id?: number;
+  applicant_name: string;
+  applicant_email: string;
+  applicant_phone?: string;
+  cover_letter?: string;
+  fit_score?: number;
+  fit_analysis?: JobFitAnalysis;
+  fit_status: string; // pending, analyzed, failed
+  stage: string; // received, screening, interview, technical, offer, hired, rejected
+  stage_notes?: string;
+  source: string;
+  consent_given: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PublicCompanyBrand {
+  name: string;
+  slug: string;
+  logo_url?: string;
+  website?: string;
+  brand_color?: string;
+  about?: string;
+}
+
+export interface PublicJobListItem {
+  slug: string;
+  title: string;
+  location?: string;
+  employment_type?: string;
+  seniority_level?: string;
+  work_mode?: string;
+  salary_display?: string;
+  published_at?: string;
+}
+
+export interface PublicJobsPageResponse {
+  company: PublicCompanyBrand;
+  jobs: PublicJobListItem[];
+  total: number;
+}
+
+export interface PublicJobResponse {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  requirements?: string;
+  responsibilities?: string;
+  benefits?: string;
+  location?: string;
+  employment_type?: string;
+  seniority_level?: string;
+  work_mode?: string;
+  salary_display?: string;
+  skills_required: string[];
+  skills_desired: string[];
+  published_at?: string;
+  closes_at?: string;
+  company: PublicCompanyBrand;
+}
+
+export interface ApplyResult {
+  id: number;
+  message: string;
+  fit_status: string;
+  fit_score?: number;
+  fit_summary?: string;
+}
+
 // ==================== Health ====================
 export interface HealthCheck {
   status: string;

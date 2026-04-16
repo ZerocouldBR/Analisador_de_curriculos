@@ -42,6 +42,8 @@ from app.db.models import (
     CandidateChangeLog,
     SourcingSyncRun,
     ProviderConfig,
+    Job,
+    JobApplication,
 )
 
 
