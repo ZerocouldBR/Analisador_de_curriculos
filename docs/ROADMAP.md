@@ -203,6 +203,50 @@ um e um candidato natural a PR futuro.
   - Limpar JobApplications muito antigas (> 1 ano) com consentimento
     expirado (LGPD).
 
+### 3.3 Bugs/riscos concretos encontrados em auditoria automatica
+
+Itens especificos levantados em revisao automatica dos 4 PRs:
+
+- [ ] **`Job.slug` unique GLOBALMENTE (cross-company) — potencial bug**
+  - `Job.slug = Column(String, unique=True, ...)` em
+    `backend/app/db/models.py`.
+  - Duas empresas tentando criar vaga "analista-dados" dao colisao.
+  - Correto seria `unique=False, index=True` + indice composto
+    `(company_id, slug)`.
+  - Fix requer migration + ajustar `JobService.generate_unique_slug`
+    para considerar `company_id`.
+
+- [ ] **`JobService.find_or_create_candidate` nao normaliza email**
+  - Aceita o email cru do form publico. `USER@foo.com` e
+    `user@foo.com` viram 2 candidatos.
+  - Correto: `email.strip().lower()` antes de buscar/inserir.
+
+- [ ] **N+1 em `/v1/public/careers/{slug}`**
+  - `list_public_jobs` retorna `Job[]`; cada serializacao acessa
+    `.company`. Sem eager-load (`selectinload(Job.company)`), cada
+    vaga vira uma query extra.
+  - Critico porque este endpoint e 100% publico e pode receber
+    carga nao autenticada.
+
+- [ ] **Race condition em `CandidateProfile.version`**
+  - Dois requests simultaneos do mesmo magic link podem criar
+    versoes com o mesmo numero (ou pular) — nao ha lock otimista.
+  - Correto: `UNIQUE (candidate_id, version)` + retry em
+    `IntegrityError`, ou usar `SELECT FOR UPDATE`.
+
+- [ ] **`analyze_application_fit_task` usa perfil mais recente**
+  - Se o candidato edita o perfil no portal logo apos aplicar, a
+    analise pode rodar contra um perfil diferente do "snapshot"
+    da aplicacao.
+  - Correto: salvar `candidate_profile_version_id` em
+    `JobApplication` no momento da aplicacao e carregar exatamente
+    essa versao na task.
+
+- [ ] **Magic link sem rate limit**
+  - Um token roubado permite chamadas ilimitadas em
+    `/improve` (custo LLM) e `/apply-suggestion`. Combinar com o
+    item de rate limiting em 3.2.
+
 ---
 
 ## 4. Testes manuais pos-merge
