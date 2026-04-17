@@ -11,6 +11,7 @@ from sqlalchemy import (
     Date,
     Float,
     Index,
+    Numeric,
     Table,
 )
 from sqlalchemy.dialects.postgresql import JSONB, ARRAY
@@ -153,6 +154,24 @@ class Candidate(Base):
     linkedin_url = Column(String, nullable=True)
     # Caminho relativo da foto de perfil salva no storage
     photo_url = Column(String, nullable=True)
+
+    # Pretensao salarial (opcional)
+    salary_min = Column(Numeric(12, 2), nullable=True)
+    salary_max = Column(Numeric(12, 2), nullable=True)
+    salary_currency = Column(String(3), nullable=True)  # BRL, USD, EUR
+    salary_period = Column(String(16), nullable=True)   # mensal, anual, hora
+    salary_notes = Column(String, nullable=True)
+
+    # Scores de confianca da extracao (0.0 - 1.0) - persiste a qualidade
+    # percebida pela IA para permitir filtros e alertas de revisao manual
+    name_confidence = Column(Float, nullable=True)
+    email_confidence = Column(Float, nullable=True)
+    phone_confidence = Column(Float, nullable=True)
+    linkedin_confidence = Column(Float, nullable=True)
+    overall_extraction_confidence = Column(Float, nullable=True)
+    extraction_method = Column(String(32), nullable=True)  # regex_only, ai_validated
+    extraction_quality_label = Column(String(32), nullable=True)  # alta, media, baixa
+
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 

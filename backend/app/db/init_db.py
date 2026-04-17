@@ -348,6 +348,20 @@ def apply_lightweight_migrations():
         f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS professional_summary TEXT",
         f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR",
         f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS photo_url VARCHAR",
+        # Pretensao salarial
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS salary_min NUMERIC(12,2)",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS salary_max NUMERIC(12,2)",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS salary_currency VARCHAR(3)",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS salary_period VARCHAR(16)",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS salary_notes VARCHAR",
+        # Scores de confianca da extracao
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS name_confidence FLOAT",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS email_confidence FLOAT",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS phone_confidence FLOAT",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS linkedin_confidence FLOAT",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS overall_extraction_confidence FLOAT",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS extraction_method VARCHAR(32)",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS extraction_quality_label VARCHAR(32)",
     ]
 
     with engine.begin() as connection:
@@ -357,7 +371,7 @@ def apply_lightweight_migrations():
             except Exception as e:
                 print(f"  [migration] ignorada ({stmt[:60]}...): {e}")
 
-    print("  Lightweight migrations applied (candidates: professional_title, professional_summary, linkedin_url, photo_url)")
+    print("  Lightweight migrations applied (candidates: profile, salary, confidence scores)")
 
 
 def drop_all_tables():

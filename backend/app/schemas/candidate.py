@@ -17,6 +17,20 @@ class CandidateBase(BaseModel):
     professional_summary: Optional[str] = None
     linkedin_url: Optional[str] = None
     photo_url: Optional[str] = None
+    # Pretensao salarial
+    salary_min: Optional[float] = None
+    salary_max: Optional[float] = None
+    salary_currency: Optional[str] = None
+    salary_period: Optional[str] = None
+    salary_notes: Optional[str] = None
+    # Scores de confianca da extracao
+    name_confidence: Optional[float] = None
+    email_confidence: Optional[float] = None
+    phone_confidence: Optional[float] = None
+    linkedin_confidence: Optional[float] = None
+    overall_extraction_confidence: Optional[float] = None
+    extraction_method: Optional[str] = None
+    extraction_quality_label: Optional[str] = None
 
 
 class CandidateCreate(CandidateBase):
