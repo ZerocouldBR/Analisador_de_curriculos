@@ -27,6 +27,149 @@ from app.services.brazilian_validators import (
 )
 
 
+# Stopwords comuns que indicam frase narrativa (nao e skill/certificacao)
+_NARRATIVE_STOPWORDS = {
+    'que', 'para', 'com', 'dos', 'das', 'pelo', 'pela', 'pelos', 'pelas',
+    'sobre', 'entre', 'como', 'quando', 'onde', 'porque', 'tambem',
+    'também', 'muito', 'mais', 'menos', 'ainda', 'apenas', 'sempre',
+    'nunca', 'assim', 'então', 'entao', 'deste', 'desta', 'nesta',
+    'neste', 'nessa', 'nesse', 'aos', 'nos', 'nas',
+}
+
+# Conjuncoes/preposicoes que terminam fragmentos incompletos
+_TRAILING_CONJUNCTIONS = (' e', ' ou', ' para', ' com', ' de', ' do', ' da', ' dos', ' das', ' em')
+
+# Cabecalhos de secao que as vezes vazam para a lista
+_SECTION_HEADERS_LOWER = {
+    'contato', 'resumo', 'objetivo', 'experiencia', 'experiência',
+    'formacao', 'formação', 'habilidades', 'idiomas', 'languages',
+    'skills', 'certificacoes', 'certificações', 'competencias',
+    'competências', 'perfil', 'sobre', 'sobre mim', 'endereco',
+    'endereço', 'dados', 'dados pessoais', 'principais competencias',
+    'principais competências', 'top skills', 'summary', 'education',
+    'languages', 'about', 'references', 'referencias', 'referências',
+}
+
+
+def _is_pdf_artifact(line: str) -> bool:
+    """Detecta artefatos de PDF export (paginacao, placeholders, bullets vazios)."""
+    if not line:
+        return True
+    lower = line.strip().lower()
+    # Paginacao "Page 1 of 9" / "Pagina 1 de 9" / "Page 1 / 9"
+    if re.match(r'^(?:page|p[áa]gina?)\s+\d+\s*(?:of|de|/)\s*\d+$', lower):
+        return True
+    if re.match(r'^\d+\s*/\s*\d+$', lower):
+        return True
+    # Placeholders de tabela/imagem
+    if re.match(r'^\[\s*(?:tabela|imagem|image|table|figura|figure)\s*\]$', lower):
+        return True
+    # Linhas com apenas bullet/separador
+    if re.match(r'^[-•*–—_·\s]+$', line):
+        return True
+    return False
+
+
+def _looks_like_narrative(line: str) -> bool:
+    """Detecta se uma linha parece texto narrativo (frase inteira) e nao um skill/cert."""
+    if not line:
+        return True
+    line_clean = line.strip()
+    # Muitas palavras sugere prosa
+    words = line_clean.split()
+    if len(words) > 8:
+        return True
+    # Termina com conjuncao/preposicao -> fragmento cortado
+    lower = line_clean.lower().rstrip('.,;:')
+    for conj in _TRAILING_CONJUNCTIONS:
+        if lower.endswith(conj):
+            return True
+    # Termina com gerundio (-ando/-endo/-indo) -> fragmento cortado
+    last_word = words[-1].lower().rstrip('.,;:') if words else ''
+    if re.search(r'(ando|endo|indo)$', last_word) and len(last_word) >= 5:
+        return True
+    # Tem muitas stopwords narrativas
+    words_lower = [w.lower().rstrip('.,;:') for w in words]
+    stopword_count = sum(1 for w in words_lower if w in _NARRATIVE_STOPWORDS)
+    if stopword_count >= 2:
+        return True
+    # Contem preposicao "em" no meio seguida de texto (ex: "consolidada em X, Y"):
+    # isso e padrao narrativo, nao skill
+    if len(words) >= 5 and any(w in ('em', 'na', 'no', 'nas', 'nos') for w in words_lower[1:-1]):
+        # Mas aceitar se eh uma expressao curta tipo "Mestrado em Engenharia"
+        if len(words) > 5:
+            return True
+    # Termina com ponto final e tem 4+ palavras -> frase completa
+    if line_clean.endswith('.') and len(words) >= 4:
+        return True
+    # Comeca com letra minuscula (skills/certs tipicamente comecam com maiuscula ou sigla)
+    first_char = line_clean[0]
+    if first_char.isalpha() and first_char.islower() and len(words) >= 3:
+        return True
+    return False
+
+
+def _is_clean_list_item(line: str, max_len: int = 80, min_len: int = 2) -> bool:
+    """
+    Valida se uma linha parece um item de lista (skill, certificacao, ferramenta)
+    e nao texto narrativo ou artefato de PDF.
+    """
+    if not line:
+        return False
+    stripped = line.strip()
+    if len(stripped) < min_len or len(stripped) > max_len:
+        return False
+    if _is_pdf_artifact(stripped):
+        return False
+    # Rejeitar cabecalhos de secao
+    if stripped.lower().rstrip(':').strip() in _SECTION_HEADERS_LOWER:
+        return False
+    if _looks_like_narrative(stripped):
+        return False
+    return True
+
+
+# Mapeamento de variacoes de idiomas para forma canonica
+_LANGUAGE_CANONICAL = {
+    'portugues': 'Portugues', 'português': 'Portugues', 'portuguese': 'Portugues',
+    'ingles': 'Ingles', 'inglês': 'Ingles', 'english': 'Ingles',
+    'espanhol': 'Espanhol', 'spanish': 'Espanhol', 'español': 'Espanhol',
+    'frances': 'Frances', 'francês': 'Frances', 'french': 'Frances', 'français': 'Frances',
+    'alemao': 'Alemao', 'alemão': 'Alemao', 'german': 'Alemao', 'deutsch': 'Alemao',
+    'italiano': 'Italiano', 'italian': 'Italiano',
+    'chines': 'Chines', 'chinês': 'Chines', 'chinese': 'Chines', 'mandarim': 'Chines', 'mandarin': 'Chines',
+    'japones': 'Japones', 'japonês': 'Japones', 'japanese': 'Japones',
+    'coreano': 'Coreano', 'korean': 'Coreano',
+    'arabe': 'Arabe', 'árabe': 'Arabe', 'arabic': 'Arabe',
+    'libras': 'Libras',
+}
+
+_LEVEL_CANONICAL = {
+    'nativo': 'Nativo', 'native': 'Nativo', 'mother tongue': 'Nativo',
+    'fluente': 'Fluente', 'fluent': 'Fluente', 'proficient': 'Fluente',
+    'avancado': 'Avancado', 'avançado': 'Avancado', 'advanced': 'Avancado',
+    'intermediario': 'Intermediario', 'intermediário': 'Intermediario', 'intermediate': 'Intermediario',
+    'basico': 'Basico', 'básico': 'Basico', 'basic': 'Basico', 'beginner': 'Basico',
+    'iniciante': 'Basico',
+}
+
+
+def _canonical_language(raw: str) -> Optional[str]:
+    """Normaliza um nome de idioma para sua forma canonica (ex: 'Inglês' -> 'Ingles')."""
+    if not raw:
+        return None
+    key = raw.strip().lower().rstrip(':,;.-')
+    return _LANGUAGE_CANONICAL.get(key)
+
+
+def _canonical_level(raw: Optional[str]) -> str:
+    """Normaliza um nivel de proficiencia."""
+    if not raw:
+        return 'Nao especificado'
+    key = raw.strip().lower().rstrip(':,;.-')
+    return _LEVEL_CANONICAL.get(key, 'Nao especificado')
+
+
 class ResumeParserService:
     """
     Servico para parsing estruturado de curriculos
@@ -644,6 +787,7 @@ class ResumeParserService:
         skills_text = text[section_start:section_end]
 
         lines = skills_text.split('\n')
+        seen = set()
 
         for line in lines:
             line = line.strip()
@@ -651,53 +795,52 @@ class ResumeParserService:
             if not line:
                 continue
 
-            line = re.sub(r'^[-•*–]\s*', '', line)
+            # Remove bullets e marcadores
+            line = re.sub(r'^[-•*–—·]\s*', '', line).strip()
 
-            if ',' in line or '|' in line or ';' in line:
-                separators = [',', '|', ';']
-                for sep in separators:
-                    if sep in line:
-                        parts = [p.strip() for p in line.split(sep)]
-                        skills.extend([p for p in parts if p and len(p) > 1])
-                        break
+            # Divide por separadores comuns em listas
+            if any(sep in line for sep in (',', '|', ';', '•')):
+                parts = re.split(r'[,|;•]+', line)
             else:
-                if len(line) > 1:
-                    skills.append(line)
+                parts = [line]
+
+            for part in parts:
+                part = part.strip()
+                # Skills tipicamente sao curtos: ate 50 chars e 5 palavras
+                if not _is_clean_list_item(part, max_len=50):
+                    continue
+                # Evitar duplicatas (case-insensitive)
+                key = part.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                skills.append(part)
 
         return skills
 
     @staticmethod
     def extract_languages(text: str) -> list[Dict[str, str]]:
-        """Extrai idiomas e niveis"""
-        languages = []
+        """Extrai idiomas e niveis, normalizados para forma canonica."""
+        languages: list[Dict[str, str]] = []
+        seen_canonical: set[str] = set()
 
-        language_names = [
-            'português', 'portugues', 'inglês', 'ingles', 'espanhol', 'francês', 'frances',
-            'alemão', 'alemao', 'italiano', 'chinês', 'chines', 'japonês', 'japones',
-            'coreano', 'árabe', 'arabe', 'libras',
-            'portuguese', 'english', 'spanish', 'french', 'german',
-            'italian', 'chinese', 'japanese', 'korean', 'arabic'
-        ]
+        level_alternation = "|".join(
+            re.escape(k) for k in sorted(_LEVEL_CANONICAL.keys(), key=len, reverse=True)
+        )
+        language_alternation = "|".join(
+            re.escape(k) for k in sorted(_LANGUAGE_CANONICAL.keys(), key=len, reverse=True)
+        )
+        pattern = rf'\b({language_alternation})\b\s*[:\-–()]*\s*({level_alternation})?'
 
-        levels = [
-            'nativo', 'fluente', 'avançado', 'avancado', 'intermediário', 'intermediario',
-            'básico', 'basico', 'iniciante',
-            'native', 'fluent', 'advanced', 'intermediate', 'basic', 'beginner',
-        ]
-
-        for language in language_names:
-            pattern = rf'{language}\s*[:\-–]?\s*({"|".join(levels)})?'
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-
-            for match in matches:
-                lang_entry = {
-                    "language": match.group().split(':')[0].split('-')[0].strip(),
-                    "level": match.group(1) if match.group(1) else "Nao especificado"
-                }
-                # Evitar duplicatas
-                if not any(l["language"].lower() == lang_entry["language"].lower()
-                          for l in languages):
-                    languages.append(lang_entry)
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            canonical_lang = _canonical_language(match.group(1))
+            if not canonical_lang or canonical_lang in seen_canonical:
+                continue
+            seen_canonical.add(canonical_lang)
+            languages.append({
+                "language": canonical_lang,
+                "level": _canonical_level(match.group(2)),
+            })
 
         return languages
 
@@ -743,15 +886,24 @@ class ResumeParserService:
         cert_text = text[section_start:section_end]
 
         lines = cert_text.split('\n')
+        seen = set()
 
         for line in lines:
             line = line.strip()
-
-            if not line or len(line) < 5:
+            if not line:
                 continue
 
-            line = re.sub(r'^[-•*–]\s*', '', line)
+            # Remove bullets
+            line = re.sub(r'^[-•*–—·]\s*', '', line).strip()
 
+            # Certificacoes podem ter ate ~100 chars (ex: "AWS Certified Solutions Architect - Associate")
+            if not _is_clean_list_item(line, max_len=100, min_len=5):
+                continue
+
+            key = line.lower()
+            if key in seen:
+                continue
+            seen.add(key)
             certifications.append(line)
 
         return certifications
