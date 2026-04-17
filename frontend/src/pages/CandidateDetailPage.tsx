@@ -62,6 +62,7 @@ import {
   Error as ErrorIcon,
   LinkedIn,
   GitHub,
+  Link as LinkIcon,
 } from '@mui/icons-material';
 import { apiService } from '../services/api';
 import {
@@ -73,6 +74,7 @@ import {
   CareerAdvisoryResponse,
 } from '../types';
 import { DetailSkeleton } from '../components/LoadingSkeleton';
+import CandidateAccessTokenDialog from '../components/CandidateAccessTokenDialog';
 import { useNotification } from '../contexts/NotificationContext';
 
 interface TabPanelProps {
@@ -99,6 +101,7 @@ const CandidateDetailPage: React.FC = () => {
   const [advisoryLoading, setAdvisoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState(0);
+  const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
 
   useEffect(() => {
     if (id) fetchData();
@@ -248,12 +251,28 @@ const CandidateDetailPage: React.FC = () => {
         </Box>
         <Button
           variant="outlined"
+          startIcon={<LinkIcon />}
+          onClick={() => setTokenDialogOpen(true)}
+          sx={{ mr: 1 }}
+        >
+          Link do candidato
+        </Button>
+        <Button
+          variant="outlined"
           startIcon={<SmartToy />}
           onClick={() => navigate('/chat')}
         >
           Analisar com IA
         </Button>
       </Box>
+
+      {candidate && (
+        <CandidateAccessTokenDialog
+          candidateId={candidate.id}
+          open={tokenDialogOpen}
+          onClose={() => setTokenDialogOpen(false)}
+        />
+      )}
 
       <Grid container spacing={3}>
         {/* Left column - Info */}

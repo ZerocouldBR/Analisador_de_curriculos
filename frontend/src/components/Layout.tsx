@@ -41,6 +41,7 @@ import {
   Hub,
   BugReport,
   FolderCopy,
+  Work,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useThemeMode } from '../contexts/ThemeContext';
@@ -60,6 +61,7 @@ const menuItems: MenuItem_[] = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/dashboard' },
   { text: 'Chat IA', icon: <SmartToy />, path: '/chat', dividerAfter: true },
   { text: 'Candidatos', icon: <People />, path: '/candidates' },
+  { text: 'Vagas', icon: <Work />, path: '/jobs' },
   { text: 'Busca Inteligente', icon: <Search />, path: '/search' },
   { text: 'Upload de Curriculos', icon: <CloudUpload />, path: '/upload' },
   { text: 'Importacao em Lote', icon: <FolderCopy />, path: '/batch-import' },

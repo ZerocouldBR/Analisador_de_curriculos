@@ -329,6 +329,139 @@ export interface PaginatedResponse<T> {
   total_pages: number;
 }
 
+// ==================== Jobs ====================
+export interface Job {
+  id: number;
+  company_id: number;
+  slug: string;
+  title: string;
+  description: string;
+  requirements?: string;
+  responsibilities?: string;
+  benefits?: string;
+  location?: string;
+  employment_type?: string; // CLT, PJ, Estagio
+  seniority_level?: string; // Junior, Pleno, Senior
+  work_mode?: string; // presencial, remoto, hibrido
+  salary_range_min?: number;
+  salary_range_max?: number;
+  salary_currency?: string;
+  salary_visible?: boolean;
+  skills_required: string[];
+  skills_desired: string[];
+  is_active: boolean;
+  published_at?: string;
+  closes_at?: string;
+  created_at: string;
+  updated_at: string;
+  applications_count?: number;
+}
+
+export interface JobCreate {
+  title: string;
+  description: string;
+  requirements?: string;
+  responsibilities?: string;
+  benefits?: string;
+  location?: string;
+  employment_type?: string;
+  seniority_level?: string;
+  work_mode?: string;
+  salary_range_min?: number;
+  salary_range_max?: number;
+  salary_currency?: string;
+  salary_visible?: boolean;
+  skills_required?: string[];
+  skills_desired?: string[];
+  is_active?: boolean;
+  closes_at?: string;
+}
+
+export interface JobFitAnalysis {
+  score?: number;
+  summary?: string;
+  strengths?: string[];
+  gaps?: string[];
+  matched_skills?: string[];
+  missing_skills?: string[];
+  experience_match?: string;
+  recommendation?: 'strong_match' | 'good_match' | 'weak_match' | 'no_match';
+}
+
+export interface JobApplication {
+  id: number;
+  job_id: number;
+  candidate_id: number;
+  document_id?: number;
+  applicant_name: string;
+  applicant_email: string;
+  applicant_phone?: string;
+  cover_letter?: string;
+  fit_score?: number;
+  fit_analysis?: JobFitAnalysis;
+  fit_status: string; // pending, analyzed, failed
+  stage: string; // received, screening, interview, technical, offer, hired, rejected
+  stage_notes?: string;
+  source: string;
+  consent_given: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PublicCompanyBrand {
+  name: string;
+  slug: string;
+  logo_url?: string;
+  website?: string;
+  brand_color?: string;
+  about?: string;
+}
+
+export interface PublicJobListItem {
+  slug: string;
+  title: string;
+  location?: string;
+  employment_type?: string;
+  seniority_level?: string;
+  work_mode?: string;
+  salary_display?: string;
+  published_at?: string;
+}
+
+export interface PublicJobsPageResponse {
+  company: PublicCompanyBrand;
+  jobs: PublicJobListItem[];
+  total: number;
+}
+
+export interface PublicJobResponse {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  requirements?: string;
+  responsibilities?: string;
+  benefits?: string;
+  location?: string;
+  employment_type?: string;
+  seniority_level?: string;
+  work_mode?: string;
+  salary_display?: string;
+  skills_required: string[];
+  skills_desired: string[];
+  published_at?: string;
+  closes_at?: string;
+  company: PublicCompanyBrand;
+}
+
+export interface ApplyResult {
+  id: number;
+  message: string;
+  fit_status: string;
+  fit_score?: number;
+  fit_summary?: string;
+}
+
 // ==================== Health ====================
 export interface HealthCheck {
   status: string;
@@ -536,4 +669,150 @@ export interface CareerAdvisoryResponse {
   advisory?: CareerAdvisoryData;
   quick_tips?: { tip: string; category: string; priority: string }[];
   error?: string;
+}
+
+// ==================== Candidate Portal (Magic Link) ====================
+export interface CandidateAccessToken {
+  id: number;
+  candidate_id: number;
+  token: string;
+  url: string;
+  expires_at: string;
+  created_at: string;
+  revoked_at?: string;
+  last_used_at?: string;
+  use_count: number;
+  purpose: string;
+}
+
+export interface AccessTokenListItem {
+  id: number;
+  expires_at: string;
+  created_at: string;
+  revoked_at?: string;
+  last_used_at?: string;
+  use_count: number;
+  purpose: string;
+}
+
+export interface PortalExperience {
+  company?: string;
+  title?: string;
+  start_date?: string;
+  end_date?: string;
+  location?: string;
+  description?: string;
+  achievements?: string[];
+}
+
+export interface PortalEducation {
+  institution?: string;
+  degree?: string;
+  field?: string;
+  start_year?: string;
+  end_year?: string;
+  status?: string;
+}
+
+export interface PortalCompanyBrand {
+  name: string;
+  slug?: string;
+  logo_url?: string;
+  brand_color?: string;
+}
+
+export interface PortalProfile {
+  candidate_id: number;
+  full_name: string;
+  email?: string;
+  phone?: string;
+  location?: string;
+  linkedin?: string;
+  github?: string;
+  portfolio?: string;
+  photo_url?: string;
+  headline?: string;
+  summary?: string;
+  experiences: PortalExperience[];
+  education: PortalEducation[];
+  skills_technical: string[];
+  skills_soft: string[];
+  languages: { language: string; level: string }[];
+  certifications: any[];
+  company?: PortalCompanyBrand;
+  token_expires_at?: string;
+}
+
+export interface PortalPatchRequest {
+  full_name?: string;
+  email?: string;
+  phone?: string;
+  location?: string;
+  linkedin?: string;
+  github?: string;
+  portfolio?: string;
+  headline?: string;
+  summary?: string;
+  experiences?: PortalExperience[];
+  skills_technical?: string[];
+}
+
+export interface ImproveResponse {
+  field: string;
+  experience_index?: number;
+  original?: string;
+  suggestion?: {
+    improved_summary?: string;
+    improved_headline?: string;
+    improved_bullets?: string[];
+    improved_description?: string;
+    rationale?: string;
+  };
+  rationale?: string;
+  ai_available: boolean;
+  error?: string;
+}
+
+// ==================== Candidate Portal Jobs (PR3) ====================
+export interface PortalJobListItem {
+  slug: string;
+  title: string;
+  location?: string;
+  employment_type?: string;
+  seniority_level?: string;
+  work_mode?: string;
+  salary_display?: string;
+  published_at?: string;
+  already_applied: boolean;
+  my_application_id?: number;
+  my_application_stage?: string;
+}
+
+export interface PortalJobsListResponse {
+  total: number;
+  jobs: PortalJobListItem[];
+}
+
+export interface PortalMyApplication {
+  id: number;
+  job_slug: string;
+  job_title: string;
+  stage: string;
+  fit_status: string;
+  fit_score?: number;
+  fit_summary?: string;
+  fit_recommendation?: string;
+  created_at: string;
+}
+
+export interface PortalApplicationsListResponse {
+  total: number;
+  applications: PortalMyApplication[];
+}
+
+export interface PortalApplyResponse {
+  id: number;
+  message: string;
+  fit_status: string;
+  already_existed: boolean;
 }

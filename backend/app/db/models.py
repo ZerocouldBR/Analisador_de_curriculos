@@ -530,6 +530,128 @@ class ProviderConfig(Base):
     # Relacionamentos
     company = relationship("Company", back_populates="sourcing_configs")
 
+
+# ================================================================
+# Portal do Candidato (Magic Link) - PR2
+# ================================================================
+
+class CandidateAccessToken(Base):
+    """
+    Token de acesso do candidato (magic link).
+
+    O candidato recebe um link com este token e pode ver/editar seu
+    proprio perfil sem precisar criar conta. Cada token tem validade
+    limitada e pode ser revogado pelo RH.
+    """
+    __tablename__ = "candidate_access_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(
+        Integer,
+        ForeignKey("candidates.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    token = Column(String, unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+    use_count = Column(Integer, default=0)
+    revoked_at = Column(DateTime, nullable=True)
+    purpose = Column(String, default="self_edit")  # self_edit, apply_with_profile
+
+    candidate = relationship("Candidate")
+
+    __table_args__ = (
+        Index("idx_access_token_candidate", "candidate_id"),
+    )
+
+
+# ================================================================
+# Vagas publicas (Job Board) - PR1
+# ================================================================
+
+class Job(Base):
+    """Vaga publicada pela empresa, acessivel via link publico."""
+    __tablename__ = "jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    slug = Column(String, unique=True, nullable=False, index=True)  # slug publico gerado
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)  # descricao completa (markdown permitido)
+    requirements = Column(Text, nullable=True)  # requisitos principais
+    responsibilities = Column(Text, nullable=True)  # responsabilidades
+    benefits = Column(Text, nullable=True)
+    location = Column(String, nullable=True)  # Cidade, UF ou "Remoto"
+    employment_type = Column(String, nullable=True)  # CLT, PJ, Estagio, Temporario
+    seniority_level = Column(String, nullable=True)  # Junior, Pleno, Senior, Lead
+    work_mode = Column(String, nullable=True)  # presencial, remoto, hibrido
+    salary_range_min = Column(Float, nullable=True)
+    salary_range_max = Column(Float, nullable=True)
+    salary_currency = Column(String, default="BRL")
+    salary_visible = Column(Boolean, default=False)
+    skills_required = Column(JSONB, default=list)  # ["python", "aws"]
+    skills_desired = Column(JSONB, default=list)
+    is_active = Column(Boolean, default=True, index=True)
+    published_at = Column(DateTime, nullable=True)
+    closes_at = Column(DateTime, nullable=True)  # data limite
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relacionamentos
+    company = relationship("Company")
+    applications = relationship("JobApplication", back_populates="job", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_job_company_active", "company_id", "is_active"),
+    )
+
+
+class JobApplication(Base):
+    """Aplicacao de um candidato para uma vaga."""
+    __tablename__ = "job_applications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+
+    # Dados informados no momento da aplicacao (publica)
+    applicant_name = Column(String, nullable=False)
+    applicant_email = Column(String, nullable=False, index=True)
+    applicant_phone = Column(String, nullable=True)
+    cover_letter = Column(Text, nullable=True)
+
+    # Resultado da analise de fit pela IA
+    fit_score = Column(Integer, nullable=True)  # 0-100
+    fit_analysis = Column(JSONB, nullable=True)  # detalhes estruturados
+    fit_status = Column(String, default="pending")  # pending, analyzed, failed
+
+    # Pipeline da vaga (RH gerencia)
+    stage = Column(String, default="received", index=True)
+    # received, screening, interview, technical, offer, hired, rejected
+    stage_notes = Column(Text, nullable=True)
+
+    # Origem
+    source = Column(String, default="public_form")  # public_form, manual, import
+    consent_given = Column(Boolean, default=False)  # LGPD
+
+    created_at = Column(DateTime, default=_utcnow, index=True)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relacionamentos
+    job = relationship("Job", back_populates="applications")
+    candidate = relationship("Candidate")
+    document = relationship("Document")
+
+    __table_args__ = (
+        Index("idx_application_job_stage", "job_id", "stage"),
+        Index("idx_application_email_job", "applicant_email", "job_id"),
+    )
+
     __table_args__ = (
         Index("idx_provider_config_unique", "company_id", "provider_name", unique=True),
     )

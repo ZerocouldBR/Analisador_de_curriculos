@@ -9,7 +9,11 @@ celery_app = Celery(
     "analisador_curriculos",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.document_tasks", "app.tasks.sourcing_tasks"]
+    include=[
+        "app.tasks.document_tasks",
+        "app.tasks.sourcing_tasks",
+        "app.tasks.job_fit_tasks",
+    ]
 )
 
 # Celery configuration
@@ -32,6 +36,7 @@ celery_app.conf.task_routes = {
     "app.tasks.document_tasks.*": {"queue": "documents"},
     "app.tasks.search_tasks.*": {"queue": "search"},
     "app.tasks.sourcing_tasks.*": {"queue": "sourcing"},
+    "app.tasks.job_fit_tasks.*": {"queue": "documents"},
 }
 
 # Celery Beat schedule

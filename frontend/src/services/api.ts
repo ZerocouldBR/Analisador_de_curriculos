@@ -23,6 +23,12 @@ import {
   SystemConfigUpdateResult,
   EnrichedResumeProfile,
   CareerAdvisoryResponse,
+  Job,
+  JobCreate,
+  JobApplication,
+  PublicJobsPageResponse,
+  PublicJobResponse,
+  ApplyResult,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -708,6 +714,196 @@ class ApiService {
 
   async getImportHistory(limit: number = 20): Promise<any> {
     const response = await this.api.get('/v1/batch-import/history', { params: { limit } });
+    return response.data;
+  }
+
+  // ==================== Candidate Access Tokens (HR) ====================
+  async generateCandidateAccessToken(
+    candidateId: number,
+    expiresInHours: number = 72,
+  ): Promise<import('../types').CandidateAccessToken> {
+    const response = await this.api.post<import('../types').CandidateAccessToken>(
+      `/v1/candidates/${candidateId}/access-tokens`,
+      { expires_in_hours: expiresInHours, purpose: 'self_edit' },
+    );
+    return response.data;
+  }
+
+  async listCandidateAccessTokens(
+    candidateId: number,
+  ): Promise<import('../types').AccessTokenListItem[]> {
+    const response = await this.api.get<import('../types').AccessTokenListItem[]>(
+      `/v1/candidates/${candidateId}/access-tokens`,
+    );
+    return response.data;
+  }
+
+  async revokeCandidateAccessToken(candidateId: number, tokenId: number): Promise<void> {
+    await this.api.delete(`/v1/candidates/${candidateId}/access-tokens/${tokenId}`);
+  }
+
+  // ==================== Candidate Portal (public) ====================
+  async getPortalProfile(token: string): Promise<import('../types').PortalProfile> {
+    const response = await this.api.get<import('../types').PortalProfile>(
+      `/v1/public/me/${token}`,
+    );
+    return response.data;
+  }
+
+  async patchPortalProfile(
+    token: string,
+    data: import('../types').PortalPatchRequest,
+  ): Promise<import('../types').PortalProfile> {
+    const response = await this.api.patch<import('../types').PortalProfile>(
+      `/v1/public/me/${token}`,
+      data,
+    );
+    return response.data;
+  }
+
+  async improvePortalField(
+    token: string,
+    field: 'summary' | 'headline' | 'experience',
+    experience_index?: number,
+  ): Promise<import('../types').ImproveResponse> {
+    const response = await this.api.post<import('../types').ImproveResponse>(
+      `/v1/public/me/${token}/improve`,
+      { field, experience_index },
+    );
+    return response.data;
+  }
+
+  async applyPortalSuggestion(
+    token: string,
+    field: 'summary' | 'headline' | 'experience',
+    value: any,
+    experience_index?: number,
+  ): Promise<import('../types').PortalProfile> {
+    const response = await this.api.post<import('../types').PortalProfile>(
+      `/v1/public/me/${token}/apply-suggestion`,
+      { field, value, experience_index },
+    );
+    return response.data;
+  }
+
+  // Vagas e candidaturas via portal (PR3)
+  async listPortalJobs(token: string): Promise<import('../types').PortalJobsListResponse> {
+    const response = await this.api.get<import('../types').PortalJobsListResponse>(
+      `/v1/public/me/${token}/jobs`,
+    );
+    return response.data;
+  }
+
+  async listPortalMyApplications(
+    token: string,
+  ): Promise<import('../types').PortalApplicationsListResponse> {
+    const response = await this.api.get<import('../types').PortalApplicationsListResponse>(
+      `/v1/public/me/${token}/applications`,
+    );
+    return response.data;
+  }
+
+  async applyFromPortal(
+    token: string,
+    jobSlug: string,
+    coverLetter?: string,
+  ): Promise<import('../types').PortalApplyResponse> {
+    const response = await this.api.post<import('../types').PortalApplyResponse>(
+      `/v1/public/me/${token}/apply/${jobSlug}`,
+      { cover_letter: coverLetter },
+    );
+    return response.data;
+  }
+
+  // ==================== Jobs (HR) ====================
+  async listJobs(includeInactive: boolean = true): Promise<Job[]> {
+    const response = await this.api.get<Job[]>('/v1/jobs/', {
+      params: { include_inactive: includeInactive },
+    });
+    return response.data;
+  }
+
+  async getJob(id: number): Promise<Job> {
+    const response = await this.api.get<Job>(`/v1/jobs/${id}`);
+    return response.data;
+  }
+
+  async createJob(data: JobCreate): Promise<Job> {
+    const response = await this.api.post<Job>('/v1/jobs/', data);
+    return response.data;
+  }
+
+  async updateJob(id: number, data: Partial<JobCreate>): Promise<Job> {
+    const response = await this.api.put<Job>(`/v1/jobs/${id}`, data);
+    return response.data;
+  }
+
+  async deleteJob(id: number): Promise<void> {
+    await this.api.delete(`/v1/jobs/${id}`);
+  }
+
+  async listJobApplications(jobId: number, stage?: string): Promise<JobApplication[]> {
+    const params = stage ? { stage } : undefined;
+    const response = await this.api.get<JobApplication[]>(`/v1/jobs/${jobId}/applications`, { params });
+    return response.data;
+  }
+
+  async updateApplicationStage(
+    jobId: number,
+    applicationId: number,
+    stage: string,
+    notes?: string,
+  ): Promise<JobApplication> {
+    const response = await this.api.patch<JobApplication>(
+      `/v1/jobs/${jobId}/applications/${applicationId}/stage`,
+      { stage, stage_notes: notes },
+    );
+    return response.data;
+  }
+
+  // ==================== Public Careers ====================
+  async getPublicCareersPage(companySlug: string): Promise<PublicJobsPageResponse> {
+    const response = await this.api.get<PublicJobsPageResponse>(
+      `/v1/public/careers/${companySlug}`,
+    );
+    return response.data;
+  }
+
+  async getPublicJob(companySlug: string, jobSlug: string): Promise<PublicJobResponse> {
+    const response = await this.api.get<PublicJobResponse>(
+      `/v1/public/careers/${companySlug}/${jobSlug}`,
+    );
+    return response.data;
+  }
+
+  async applyToPublicJob(
+    companySlug: string,
+    jobSlug: string,
+    data: {
+      resume: File;
+      applicant_name: string;
+      applicant_email: string;
+      applicant_phone?: string;
+      cover_letter?: string;
+      consent_given: boolean;
+    },
+  ): Promise<ApplyResult> {
+    const formData = new FormData();
+    formData.append('resume', data.resume);
+    formData.append('applicant_name', data.applicant_name);
+    formData.append('applicant_email', data.applicant_email);
+    if (data.applicant_phone) formData.append('applicant_phone', data.applicant_phone);
+    if (data.cover_letter) formData.append('cover_letter', data.cover_letter);
+    formData.append('consent_given', String(data.consent_given));
+
+    const response = await this.api.post<ApplyResult>(
+      `/v1/public/careers/${companySlug}/${jobSlug}/apply`,
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000,
+      },
+    );
     return response.data;
   }
 }
