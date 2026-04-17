@@ -145,7 +145,7 @@ EMBEDDING_MODEL_LOCAL=all-MiniLM-L6-v2
 # OPENAI_API_KEY=sk-...
 
 # LLM
-# LLM_MODEL=gpt-4-turbo-preview
+# LLM_MODEL=gpt-4o
 # LLM_TEMPERATURE=0.7
 
 # Upload
