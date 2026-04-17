@@ -632,7 +632,7 @@ Acesse **Configuracoes** no menu lateral. A pagina esta organizada em abas:
 - Configuracoes de cada provedor
 
 #### Aba: LLM & Chat
-- Modelo do chat (ex: gpt-4-turbo-preview)
+- Modelo do chat (ex: gpt-4o, gpt-4o-mini)
 - Temperatura (criatividade)
 - Limites de tokens
 - Contexto de conversa

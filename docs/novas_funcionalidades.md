@@ -19,7 +19,7 @@ GET /v1/settings/prompts/chat
   "user_prompt_template": "Com base nos currículos disponíveis, {query}...",
   "temperature": 0.7,
   "max_tokens": 1000,
-  "model": "gpt-4-turbo-preview"
+  "model": "gpt-4o"
 }
 ```
 
@@ -48,7 +48,7 @@ POST /v1/settings/prompts/chat/reset
 - **user_prompt_template**: Template para formatar perguntas dos usuários (use `{query}` como placeholder)
 - **temperature**: Controla aleatoriedade (0.0 = determinístico, 2.0 = muito criativo)
 - **max_tokens**: Número máximo de tokens na resposta
-- **model**: Modelo do OpenAI a usar (ex: gpt-4-turbo-preview, gpt-3.5-turbo)
+- **model**: Modelo do OpenAI a usar (ex: gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo)
 
 ### Exemplos de Uso
 

@@ -141,7 +141,7 @@ def create_env_vps(backend_dir):
         openai_key = prompt_input("OpenAI API Key (sk-...)", "")
 
     # Chat model
-    chat_model = prompt_input("Modelo LLM do chat", "gpt-4-turbo-preview")
+    chat_model = prompt_input("Modelo LLM do chat", "gpt-4o")
 
     # OCR
     ocr_langs = prompt_input("Idiomas OCR (Tesseract)", "por+eng")

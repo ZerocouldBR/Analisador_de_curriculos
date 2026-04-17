@@ -346,8 +346,8 @@ REFRESH_TOKEN_EXPIRE_DAYS=7
 # Obtenha sua chave em: https://platform.openai.com/api-keys
 OPENAI_API_KEY=sk-sua-chave-openai-aqui
 
-# Modelo do chat (gpt-4-turbo-preview recomendado)
-CHAT_MODEL=gpt-4-turbo-preview
+# Modelo do chat (gpt-4o recomendado)
+CHAT_MODEL=gpt-4o
 
 # Modelo de embeddings
 EMBEDDING_MODEL=text-embedding-3-small
@@ -1790,7 +1790,7 @@ volumes/
 | `EMBEDDING_MODE` | Nao | api | Modo embeddings: api ou code |
 | `EMBEDDING_MODEL` | Nao | text-embedding-3-small | Modelo de embeddings (API) |
 | `EMBEDDING_DIMENSIONS` | Nao | 1536 | Dimensoes do embedding |
-| `CHAT_MODEL` | Nao | gpt-4-turbo-preview | Modelo do chat LLM |
+| `CHAT_MODEL` | Nao | gpt-4o | Modelo do chat LLM |
 | `VECTOR_DB_PROVIDER` | Nao | pgvector | Provedor vetorial: pgvector, supabase, qdrant |
 | `MULTI_TENANT_ENABLED` | Nao | true | Isolamento multi-tenant |
 | `ENABLE_PII_ENCRYPTION` | Nao | true | Criptografia de dados pessoais |
