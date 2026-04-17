@@ -321,13 +321,74 @@ curl -X DELETE "http://localhost:8000/v1/candidates/1"
 
 ---
 
+## Funcionalidades entregues recentemente
+
+### Hardening da extração de dados (PR #32 + hardening atual)
+
+Corrigido o bug que fazia a extração via IA falhar silenciosamente
+(`response.usage.total_tokens` → `response.tokens_used`). Além disso:
+
+- **Multi-pass LLM**: 24k/16k/10k chars, até 8k tokens de resposta,
+  parser JSON tolerante.
+- **Prompt anti-competência**: rejeita "Gestão de data center",
+  "Senior Project Manager", "Active Directory" como nome.
+- **Validadores brasileiros** em `brazilian_validators.py`:
+  - CPF com checksum mod 11 (descarta CPFs inválidos).
+  - Telefone normalizado para E.164 (`+5511999998888`).
+  - Email em lowercase + strip + validação de formato.
+  - Data de nascimento flexível (aceita `15/01/1990`, `1990-01-15`,
+    "15 de janeiro de 1990").
+  - LinkedIn canônico preservando `/in/` vs `/pub/`.
+- **Cross-validation nome↔email**: se o prefixo do email não bate
+  com tokens do nome (< 30%), baixa a confiança e gera alerta.
+- **Fuzzy match unicode-aware**: verifica se o nome aparece no texto
+  bruto ignorando acentos e preposições.
+- **Flag de OCR baixo**: quando páginas OCR'ed têm confiança < 60%,
+  um alerta `low_ocr_confidence` é propagado para a validação.
+- **Foto de perfil**: `PhotoExtractionService` extrai de PDFs/DOCX
+  com heurística de proporção + Haar cascade quando OpenCV disponível.
+  Servida via `GET /v1/candidates/{id}/photo`.
+- **Novos campos em `candidates`**: `professional_title`,
+  `professional_summary`, `linkedin_url`, `photo_url`.
+
+### Painel público de vagas + análise de fit por IA (PR #33)
+
+- CRUD de vagas em `/v1/jobs/*` (novas permissões `jobs.*`).
+- Endpoints públicos sem auth em `/v1/public/careers/{company_slug}[/*]`.
+- Página pública por empresa com branding customizado
+  (`logo_url` + `brand_color` + `public_about` em `company.settings_json`).
+- `JobFitService` compara perfil vs vaga e retorna score 0–100,
+  `strengths`, `gaps`, `matched_skills`, `missing_skills`, `recommendation`.
+- Task Celery `analyze_application_fit_task` roda em background.
+
+### Portal do candidato via magic link (PR #34)
+
+- `CandidateAccessToken` de 256 bits, expiração default 72h, revogável.
+- Endpoints HR: `POST/GET/DELETE /v1/candidates/{id}/access-tokens[/*]`.
+- Endpoints públicos (`/v1/public/me/{token}[/*]`):
+  - `GET` — perfil | `PATCH` — edita campos (cria nova versão de `candidate_profiles`)
+  - `POST /improve` — sugestão de melhoria via `ProfileImprovementService`
+  - `POST /apply-suggestion` — aplica sugestão aprovada pelo candidato.
+
+### Portal aplica em vagas sem reupload (PR #35)
+
+- `GET /v1/public/me/{token}/jobs` — vagas ativas com flag `already_applied`.
+- `GET /v1/public/me/{token}/applications` — candidaturas com `fit_score`.
+- `POST /v1/public/me/{token}/apply/{job_slug}` — aplica reusando o
+  `Document` mais recente. Dedup por `(candidate_id, job_id)`.
+
+---
+
 ## Próximos Passos
 
-1. **Autenticação:** Adicionar JWT para proteger endpoints
-2. **Permissões:** Implementar RBAC (Role-Based Access Control)
-3. **Interface Web:** Criar frontend React para gerenciar configurações
-4. **Validações:** Adicionar validações mais robustas
-5. **Testes:** Implementar testes unitários e de integração
-6. **LinkedIn API:** Integrar com API oficial do LinkedIn
-7. **Storage:** Implementar upload de currículos para MinIO/S3
-8. **OCR:** Adicionar extração de texto de PDFs e imagens
+Ver `docs/ROADMAP.md` para a lista priorizada. Principais itens:
+
+1. **Emails transacionais** (magic link, confirmação de candidatura, mudança de estágio).
+2. **Dashboard HR** com contadores de aplicações novas.
+3. **Comparador de candidatos** para uma mesma vaga.
+4. **Migração para Alembic** (hoje usa `create_all` + `ALTER IF NOT EXISTS`).
+5. **Rate limiting** nos endpoints públicos (magic link + apply).
+6. **Testes automatizados** (validadores, pipeline, endpoints públicos).
+7. **Conta real de candidato** (alternativa ao magic link).
+8. **Bugs concretos** listados em `ROADMAP.md` §3.3 (slug global unique,
+   N+1 em `/public/careers`, race em `CandidateProfile.version`, etc.).

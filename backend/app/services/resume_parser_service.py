@@ -17,6 +17,15 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 from dateutil.parser import parse as parse_date
 
+from app.services.brazilian_validators import (
+    format_cpf,
+    is_valid_cpf,
+    normalize_email,
+    normalize_linkedin_url,
+    normalize_phone_br,
+    parse_birth_date,
+)
+
 
 class ResumeParserService:
     """
@@ -69,11 +78,11 @@ class ResumeParserService:
             "birth_date": None,
         }
 
-        # Email
+        # Email (normalizado: lower + strip + validacao de formato)
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
         email_match = re.search(email_pattern, text)
         if email_match:
-            info["email"] = email_match.group()
+            info["email"] = normalize_email(email_match.group()) or email_match.group().lower().strip()
 
         # Telefone (formatos brasileiros - mais abrangente)
         phone_patterns = [
@@ -83,40 +92,44 @@ class ResumeParserService:
             r'(?:tel(?:efone)?|cel(?:ular)?|fone|whatsapp|wpp|contato)[\s.:]+\+?5?5?\s*\(?\d{2}\)?\s*\d{4,5}[\s.-]?\d{4}',
         ]
 
+        # Tentar normalizar telefones candidatos e pegar o primeiro valido
         for pattern in phone_patterns:
-            phone_match = re.search(pattern, text, re.IGNORECASE)
-            if phone_match:
-                info["phone"] = phone_match.group().strip()
+            for phone_match in re.finditer(pattern, text, re.IGNORECASE):
+                raw = phone_match.group().strip()
+                normalized = normalize_phone_br(raw)
+                if normalized:
+                    info["phone"] = normalized
+                    info["_phone_raw"] = raw  # opcional: manter original
+                    break
+            if info.get("phone"):
                 break
 
+        # Fallback: se nao conseguiu normalizar nenhum, guarda o primeiro match bruto
+        if not info.get("phone"):
+            for pattern in phone_patterns:
+                phone_match = re.search(pattern, text, re.IGNORECASE)
+                if phone_match:
+                    info["phone"] = phone_match.group().strip()
+                    break
+
         # LinkedIn - com varias variacoes e correcao de quebras de linha
-        # Primeiro normaliza o texto unindo URLs quebradas
+        # Primeiro normaliza o texto unindo URLs quebradas (tanto /in/ quanto /pub/)
         ln_normalized = re.sub(
-            r'(linkedin\.com/in/[A-Za-z0-9\-_]*)\s*\n\s*([A-Za-z0-9\-_]+)',
+            r'(linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_]*)\s*\n\s*([A-Za-z0-9\-_]+)',
             r'\1\2', text, flags=re.IGNORECASE,
         )
         linkedin_patterns = [
-            r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/[A-Za-z0-9\-_%]+',
-            r'(?:[a-z]{2,3}\.)?linkedin\.com/in/[A-Za-z0-9\-_%]+',
-            r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/pub/[A-Za-z0-9\-_%]+',
+            r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+',
+            r'(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+',
         ]
         for pattern in linkedin_patterns:
             linkedin_match = re.search(pattern, ln_normalized, re.IGNORECASE)
             if linkedin_match:
-                url = linkedin_match.group().rstrip('/,;.)')
-                # Extrair slug canonico
-                slug_match = re.search(
-                    r'linkedin\.com/(?:in|pub)/([A-Za-z0-9\-_%]+)', url, re.IGNORECASE,
-                )
-                if slug_match:
-                    slug = slug_match.group(1).rstrip('-_')
-                    if len(slug) >= 3:
-                        info["linkedin"] = f"https://www.linkedin.com/in/{slug}"
-                        break
-                if not url.startswith('http'):
-                    url = f"https://{url}"
-                info["linkedin"] = url
-                break
+                # Usar o normalizador central - preserva /in/ vs /pub/
+                canonical = normalize_linkedin_url(linkedin_match.group())
+                if canonical:
+                    info["linkedin"] = canonical
+                    break
 
         # GitHub
         github_pattern = r'(?:https?://)?(?:www\.)?github\.com/[\w-]+'
@@ -127,11 +140,14 @@ class ResumeParserService:
                 url = f"https://{url}"
             info["github"] = url
 
-        # CPF
+        # CPF (validacao de checksum mod 11, nao apenas formato)
         cpf_pattern = r'\b\d{3}[.\s]?\d{3}[.\s]?\d{3}[-.\s]?\d{2}\b'
-        cpf_match = re.search(cpf_pattern, text)
-        if cpf_match:
-            info["cpf"] = cpf_match.group().strip()
+        for cpf_match in re.finditer(cpf_pattern, text):
+            candidate = cpf_match.group().strip()
+            if is_valid_cpf(candidate):
+                info["cpf"] = format_cpf(candidate)
+                break
+        # Se nenhum CPF valido, nao registra nada (evita dados invalidos no BD)
 
         # RG
         rg_patterns = [
@@ -144,16 +160,27 @@ class ResumeParserService:
                 info["rg"] = rg_match.group(1).strip() if rg_match.lastindex else rg_match.group().strip()
                 break
 
-        # Data de nascimento (mais padroes)
+        # Data de nascimento (padroes numericos + "15 de janeiro de 1990")
         birth_patterns = [
-            r'(?:nascimento|data\s+de\s+nascimento|born|nasc\.?|d\.?\s*n\.?|dt\.?\s*nasc\.?)[\s:]+(\d{2}[/.-]\d{2}[/.-]\d{4})',
-            r'(\d{2}[/.-]\d{2}[/.-]\d{4})\s*(?:\(?\s*\d+\s*anos\s*\)?)',
-            r'(?:nascido\s+em|nascida\s+em)[\s:]+(\d{2}[/.-]\d{2}[/.-]\d{4})',
+            # Contexto explicito + data numerica
+            r'(?:nascimento|data\s+de\s+nascimento|born|nasc\.?|d\.?\s*n\.?|dt\.?\s*nasc\.?)[\s:]+(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4})',
+            r'(?:nascido\s+em|nascida\s+em)[\s:]+(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4})',
+            # Contexto explicito + data por extenso (15 de janeiro de 1990)
+            r'(?:nascimento|nasc\.?|nascido\s+em|nascida\s+em|data\s+de\s+nascimento)[\s:]+(\d{1,2}\s+de\s+[a-zçãéíóúê]+\s+de\s+\d{4})',
+            # Data + indicador de idade
+            r'(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4})\s*(?:\(?\s*\d{1,2}\s*anos\s*\)?)',
         ]
         for pattern in birth_patterns:
             birth_match = re.search(pattern, text, re.IGNORECASE)
             if birth_match:
-                info["birth_date"] = birth_match.group(1).strip()
+                raw = birth_match.group(1).strip()
+                parsed = parse_birth_date(raw)
+                if parsed is not None:
+                    info["birth_date"] = parsed.strftime("%d/%m/%Y")
+                    break
+                # Se nao conseguiu parse, guardar raw como fallback
+                info["birth_date"] = raw
+                break
                 break
 
         # Nome - Estrategia robusta com protecao contra enderecos e competencias

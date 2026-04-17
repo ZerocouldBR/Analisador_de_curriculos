@@ -134,8 +134,9 @@ def process_document_task(
         try:
             from app.services.resume_enrichment_pipeline import ResumeEnrichmentPipeline
             _update_document_status(db, document_id, "processing", 48, "Executando pipeline de enriquecimento (IA + validacao)")
-            enriched_result = ResumeEnrichmentPipeline.process_sync(
+            enriched_result = ResumeEnrichmentPipeline.process_sync_with_metadata(
                 text,
+                extraction_metadata=ocr_metadata,
                 enable_ai=bool(settings.active_llm_api_key),
                 enable_career_advisory=False,
             )

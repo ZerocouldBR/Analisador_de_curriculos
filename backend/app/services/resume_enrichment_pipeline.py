@@ -32,6 +32,7 @@ class ResumeEnrichmentPipeline:
         text: str,
         enable_ai: bool = True,
         enable_career_advisory: bool = False,
+        extraction_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Executa pipeline completo de processamento.
@@ -40,6 +41,8 @@ class ResumeEnrichmentPipeline:
             text: Texto bruto do curriculo
             enable_ai: Habilitar extracao por IA (requer OpenAI API key)
             enable_career_advisory: Habilitar modulo de consultoria
+            extraction_metadata: Metadados da extracao (ex: ocr_confidence,
+                                 pages_with_ocr). Usado para alertar sobre OCR ruim.
 
         Returns:
             Dict com dados enriquecidos, validacao e metadados
@@ -90,10 +93,18 @@ class ResumeEnrichmentPipeline:
 
         result["data"] = enriched_data
 
-        # ETAPA 4: Scoring de confianca
+        # ETAPA 4: Scoring de confianca (considerando metadata de OCR)
         logger.info("Pipeline: Etapa 4 - Scoring de confianca")
-        validation = ResumeValidationService.validate_resume_data(enriched_data, text)
+        validation = ResumeValidationService.validate_resume_data(
+            enriched_data, text, extraction_metadata=extraction_metadata,
+        )
         result["validation"] = validation
+        if extraction_metadata:
+            result["metadata"]["extraction"] = {
+                k: v for k, v in extraction_metadata.items()
+                if k in {"ocr_confidence", "pages_with_ocr", "pages_with_text",
+                         "pages_processed", "language", "extraction_method"}
+            }
 
         # ETAPA 5: Consultoria de carreira (opcional)
         if enable_career_advisory:
@@ -122,6 +133,53 @@ class ResumeEnrichmentPipeline:
         return result
 
     @staticmethod
+    def process_sync_with_metadata(
+        text: str,
+        extraction_metadata: Optional[Dict[str, Any]] = None,
+        enable_ai: bool = True,
+        enable_career_advisory: bool = False,
+    ) -> Dict[str, Any]:
+        """Versao sync que aceita extraction_metadata (para uso em Celery)."""
+        return ResumeEnrichmentPipeline._run_sync(
+            text=text,
+            enable_ai=enable_ai,
+            enable_career_advisory=enable_career_advisory,
+            extraction_metadata=extraction_metadata,
+        )
+
+    @staticmethod
+    def _run_sync(
+        text: str,
+        enable_ai: bool = True,
+        enable_career_advisory: bool = False,
+        extraction_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Invoca process() de forma sincrona (Celery-friendly)."""
+        coro_kwargs = dict(
+            text=text,
+            enable_ai=enable_ai,
+            enable_career_advisory=enable_career_advisory,
+            extraction_metadata=extraction_metadata,
+        )
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(
+                        asyncio.run,
+                        ResumeEnrichmentPipeline.process(**coro_kwargs),
+                    )
+                    return future.result(timeout=120)
+            return loop.run_until_complete(
+                ResumeEnrichmentPipeline.process(**coro_kwargs)
+            )
+        except RuntimeError:
+            return asyncio.run(
+                ResumeEnrichmentPipeline.process(**coro_kwargs)
+            )
+
+    @staticmethod
     def process_sync(
         text: str,
         enable_ai: bool = True,
@@ -129,32 +187,14 @@ class ResumeEnrichmentPipeline:
     ) -> Dict[str, Any]:
         """
         Versao sincrona do pipeline (para uso em Celery tasks).
+        Retrocompativel - sem extraction_metadata.
         """
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Dentro de um event loop existente (ex: FastAPI)
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(
-                        asyncio.run,
-                        ResumeEnrichmentPipeline.process(
-                            text, enable_ai, enable_career_advisory
-                        )
-                    )
-                    return future.result(timeout=120)
-            else:
-                return loop.run_until_complete(
-                    ResumeEnrichmentPipeline.process(
-                        text, enable_ai, enable_career_advisory
-                    )
-                )
-        except RuntimeError:
-            return asyncio.run(
-                ResumeEnrichmentPipeline.process(
-                    text, enable_ai, enable_career_advisory
-                )
-            )
+        return ResumeEnrichmentPipeline._run_sync(
+            text=text,
+            enable_ai=enable_ai,
+            enable_career_advisory=enable_career_advisory,
+            extraction_metadata=None,
+        )
 
     @staticmethod
     def _convert_regex_to_enriched(regex_data: Dict[str, Any]) -> Dict[str, Any]:

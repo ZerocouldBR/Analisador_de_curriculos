@@ -56,14 +56,66 @@ Sistema on-premises para RH com base central na LAN e agentes Windows nas estaç
 [Windows Agent] --(API + Upload)--> [FastAPI] --(Jobs)--> [Celery Workers]
         |                                |                    |
         |                                |                    +--> [OCR/Parsing/Chunking]
-        |                                |                    +--> [Embeddings OpenAI]
+        |                                |                    +--> [Extração IA + validadores BR]
+        |                                |                    +--> [Análise de fit (jobs)]
+        |                                |                    +--> [Embeddings OpenAI/Anthropic]
         |                                |
         |                                +--> [PostgreSQL + pgvector + tsvector]
-        |                                +--> [NAS/SMB ou MinIO]
+        |                                +--> [NAS/SMB ou MinIO + photos/<id>]
         |
         +--> [Web UI RH] (abre browser apontando para UI)
 
 [Console Admin] <--> [FastAPI] <--> [Serviços/Configurações/LGPD]
+
+# Fluxos públicos (sem autenticação)
+[Candidato] --> [/careers/<company_slug>] --> lista de vagas da empresa
+[Candidato] --> [/careers/<company_slug>/<job_slug>] --> detalhes + aplicar
+[Candidato] --> [/me/<magic_token>] --> portal (editar perfil + sugerir IA)
+```
+
+## Camada pública (PR #33, #34, #35)
+
+Novos endpoints em `/v1/public/...` e páginas frontend `/careers/*` e
+`/me/*` que não exigem autenticação:
+
+- **Painel de vagas por empresa**: branding customizado via
+  `company.settings_json.brand_color`, `company.logo_url`, `public_about`.
+- **Aplicação pública**: upload do currículo + consentimento LGPD → cria
+  `Candidate` + `Document` + `JobApplication`. Backend dispara processamento
+  + análise de fit via IA (`JobFitService`).
+- **Magic link do candidato**: token de 256 bits em `candidate_access_tokens`,
+  expiração configurável (default 72h), revogável pelo RH. Cada edição via
+  portal cria nova versão em `candidate_profiles`.
+
+## Pipeline de extração (pós PR #32 e hardening)
+
+```
+[Documento] -> TextExtractionService
+                 ├── pdfplumber (PDF nativo)
+                 ├── Tesseract OCR (multi-res, multi-PSM, CLAHE, deskew)
+                 └── DOCX parse + imagens embutidas
+
+     -> normalize_text() -> texto limpo
+
+     -> ResumeEnrichmentPipeline
+          ├── 1. ResumeParserService (regex) + brazilian_validators
+          │      (CPF mod 11, email lowercase, phone E.164,
+          │       birth_date flexível, LinkedIn canônico /in/ ou /pub/)
+          ├── 2. ResumeAIExtractionService (LLM multi-pass)
+          │      - prompt anti-competência
+          │      - cross-validate nome vs email prefix
+          │      - descarta CPF inválido com note
+          ├── 3. ResumeValidationService
+          │      - fuzzy match unicode-aware (nome no texto)
+          │      - alerta low_ocr_confidence se < 60%
+          │      - alerta mismatch_with_email se overlap < 30%
+          │      - alerta invalid_checksum em CPF inválido
+          └── 4. PhotoExtractionService (Haar cascade + heurísticas)
+                 -> <storage>/photos/<candidate_id>/profile.jpg
+
+     -> CandidateProfile (versionado) + Candidate.full_name /
+        professional_title / professional_summary /
+        linkedin_url / photo_url
 ```
 
 ## Considerações de segurança e LGPD

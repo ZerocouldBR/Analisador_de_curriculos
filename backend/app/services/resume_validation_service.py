@@ -55,13 +55,19 @@ class ResumeValidationService:
     """
 
     @staticmethod
-    def validate_resume_data(data: Dict[str, Any], raw_text: str = "") -> Dict[str, Any]:
+    def validate_resume_data(
+        data: Dict[str, Any],
+        raw_text: str = "",
+        extraction_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Executa validacao completa dos dados extraidos.
 
         Args:
             data: Dados extraidos do curriculo (formato enriquecido)
             raw_text: Texto bruto original para validacao cruzada
+            extraction_metadata: Metadados da extracao (ex: ocr_confidence, pages_with_ocr).
+                                 Usado para alertar sobre OCR com baixa confianca.
 
         Returns:
             Dict com dados validados, scores e alertas
@@ -69,6 +75,22 @@ class ResumeValidationService:
         personal = data.get("personal_info", {})
         alerts = []
         field_scores = {}
+
+        # Alerta de OCR de baixa qualidade (afeta todos os dados extraidos)
+        if extraction_metadata:
+            ocr_conf = extraction_metadata.get("ocr_confidence")
+            pages_with_ocr = extraction_metadata.get("pages_with_ocr", 0) or 0
+            if ocr_conf is not None and pages_with_ocr > 0 and ocr_conf < 0.6:
+                alerts.append({
+                    "field": "document",
+                    "type": "low_ocr_confidence",
+                    "severity": "high" if ocr_conf < 0.4 else "medium",
+                    "message": (
+                        f"OCR com baixa confianca ({ocr_conf:.0%}) em {pages_with_ocr} "
+                        "pagina(s). Dados extraidos podem conter erros - recomenda-se "
+                        "revisao manual."
+                    ),
+                })
 
         # 1. Validar nome
         name_result = ResumeValidationService._validate_name_field(
@@ -394,27 +416,58 @@ class ResumeValidationService:
         email = personal.get("email", "")
         location = personal.get("location", "")
 
-        # Verificar se nome aparece no texto bruto
-        if name and raw_text and name not in raw_text:
-            # Nome pode ter sido limpo, tentar correspondencia parcial
-            name_parts = name.split()
-            found_parts = sum(1 for part in name_parts if part in raw_text)
-            if found_parts < len(name_parts) * 0.5:
+        # Verificar se nome aparece no texto bruto (fuzzy match unicode-aware)
+        if name and raw_text:
+            from app.services.brazilian_validators import (
+                name_appears_in_text,
+                name_email_match_ratio,
+            )
+            ratio = name_appears_in_text(name, raw_text)
+            if ratio < 0.5:
                 alerts.append({
                     "field": "name",
                     "type": "not_in_text",
-                    "severity": "medium",
-                    "message": "Nome extraido nao corresponde ao texto original.",
+                    "severity": "medium" if ratio < 0.25 else "low",
+                    "message": (
+                        f"Nome extraido '{name}' tem baixa correspondencia "
+                        f"com o texto original ({ratio:.0%} dos tokens encontrados)."
+                    ),
                 })
 
-        # Verificar se email aparece no texto bruto
-        if email and raw_text and email.lower() not in raw_text.lower():
+            # Cross-validate nome vs email prefix
+            if email:
+                email_ratio = name_email_match_ratio(name, email)
+                if email_ratio < 0.3:
+                    alerts.append({
+                        "field": "name",
+                        "type": "mismatch_with_email",
+                        "severity": "medium",
+                        "message": (
+                            f"Nome '{name}' tem baixa sobreposicao com o email "
+                            f"'{email}' ({email_ratio:.0%}). Verifique se o nome esta correto."
+                        ),
+                    })
+
+        # Verificar se email aparece no texto bruto (case-insensitive + trim)
+        if email and raw_text and email.lower().strip() not in raw_text.lower():
             alerts.append({
                 "field": "email",
                 "type": "not_in_text",
                 "severity": "low",
                 "message": "Email extraido nao encontrado no texto original.",
             })
+
+        # Validar CPF com checksum mod 11
+        cpf = personal.get("cpf")
+        if cpf:
+            from app.services.brazilian_validators import is_valid_cpf
+            if not is_valid_cpf(cpf):
+                alerts.append({
+                    "field": "cpf",
+                    "type": "invalid_checksum",
+                    "severity": "high",
+                    "message": f"CPF '{cpf}' nao passa na validacao de checksum (mod 11).",
+                })
 
         # Verificar se localizacao foi extraida como nome
         if name and location and name.lower() == location.lower():
