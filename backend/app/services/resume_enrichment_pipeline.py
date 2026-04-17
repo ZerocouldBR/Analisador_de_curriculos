@@ -203,14 +203,10 @@ class ResumeEnrichmentPipeline:
         """
         personal = regex_data.get("personal_info", {})
 
-        # Converter skills de lista para dict categorizado
+        # Converter skills de lista para dict categorizado usando heuristica
+        from app.services.resume_parser_service import categorize_skills
         raw_skills = regex_data.get("skills", [])
-        skills_dict = {
-            "technical": raw_skills,
-            "soft": [],
-            "tools": [],
-            "frameworks": [],
-        }
+        skills_dict = categorize_skills(raw_skills)
 
         # Converter certifications de lista de strings para lista de dicts
         raw_certs = regex_data.get("certifications", [])
