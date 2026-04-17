@@ -183,8 +183,11 @@ class Settings(BaseSettings):
     # APIs Externas
     # ================================================================
     # -- Provedor de LLM --
+    # Anthropic e o padrao por oferecer prompt caching (reduz ate ~90% do custo
+    # de input tokens quando o mesmo system prompt e reutilizado) e extended
+    # thinking, que melhoram a assertividade da extracao de curriculos.
     llm_provider: LLMProvider = Field(
-        default=LLMProvider.OPENAI,
+        default=LLMProvider.ANTHROPIC,
         description="Provedor de LLM: openai ou anthropic"
     )
 
@@ -217,7 +220,28 @@ class Settings(BaseSettings):
     # ================================================================
     # LLM e Chat
     # ================================================================
-    chat_model: str = Field(default="gpt-4o", description="Modelo do chat LLM")
+    chat_model: str = Field(
+        default="claude-sonnet-4-5",
+        description=(
+            "Modelo do chat LLM. Para Anthropic use claude-sonnet-4-5 ou "
+            "claude-opus-4-5 (alta assertividade). Para OpenAI use gpt-4o."
+        ),
+    )
+    extraction_thinking_budget: int = Field(
+        default=0,
+        description=(
+            "Budget de tokens para extended thinking do Claude na extracao de "
+            "curriculos. 0 desabilita; valores entre 2000-8000 melhoram a "
+            "assertividade em curriculos ambiguos (custo extra por chamada)."
+        ),
+    )
+    extraction_low_confidence_threshold: float = Field(
+        default=0.6,
+        description=(
+            "Limiar de confianca abaixo do qual a extracao e considerada "
+            "insatisfatoria e dispara re-extracao com extended thinking."
+        ),
+    )
     llm_max_retries: int = Field(default=5, description="Maximo de tentativas para consultas LLM")
     llm_max_tokens: int = Field(default=4096, description="Maximo de tokens na resposta LLM")
     llm_temperature: float = Field(default=0.7, description="Temperatura do LLM (0.0-2.0)")
@@ -772,7 +796,14 @@ REGRAS:
     # OCR
     # ================================================================
     ocr_languages: str = Field(default="por+eng", description="Idiomas do Tesseract OCR")
-    ocr_min_confidence: float = Field(default=30.0, description="Confianca minima aceitavel do OCR (%)")
+    ocr_min_confidence: float = Field(
+        default=60.0,
+        description=(
+            "Confianca minima aceitavel do OCR (%). Abaixo desse valor, a IA "
+            "recebe um aviso e a extracao e marcada como baixa qualidade "
+            "(o usuario deve revisar manualmente). Recomendado: >= 60."
+        ),
+    )
     ocr_resolutions: List[int] = Field(
         default=[300, 400, 200],
         description="Resolucoes DPI para tentativa adaptativa de OCR"

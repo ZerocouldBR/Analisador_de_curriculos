@@ -122,6 +122,8 @@ class LLMClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         provider: Optional[LLMProvider] = None,
+        cache_system_prompt: bool = False,
+        thinking_budget: Optional[int] = None,
     ) -> LLMResponse:
         """
         Executa chat completion usando o provedor configurado.
@@ -133,6 +135,11 @@ class LLMClient:
             temperature: Temperatura (padrao: settings.llm_temperature)
             max_tokens: Max tokens (padrao: settings.llm_max_tokens)
             provider: Forcar provedor especifico (padrao: settings.llm_provider)
+            cache_system_prompt: Habilita prompt caching (Anthropic) do system prompt.
+                Reduz custo/latencia quando o mesmo system prompt e reutilizado
+                em multiplas chamadas dentro de ~5 minutos. No-op para OpenAI.
+            thinking_budget: Se fornecido, habilita extended thinking do Claude
+                com esse budget de tokens (ex: 5000). No-op para OpenAI.
 
         Returns:
             LLMResponse com conteudo, tokens e metadados
@@ -143,7 +150,11 @@ class LLMClient:
         _max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
 
         if _provider == LLMProvider.ANTHROPIC:
-            return await self._call_anthropic(messages, _model, _temperature, _max_tokens)
+            return await self._call_anthropic(
+                messages, _model, _temperature, _max_tokens,
+                cache_system_prompt=cache_system_prompt,
+                thinking_budget=thinking_budget,
+            )
         else:
             return await self._call_openai(messages, _model, _temperature, _max_tokens)
 
@@ -181,8 +192,11 @@ class LLMClient:
         model: str,
         temperature: float,
         max_tokens: int,
+        cache_system_prompt: bool = False,
+        thinking_budget: Optional[int] = None,
     ) -> LLMResponse:
-        """Chama Anthropic Messages API"""
+        """Chama Anthropic Messages API com suporte opcional a prompt caching
+        e extended thinking."""
         # Separar system message das demais (Anthropic usa parametro separado)
         system_content = None
         user_messages = []
@@ -225,16 +239,41 @@ class LLMClient:
             "max_tokens": max_tokens,
         }
         if system_content:
-            kwargs["system"] = system_content
+            # Prompt caching: a API da Anthropic aceita "system" como lista de
+            # blocos quando um deles precisa ser marcado para cache.
+            # Reutilizar o system prompt em chamadas subsequentes (ate ~5 min)
+            # economiza ate ~90% do custo de input tokens no bloco cacheado.
+            if cache_system_prompt and len(system_content) >= 1024:
+                kwargs["system"] = [
+                    {
+                        "type": "text",
+                        "text": system_content,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            else:
+                kwargs["system"] = system_content
+
+        # Extended thinking (Claude): quando habilitado, temperatura deve ser 1.0
+        if thinking_budget and thinking_budget > 0:
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
+            kwargs["temperature"] = 1.0  # requisito da API
+            # max_tokens precisa ser > thinking_budget
+            if max_tokens <= thinking_budget:
+                kwargs["max_tokens"] = thinking_budget + 1024
 
         response = await self.anthropic_client.messages.create(**kwargs)
 
+        # Extrair o texto da resposta, pulando blocos "thinking" quando presentes
         content = ""
         if response.content:
-            content = response.content[0].text
+            for block in response.content:
+                block_type = getattr(block, "type", None)
+                if block_type == "text":
+                    content = block.text
+                    break
 
         # Normalizar stop_reason para formato compativel com OpenAI
-        # Anthropic: "end_turn" -> "stop", "max_tokens" -> "length"
         raw_reason = response.stop_reason or "end_turn"
         finish_reason_map = {
             "end_turn": "stop",
@@ -243,12 +282,20 @@ class LLMClient:
         }
         finish_reason = finish_reason_map.get(raw_reason, raw_reason)
 
+        # Contabilizar tokens cacheados quando o caching esta ativo.
+        # A API Anthropic expoe cache_creation_input_tokens e
+        # cache_read_input_tokens alem de input_tokens regulares.
+        usage = response.usage
+        cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        total_input = (usage.input_tokens or 0) + cache_creation + cache_read
+
         return LLMResponse(
             content=content,
             finish_reason=finish_reason,
-            tokens_used=response.usage.input_tokens + response.usage.output_tokens,
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
+            tokens_used=total_input + usage.output_tokens,
+            input_tokens=total_input,
+            output_tokens=usage.output_tokens,
             model=response.model,
             raw=response,
         )
