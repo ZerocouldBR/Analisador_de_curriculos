@@ -422,22 +422,33 @@ class ResumeAIExtractionService:
         validated_personal["location_confidence"] = ai_personal.get("location_confidence", 0.85) if ai_location else (0.7 if regex_location else 0.0)
         validated_personal["full_address"] = ai_personal.get("full_address")
 
-        # --- LINKEDIN URL (com normalizacao e confianca) ---
+        # --- LINKEDIN URL (com normalizacao, confianca e valida afinidade com nome) ---
         ai_linkedin = ResumeAIExtractionService._normalize_linkedin_url(
             ai_personal.get("linkedin")
         )
         regex_linkedin = ResumeAIExtractionService._normalize_linkedin_url(
             regex_personal.get("linkedin")
         )
-        # Fallback: buscar diretamente no texto bruto
-        fallback_linkedin = ResumeAIExtractionService._find_linkedin_in_text(raw_text)
+        # Busca todas as URLs do LinkedIn no texto (pode haver multiplas em PDFs)
+        all_linkedin_urls = ResumeAIExtractionService._find_all_linkedin_urls(raw_text)
 
-        chosen_linkedin = ai_linkedin or regex_linkedin or fallback_linkedin
+        # Escolhe a melhor URL com base em afinidade com o nome do candidato
+        candidate_name_for_match = validated_personal.get("name")
+        chosen_linkedin = ResumeAIExtractionService._pick_best_linkedin(
+            candidate_name_for_match,
+            [ai_linkedin, regex_linkedin, *all_linkedin_urls],
+        )
         validated_personal["linkedin"] = chosen_linkedin
         if chosen_linkedin:
             validated_personal["linkedin_confidence"] = (
-                ai_personal.get("linkedin_confidence", 0.9) if ai_linkedin else 0.85
+                ai_personal.get("linkedin_confidence", 0.9)
+                if chosen_linkedin == ai_linkedin else 0.85
             )
+            if chosen_linkedin != ai_linkedin and ai_linkedin:
+                notes.append(
+                    f"LinkedIn da IA '{ai_linkedin}' descartado por baixa afinidade com nome; "
+                    f"usando '{chosen_linkedin}'"
+                )
         else:
             validated_personal["linkedin_confidence"] = 0.0
 
@@ -487,7 +498,98 @@ class ResumeAIExtractionService:
         # --- FOTO DO CANDIDATO ---
         validated_personal["has_photo"] = bool(ai_personal.get("has_photo"))
 
-        # Reconciliar demais secoes (priorizar IA)
+        # --- Sanitizacao de skills, certificacoes e idiomas ---
+        # A IA as vezes retorna frases narrativas inteiras como skill ou certificacao,
+        # ou idiomas duplicados (Portugues + Portuguese). Pos-processa para garantir
+        # itens limpos e canonicos.
+        from app.services.resume_parser_service import (
+            _is_clean_list_item,
+            _canonical_language,
+            _canonical_level,
+        )
+
+        def _clean_list(items, max_len=50):
+            if not items:
+                return []
+            seen = set()
+            out = []
+            for it in items:
+                if not isinstance(it, str):
+                    continue
+                candidate = it.strip()
+                if not _is_clean_list_item(candidate, max_len=max_len):
+                    continue
+                key = candidate.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(candidate)
+            return out
+
+        def _clean_skills(skills_obj):
+            if not isinstance(skills_obj, dict):
+                return {"technical": [], "soft": [], "tools": [], "frameworks": []}
+            return {
+                "technical": _clean_list(skills_obj.get("technical"), max_len=50),
+                "soft": _clean_list(skills_obj.get("soft"), max_len=60),
+                "tools": _clean_list(skills_obj.get("tools"), max_len=50),
+                "frameworks": _clean_list(skills_obj.get("frameworks"), max_len=50),
+            }
+
+        def _clean_certifications(certs):
+            if not certs:
+                return []
+            seen = set()
+            out = []
+            for c in certs:
+                if isinstance(c, dict):
+                    name = (c.get("name") or "").strip()
+                    if not _is_clean_list_item(name, max_len=100, min_len=4):
+                        continue
+                    key = name.lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    out.append(c)
+                elif isinstance(c, str):
+                    name = c.strip()
+                    if not _is_clean_list_item(name, max_len=100, min_len=4):
+                        continue
+                    key = name.lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    out.append({"name": name})
+            return out
+
+        def _clean_languages(langs):
+            if not langs:
+                return []
+            seen = set()
+            out = []
+            for lg in langs:
+                if not isinstance(lg, dict):
+                    continue
+                canonical = _canonical_language(lg.get("language"))
+                if not canonical or canonical in seen:
+                    continue
+                seen.add(canonical)
+                out.append({
+                    "language": canonical,
+                    "level": _canonical_level(lg.get("level")),
+                })
+            return out
+
+        # Reconciliar demais secoes (priorizar IA com sanitizacao)
+        raw_skills = ai.get("skills") or {
+            "technical": regex_data.get("skills", []),
+            "soft": [],
+            "tools": [],
+            "frameworks": [],
+        }
+        raw_certs = ai.get("certifications") or regex_data.get("certifications", [])
+        raw_langs = ai.get("languages") or regex_data.get("languages", [])
+
         validated = {
             "personal_info": validated_personal,
             "professional_objective": ai.get("professional_objective", {
@@ -497,14 +599,9 @@ class ResumeAIExtractionService:
             }),
             "experiences": ai.get("experiences", regex_data.get("experiences", [])),
             "education": ai.get("education", regex_data.get("education", [])),
-            "skills": ai.get("skills", {
-                "technical": regex_data.get("skills", []),
-                "soft": [],
-                "tools": [],
-                "frameworks": [],
-            }),
-            "languages": ai.get("languages", regex_data.get("languages", [])),
-            "certifications": ai.get("certifications") or regex_data.get("certifications", []),
+            "skills": _clean_skills(raw_skills),
+            "languages": _clean_languages(raw_langs),
+            "certifications": _clean_certifications(raw_certs),
             "licenses": ai.get("licenses", regex_data.get("licenses", [])),
             "additional_info": ai.get("additional_info", {
                 "availability": regex_data.get("availability", {}),
@@ -587,13 +684,13 @@ class ResumeAIExtractionService:
         def _is_valid_name(text: str) -> bool:
             if not text:
                 return False
-            text = text.strip()
+            text = text.strip().rstrip('.,;:')
             # Nome deve ter pelo menos 2 palavras
             words = text.split()
             if len(words) < 2:
                 return False
-            # Nome nao pode ser muito longo (mais de 8 palavras e suspeito)
-            if len(words) > 8:
+            # Nome nao pode ser muito longo (mais de 6 palavras e suspeito)
+            if len(words) > 6:
                 return False
             # Nao pode conter numeros
             if re.search(r'\d', text):
@@ -604,12 +701,34 @@ class ResumeAIExtractionService:
             # Nao pode ser competencia/titulo tecnico
             if _is_competency_or_title(text):
                 return False
-            # Cada palavra deve comecar com letra (maiuscula idealmente)
-            # mas aceitamos preposicoes em minuscula (de, da, do, dos, das, e)
-            prepositions = {'de', 'da', 'do', 'dos', 'das', 'e', 'di', 'del'}
+            # Rejeita frases narrativas: verbos/stopwords tipicas de prosa
+            narrative_markers = {
+                'que', 'para', 'com', 'pelo', 'pela', 'sobre', 'entre',
+                'tambem', 'também', 'mais', 'menos', 'muito',
+                'geram', 'gera', 'gerar', 'faz', 'fazer', 'tem', 'ter',
+                'sao', 'são', 'foi', 'foram', 'esta', 'está', 'estao',
+                'impacto', 'resultado', 'negocio', 'negócio',
+            }
+            words_lower = {w.lower().rstrip('.,;:') for w in words}
+            if words_lower & narrative_markers:
+                return False
+            # Prepositivos aceitaveis em nomes
+            prepositions = {'de', 'da', 'do', 'dos', 'das', 'e', 'di', 'del', 'van', 'von'}
+            # Cada palavra deve comecar com maiuscula (nome proprio), exceto preposicoes
             for word in words:
-                if word.lower() not in prepositions and not word[0].isalpha():
+                w = word.strip('.,;:')
+                if not w:
                     return False
+                if w.lower() in prepositions:
+                    continue
+                if not w[0].isupper():
+                    return False
+                if not w[0].isalpha():
+                    return False
+            # Pelo menos uma palavra nao-preposicao com >=2 chars (evita iniciais soltas)
+            non_prep = [w.strip('.,;:') for w in words if w.lower().strip('.,;:') not in prepositions]
+            if not any(len(w) >= 2 for w in non_prep):
+                return False
             return True
 
         # Caso 1: IA forneceu nome com boa confianca e passa validacao
@@ -676,7 +795,7 @@ class ResumeAIExtractionService:
                 "note": "Nome nao identificado por nenhum metodo.",
             }
 
-        # Caso default: IA com baixa confianca
+        # Caso default: IA com baixa confianca mas passa validacao estrutural
         if ai_name and _is_valid_name(ai_name):
             return {
                 "value": ai_name.strip(),
@@ -684,11 +803,25 @@ class ResumeAIExtractionService:
                 "source": "ai_low_confidence",
             }
 
+        # Ultimo fallback: tentar heuristica de primeiras linhas antes de desistir
+        fallback = ResumeAIExtractionService._extract_name_from_first_lines(raw_text)
+        if fallback:
+            return {
+                "value": fallback,
+                "confidence": 0.4,
+                "source": "heuristic_fallback",
+                "note": "Nome da IA/regex invalido - usando heuristica.",
+            }
+
+        # Nenhum candidato passou - retornar None ao inves de propagar dado ruim
         return {
-            "value": ai_name or regex_name,
-            "confidence": 0.3,
-            "source": "uncertain",
-            "note": "Baixa confianca na extracao do nome.",
+            "value": None,
+            "confidence": 0.0,
+            "source": "none",
+            "note": (
+                f"Nome nao identificado. IA retornou '{ai_name}' (invalido); "
+                f"regex retornou '{regex_name}' (invalido)."
+            ),
         }
 
     @staticmethod
@@ -730,6 +863,86 @@ class ResumeAIExtractionService:
                 return ResumeAIExtractionService._normalize_linkedin_url(match.group(0))
 
         return None
+
+    @staticmethod
+    def _find_all_linkedin_urls(text: str) -> List[str]:
+        """Retorna TODAS as URLs do LinkedIn no texto, normalizadas e sem duplicatas."""
+        if not text:
+            return []
+        normalized = re.sub(
+            r'(linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_]*)\s*\n\s*([A-Za-z0-9\-_]+)',
+            r'\1\2', text, flags=re.IGNORECASE,
+        )
+        normalized = re.sub(
+            r'([A-Za-z0-9\-_]+)-\s*\n\s*([A-Za-z0-9\-_]+)',
+            r'\1-\2', normalized,
+        )
+        pattern = r'(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+'
+        seen: set = set()
+        out: List[str] = []
+        for match in re.finditer(pattern, normalized, re.IGNORECASE):
+            canonical = ResumeAIExtractionService._normalize_linkedin_url(match.group(0))
+            if canonical and canonical not in seen:
+                seen.add(canonical)
+                out.append(canonical)
+        return out
+
+    @staticmethod
+    def _linkedin_slug(url: Optional[str]) -> Optional[str]:
+        """Extrai o slug de uma URL do LinkedIn."""
+        if not url:
+            return None
+        m = re.search(r'linkedin\.com/(?:in|pub)/([A-Za-z0-9\-_%]+)', url, re.IGNORECASE)
+        return m.group(1).lower() if m else None
+
+    @staticmethod
+    def _pick_best_linkedin(
+        candidate_name: Optional[str],
+        urls: List[Optional[str]],
+    ) -> Optional[str]:
+        """
+        Escolhe a melhor URL do LinkedIn com base em afinidade com o nome do candidato.
+
+        Se so houver uma URL, retorna ela. Se houver multiplas, escolhe a que tem
+        maior sobreposicao de tokens entre o slug e o nome do candidato.
+        """
+        # Remove None e duplicatas preservando ordem
+        seen: set = set()
+        unique_urls: List[str] = []
+        for u in urls:
+            if u and u not in seen:
+                seen.add(u)
+                unique_urls.append(u)
+
+        if not unique_urls:
+            return None
+        if len(unique_urls) == 1 or not candidate_name:
+            return unique_urls[0]
+
+        # Tokens do nome (ignora preposicoes)
+        preps = {'de', 'da', 'do', 'dos', 'das', 'e', 'di', 'del', 'van', 'von'}
+        name_tokens = {
+            t.lower()
+            for t in re.split(r'\s+', candidate_name.strip())
+            if t and t.lower() not in preps and len(t) >= 2
+        }
+
+        if not name_tokens:
+            return unique_urls[0]
+
+        def score(url: str) -> int:
+            slug = ResumeAIExtractionService._linkedin_slug(url) or ''
+            # Normaliza slug: separa por hifens/underscores e ignora sufixos alfanumericos
+            slug_tokens = {
+                t for t in re.split(r'[-_]', slug)
+                if t and len(t) >= 2 and not re.fullmatch(r'[0-9a-f]{5,}', t)
+            }
+            return len(name_tokens & slug_tokens)
+
+        scored = sorted(unique_urls, key=score, reverse=True)
+        best = scored[0]
+        # Se o melhor tiver score 0, ainda assim preferimos o primeiro (ordem: ai > regex > texto)
+        return best if score(best) > 0 else unique_urls[0]
 
     @staticmethod
     def _extract_name_from_first_lines(text: str) -> Optional[str]:
