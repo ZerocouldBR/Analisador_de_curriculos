@@ -530,6 +530,10 @@ class ProviderConfig(Base):
     # Relacionamentos
     company = relationship("Company", back_populates="sourcing_configs")
 
+    __table_args__ = (
+        Index("idx_provider_config_unique", "company_id", "provider_name", unique=True),
+    )
+
 
 # ================================================================
 # Portal do Candidato (Magic Link) - PR2
@@ -650,8 +654,4 @@ class JobApplication(Base):
     __table_args__ = (
         Index("idx_application_job_stage", "job_id", "stage"),
         Index("idx_application_email_job", "applicant_email", "job_id"),
-    )
-
-    __table_args__ = (
-        Index("idx_provider_config_unique", "company_id", "provider_name", unique=True),
     )
