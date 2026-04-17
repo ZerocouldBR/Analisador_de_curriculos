@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
+  Avatar,
   Box,
   Paper,
   Typography,
@@ -212,10 +213,35 @@ const CandidateDetailPage: React.FC = () => {
             <ArrowBack />
           </IconButton>
         </Tooltip>
+        {(enrichedProfile?.personal_info?.has_photo ||
+          (candidate as any)?.photo_url) && (
+          <Avatar
+            src={apiService.getCandidatePhotoUrl(candidate.id)}
+            alt={candidate.full_name}
+            sx={{
+              width: 72,
+              height: 72,
+              border: '2px solid',
+              borderColor: 'divider',
+            }}
+            imgProps={{
+              onError: (e: any) => {
+                e.target.style.display = 'none';
+              },
+            }}
+          >
+            {candidate.full_name?.charAt(0)?.toUpperCase()}
+          </Avatar>
+        )}
         <Box flexGrow={1}>
           <Typography variant="h4" fontWeight={700}>
             {candidate.full_name}
           </Typography>
+          {enrichedProfile?.professional_objective?.title && (
+            <Typography variant="subtitle1" color="primary" fontWeight={500}>
+              {enrichedProfile.professional_objective.title}
+            </Typography>
+          )}
           <Typography variant="body2" color="text.secondary">
             Cadastrado em {new Date(candidate.created_at).toLocaleDateString('pt-BR')}
           </Typography>

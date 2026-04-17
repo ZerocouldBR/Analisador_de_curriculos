@@ -522,6 +522,10 @@ class ApiService {
     return `${this.api.defaults.baseURL}/v1/companies/${companyId}/logo`;
   }
 
+  getCandidatePhotoUrl(candidateId: number): string {
+    return `${this.api.defaults.baseURL}/v1/candidates/${candidateId}/photo`;
+  }
+
   // ==================== VectorDB ====================
   async refreshEmbeddings(): Promise<any> {
     const response = await this.api.post('/v1/vectordb/initialize', {}, { timeout: 300000 });

@@ -431,11 +431,14 @@ export interface EnrichedPersonalInfo {
   location_confidence?: number;
   full_address?: string;
   linkedin?: string;
+  linkedin_confidence?: number;
   github?: string;
   portfolio?: string;
   cpf?: string;
   rg?: string;
   birth_date?: string;
+  photo_url?: string;
+  has_photo?: boolean;
 }
 
 export interface ProfessionalObjective {

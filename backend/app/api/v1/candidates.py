@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel
+import mimetypes
 
 from app.db.database import get_db
 from app.schemas.candidate import (
@@ -11,6 +13,7 @@ from app.schemas.candidate import (
     DocumentResponse
 )
 from app.services.candidate_service import CandidateService
+from app.services.storage_service import storage_service
 from app.core.config import settings
 from app.core.dependencies import get_current_user, require_permission
 from app.db.models import User, Candidate, Experience, CandidateProfile, Chunk
@@ -161,6 +164,43 @@ def delete_candidate(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Candidato {candidate_id} não encontrado"
         )
+
+
+@router.get("/{candidate_id}/photo")
+def get_candidate_photo(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("candidates.read")),
+):
+    """
+    Retorna a foto de perfil do candidato (extraida automaticamente do curriculo).
+
+    Retorna 404 se o candidato nao tem foto armazenada.
+
+    **Requer permissao:** candidates.read
+    """
+    candidate = CandidateService.get_candidate(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidato nao encontrado")
+
+    if settings.multi_tenant_enabled and not current_user.is_superuser and current_user.company_id:
+        if candidate.company_id != current_user.company_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidato nao encontrado")
+
+    photo_rel = getattr(candidate, "photo_url", None)
+    if not photo_rel:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Foto nao disponivel")
+
+    try:
+        absolute = storage_service.get_absolute_path(photo_rel)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Foto nao disponivel")
+
+    if not absolute.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Foto nao disponivel")
+
+    mime, _ = mimetypes.guess_type(str(absolute))
+    return FileResponse(absolute, media_type=mime or "image/jpeg")
 
 
 # Endpoints para gerenciar documentos/currículos
@@ -373,6 +413,13 @@ def get_enriched_profile(
                 "phone": candidate.phone,
                 "location": f"{candidate.city}, {candidate.state}" if candidate.city else None,
                 "cpf": candidate.doc_id,
+                "linkedin": getattr(candidate, "linkedin_url", None),
+                "photo_url": getattr(candidate, "photo_url", None),
+                "has_photo": bool(getattr(candidate, "photo_url", None)),
+            },
+            professional_objective={
+                "title": getattr(candidate, "professional_title", None),
+                "summary": getattr(candidate, "professional_summary", None),
             },
             validation={
                 "overall_confidence": 0.3,
@@ -388,11 +435,20 @@ def get_enriched_profile(
     if "data" in profile_data and "validation" in profile_data:
         # Enriched pipeline format
         enriched = profile_data.get("data", {})
+        personal_info = dict(enriched.get("personal_info", {}))
+        # Enriquecer com photo_url salvo no Candidate (se houver)
+        photo_rel = getattr(candidate, "photo_url", None)
+        if photo_rel:
+            personal_info["photo_url"] = photo_rel
+            personal_info["has_photo"] = True
+        # Fallback para linkedin vindo do Candidate
+        if not personal_info.get("linkedin") and getattr(candidate, "linkedin_url", None):
+            personal_info["linkedin"] = candidate.linkedin_url
         return EnrichedResumeResponse(
             candidate_id=candidate_id,
             extraction_method=profile_data.get("extraction_method", "unknown"),
             ai_enhanced=profile_data.get("ai_enhanced", False),
-            personal_info=enriched.get("personal_info", {}),
+            personal_info=personal_info,
             professional_objective=enriched.get("professional_objective", {}),
             experiences=enriched.get("experiences", []),
             education=enriched.get("education", []),
@@ -407,23 +463,26 @@ def get_enriched_profile(
     else:
         # Legacy format - convert to enriched response
         personal = profile_data.get("personal_info", {})
+        photo_rel = getattr(candidate, "photo_url", None)
         return EnrichedResumeResponse(
             candidate_id=candidate_id,
             extraction_method="regex_legacy",
             personal_info={
-                "name": personal.get("name"),
-                "email": personal.get("email"),
-                "phone": personal.get("phone"),
+                "name": personal.get("name") or candidate.full_name,
+                "email": personal.get("email") or candidate.email,
+                "phone": personal.get("phone") or candidate.phone,
                 "location": personal.get("location"),
-                "linkedin": personal.get("linkedin"),
+                "linkedin": personal.get("linkedin") or getattr(candidate, "linkedin_url", None),
                 "github": personal.get("github"),
-                "cpf": personal.get("cpf"),
+                "cpf": personal.get("cpf") or candidate.doc_id,
                 "rg": personal.get("rg"),
                 "birth_date": personal.get("birth_date"),
+                "photo_url": photo_rel,
+                "has_photo": bool(photo_rel),
             },
             professional_objective={
-                "title": None,
-                "summary": profile_data.get("summary"),
+                "title": getattr(candidate, "professional_title", None),
+                "summary": getattr(candidate, "professional_summary", None) or profile_data.get("summary"),
             },
             experiences=profile_data.get("experiences", []),
             education=profile_data.get("education", []),

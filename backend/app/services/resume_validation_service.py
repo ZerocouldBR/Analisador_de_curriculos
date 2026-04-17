@@ -31,6 +31,20 @@ ADDRESS_PATTERNS = [
     r'\b(?:quadra|lote|bloco|conjunto|apt[o.]?|sala|andar)\b',
 ]
 
+# Indicadores de competencia/titulo profissional - NUNCA podem ser nomes
+COMPETENCY_PATTERNS = [
+    r'\bgest[aã]o\s+d[eo]\b',
+    r'\b(?:gerenciamento|administra[çc][aã]o)\s+d[eo]\b',
+    r'\b(?:especialista|especializado)\s+em\b',
+    r'\b(?:lideran[çc]a|coordena[çc][aã]o)\s+(?:de|em)\b',
+    r'\b(?:desenvolvedor|desenvolvimento)\s+(?:de|em|web|mobile|backend|frontend)\b',
+    r'\b(?:engenheiro|analista|gerente|diretor|coordenador|supervisor|operador|assistente)\s+(?:de|em)\b',
+    r'\b(?:senior|junior|pleno)\s+(?:project|software|data|product)\b',
+    r'\b(?:project|product|program)\s+manager\b',
+    r'\b(?:active\s+directory|workspace\s+one|data\s+center)\b',
+    r'\bsap\s+\w+\b',
+]
+
 # Preposicoes validas em nomes brasileiros
 NAME_PREPOSITIONS = {'de', 'da', 'do', 'dos', 'das', 'e', 'di', 'del'}
 
@@ -80,6 +94,14 @@ class ResumeValidationService:
         if phone_result.get("alert"):
             alerts.append(phone_result["alert"])
 
+        # 3b. Validar LinkedIn
+        linkedin_result = ResumeValidationService._validate_linkedin_field(
+            personal.get("linkedin")
+        )
+        field_scores["linkedin"] = linkedin_result["confidence"]
+        if linkedin_result.get("alert"):
+            alerts.append(linkedin_result["alert"])
+
         # 4. Validar experiencias
         exp_result = ResumeValidationService._validate_experiences(
             data.get("experiences", [])
@@ -121,16 +143,17 @@ class ResumeValidationService:
         cross_alerts = ResumeValidationService._cross_validate(data, raw_text)
         alerts.extend(cross_alerts)
 
-        # Calcular score geral
+        # Calcular score geral (agora inclui LinkedIn)
         weights = {
-            "name": 0.25,
-            "email": 0.15,
-            "phone": 0.10,
+            "name": 0.22,
+            "email": 0.13,
+            "phone": 0.08,
+            "linkedin": 0.05,
             "experiences": 0.20,
             "education": 0.10,
             "skills": 0.10,
             "languages": 0.05,
-            "certifications": 0.05,
+            "certifications": 0.07,
         }
 
         overall_score = sum(
@@ -179,6 +202,17 @@ class ResumeValidationService:
                     "severity": "critical",
                     "message": f"O nome '{name}' parece ser um endereco, nao um nome de pessoa.",
                     "suggestion": "Verifique o documento original e corrija manualmente.",
+                }}
+
+        # Verificar se e uma competencia/titulo
+        for pattern in COMPETENCY_PATTERNS:
+            if re.search(pattern, name, re.IGNORECASE):
+                return {"confidence": 0.1, "alert": {
+                    "field": "name",
+                    "type": "competency_as_name",
+                    "severity": "critical",
+                    "message": f"O nome '{name}' parece ser uma competencia ou titulo profissional, nao um nome de pessoa.",
+                    "suggestion": "Reprocesse o documento - o extrator confundiu competencias com nome.",
                 }}
 
         # Verificar formato basico de nome
@@ -269,6 +303,40 @@ class ResumeValidationService:
             "type": "unusual_format",
             "severity": "low",
             "message": f"Telefone '{phone}' tem formato incomum.",
+        }}
+
+    @staticmethod
+    def _validate_linkedin_field(url: Optional[str]) -> Dict[str, Any]:
+        """Valida URL do LinkedIn."""
+        if not url:
+            return {"confidence": 0.0}
+
+        url_str = str(url).strip()
+        if not url_str:
+            return {"confidence": 0.0}
+
+        # URL canonica com /in/
+        if re.match(r'^https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/[\w\-_%]+', url_str, re.IGNORECASE):
+            return {"confidence": 0.95}
+
+        # URL com /pub/
+        if re.match(r'^https?://(?:[a-z]{2,3}\.)?linkedin\.com/pub/[\w\-_%]+', url_str, re.IGNORECASE):
+            return {"confidence": 0.85}
+
+        # Parcial ou nao padrao
+        if 'linkedin.com' in url_str.lower():
+            return {"confidence": 0.5, "alert": {
+                "field": "linkedin",
+                "type": "partial_url",
+                "severity": "low",
+                "message": f"URL do LinkedIn '{url_str}' pode estar incompleta.",
+            }}
+
+        return {"confidence": 0.2, "alert": {
+            "field": "linkedin",
+            "type": "invalid_format",
+            "severity": "medium",
+            "message": f"URL do LinkedIn '{url_str}' tem formato invalido.",
         }}
 
     @staticmethod

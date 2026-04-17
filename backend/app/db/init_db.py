@@ -294,6 +294,12 @@ def init_db():
         print(f"  Error creating tables: {e}")
         raise
 
+    # 3b. Migracao leve: adicionar colunas novas em tabelas existentes
+    try:
+        apply_lightweight_migrations()
+    except Exception as e:
+        print(f"  Lightweight migration warning: {e}")
+
     # 4. Criar indices vetoriais (para provedores que usam PostgreSQL local)
     # pgvector sempre cria indices no PostgreSQL local
     # supabase cria indices se usar o mesmo PostgreSQL (pgvector_database_url == database_url)
@@ -321,6 +327,34 @@ def init_db():
     print("\n  Database initialized successfully!")
     print(f"  Vector DB providers: {', '.join(providers)}")
     print(f"  To init roles: python -m app.db.init_roles")
+
+
+def apply_lightweight_migrations():
+    """
+    Aplica migracoes leves adicionando colunas novas em tabelas ja existentes.
+
+    Usa ALTER TABLE ADD COLUMN IF NOT EXISTS (Postgres 9.6+) para ser seguro
+    em bancos pre-existentes. Nao substitui uma ferramenta de migracao completa,
+    mas evita a necessidade de Alembic para adicoes simples.
+    """
+    schema_prefix = _schema_prefix()
+    candidates_table = f"{schema_prefix}candidates"
+
+    migrations = [
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS professional_title VARCHAR",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS professional_summary TEXT",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR",
+        f"ALTER TABLE {candidates_table} ADD COLUMN IF NOT EXISTS photo_url VARCHAR",
+    ]
+
+    with engine.begin() as connection:
+        for stmt in migrations:
+            try:
+                connection.execute(text(stmt))
+            except Exception as e:
+                print(f"  [migration] ignorada ({stmt[:60]}...): {e}")
+
+    print("  Lightweight migrations applied (candidates: professional_title, professional_summary, linkedin_url, photo_url)")
 
 
 def drop_all_tables():
