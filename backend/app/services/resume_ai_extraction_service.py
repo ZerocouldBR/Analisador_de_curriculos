@@ -126,14 +126,14 @@ Exemplo C - LinkedIn do candidato vs perfis recomendados:
 
 Exemplo D - Idiomas duplicados:
   Texto: "Languages\\nPortuguese (Native)\\nEnglish - Advanced\\nPortugues: Nativo"
-  ERRADO: [{"language": "Portuguese", "level": "Native"}, {"language": "Portugues", "level": "Nativo"}, {"language": "English", "level": "Advanced"}]
-  CORRETO: [{"language": "Portugues", "level": "Nativo"}, {"language": "Ingles", "level": "Avancado"}]
+  ERRADO: [{{"language": "Portuguese", "level": "Native"}}, {{"language": "Portugues", "level": "Nativo"}}, {{"language": "English", "level": "Advanced"}}]
+  CORRETO: [{{"language": "Portugues", "level": "Nativo"}}, {{"language": "Ingles", "level": "Avancado"}}]
   REGRA: use sempre o nome canonico em portugues (Portugues, Ingles, Espanhol, Frances, Alemao, Italiano, Chines, Japones) e nivel em portugues (Nativo, Fluente, Avancado, Intermediario, Basico).
 
 Exemplo E - Certificacoes com artefatos de PDF:
   Texto: "Certificacoes\\nAWS Certified Solutions Architect - Associate\\nPage 1 of 9\\n[TABELA]\\nPMP\\nContato"
   ERRADO: ["AWS Certified Solutions Architect - Associate", "Page 1 of 9", "[TABELA]", "PMP", "Contato"]
-  CORRETO: [{"name": "AWS Certified Solutions Architect - Associate", "institution": "AWS"}, {"name": "PMP"}]
+  CORRETO: [{{"name": "AWS Certified Solutions Architect - Associate", "institution": "AWS"}}, {{"name": "PMP"}}]
   REGRA: ignore paginacao ("Page X of Y", "Pagina X de Y"), placeholders ("[TABELA]", "[IMAGEM]") e titulos de secao ("Contato", "Resumo").
 
 FORMATO DE RESPOSTA (JSON):

@@ -99,16 +99,39 @@ class SalaryExpectationsSchema(_StrictBase):
             return None
         if isinstance(v, (int, float)):
             return float(v)
-        if isinstance(v, str):
-            import re
+        if not isinstance(v, str):
+            return None
 
-            # remove R$, espacos, pontos de milhar; troca virgula por ponto
-            cleaned = re.sub(r"[^0-9,.-]", "", v).replace(".", "").replace(",", ".")
-            try:
-                return float(cleaned) if cleaned else None
-            except ValueError:
-                return None
-        return None
+        import re
+
+        # Remove tudo exceto digitos, ponto, virgula e sinal negativo
+        cleaned = re.sub(r"[^0-9,.-]", "", v)
+        if not cleaned or cleaned in {"-", ".", ","}:
+            return None
+
+        # Determina qual e o separador decimal:
+        # - Se tem ambos "," e ".": o ULTIMO que aparece e decimal
+        # - Se tem apenas um deles: ambiguo, mas se ha >=3 digitos apos, e
+        #   separador de milhar; caso contrario e decimal
+        last_comma = cleaned.rfind(",")
+        last_dot = cleaned.rfind(".")
+
+        if last_comma >= 0 and last_dot >= 0:
+            if last_comma > last_dot:
+                # formato BR: 1.234,56
+                cleaned = cleaned.replace(".", "").replace(",", ".")
+            else:
+                # formato US: 1,234.56
+                cleaned = cleaned.replace(",", "")
+        elif last_comma >= 0:
+            # apenas virgula: decimal BR
+            cleaned = cleaned.replace(",", ".")
+        # apenas ponto: ja esta em formato correto (ex: "8500.00")
+
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -233,6 +256,31 @@ class ResumeExtractionSchema(_StrictBase):
     certifications: List[CertificationSchema] = Field(default_factory=list)
     licenses: List[LicenseSchema] = Field(default_factory=list)
     additional_info: AdditionalInfoSchema = Field(default_factory=AdditionalInfoSchema)
+
+    @field_validator(
+        "personal_info",
+        "professional_objective",
+        "salary_expectations",
+        "skills",
+        "additional_info",
+        mode="before",
+    )
+    @classmethod
+    def _none_to_empty_dict(cls, v: Any) -> Any:
+        """Converte None em {} para permitir que os defaults dos submodelos sejam aplicados."""
+        return {} if v is None else v
+
+    @field_validator(
+        "experiences",
+        "education",
+        "languages",
+        "certifications",
+        "licenses",
+        mode="before",
+    )
+    @classmethod
+    def _none_to_empty_list(cls, v: Any) -> Any:
+        return [] if v is None else v
 
 
 def validate_ai_extraction(raw: Dict[str, Any]) -> Dict[str, Any]:
