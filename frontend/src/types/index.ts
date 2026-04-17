@@ -769,3 +769,47 @@ export interface ImproveResponse {
   ai_available: boolean;
   error?: string;
 }
+
+// ==================== Candidate Portal Jobs (PR3) ====================
+export interface PortalJobListItem {
+  slug: string;
+  title: string;
+  location?: string;
+  employment_type?: string;
+  seniority_level?: string;
+  work_mode?: string;
+  salary_display?: string;
+  published_at?: string;
+  already_applied: boolean;
+  my_application_id?: number;
+  my_application_stage?: string;
+}
+
+export interface PortalJobsListResponse {
+  total: number;
+  jobs: PortalJobListItem[];
+}
+
+export interface PortalMyApplication {
+  id: number;
+  job_slug: string;
+  job_title: string;
+  stage: string;
+  fit_status: string;
+  fit_score?: number;
+  fit_summary?: string;
+  fit_recommendation?: string;
+  created_at: string;
+}
+
+export interface PortalApplicationsListResponse {
+  total: number;
+  applications: PortalMyApplication[];
+}
+
+export interface PortalApplyResponse {
+  id: number;
+  message: string;
+  fit_status: string;
+  already_existed: boolean;
+}

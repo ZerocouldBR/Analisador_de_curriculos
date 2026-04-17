@@ -41,6 +41,7 @@ import {
 } from '@mui/icons-material';
 import { apiService } from '../services/api';
 import { ImproveResponse, PortalExperience, PortalProfile } from '../types';
+import PortalJobsSection from '../components/PortalJobsSection';
 
 /**
  * Portal publico do candidato (magic link).
@@ -529,6 +530,9 @@ const CandidatePortalPage: React.FC = () => {
               </Box>
             </Paper>
           )}
+
+          {/* Vagas e candidaturas (PR3) */}
+          {token && <PortalJobsSection token={token} />}
         </Container>
 
         {/* Dialog de sugestao */}

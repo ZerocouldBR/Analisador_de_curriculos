@@ -782,6 +782,35 @@ class ApiService {
     return response.data;
   }
 
+  // Vagas e candidaturas via portal (PR3)
+  async listPortalJobs(token: string): Promise<import('../types').PortalJobsListResponse> {
+    const response = await this.api.get<import('../types').PortalJobsListResponse>(
+      `/v1/public/me/${token}/jobs`,
+    );
+    return response.data;
+  }
+
+  async listPortalMyApplications(
+    token: string,
+  ): Promise<import('../types').PortalApplicationsListResponse> {
+    const response = await this.api.get<import('../types').PortalApplicationsListResponse>(
+      `/v1/public/me/${token}/applications`,
+    );
+    return response.data;
+  }
+
+  async applyFromPortal(
+    token: string,
+    jobSlug: string,
+    coverLetter?: string,
+  ): Promise<import('../types').PortalApplyResponse> {
+    const response = await this.api.post<import('../types').PortalApplyResponse>(
+      `/v1/public/me/${token}/apply/${jobSlug}`,
+      { cover_letter: coverLetter },
+    );
+    return response.data;
+  }
+
   // ==================== Jobs (HR) ====================
   async listJobs(includeInactive: boolean = true): Promise<Job[]> {
     const response = await this.api.get<Job[]>('/v1/jobs/', {
