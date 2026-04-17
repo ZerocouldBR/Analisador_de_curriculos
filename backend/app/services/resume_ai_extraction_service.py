@@ -78,8 +78,41 @@ REGRAS CRITICAS - LEIA ATENTAMENTE:
 10. GERAL
     - Extraia TODOS os campos disponiveis. Se nao encontrar, use null.
     - Para cada campo principal, forneca score de confianca de 0.0 a 1.0.
+    - Use confianca baseada em evidencia: 0.95+ apenas quando o campo esta explicito
+      (rotulado ou sem ambiguidade). Campos inferidos = 0.6-0.8.
     - Responda APENAS com JSON valido, sem markdown, sem explicacoes.
     - NAO trunque: se faltar espaco, priorize campos pessoais e titulo; encurte descricoes longas.
+
+EXEMPLOS DE ERROS COMUNS A EVITAR:
+
+Exemplo A - Nome confundido com frase do resumo:
+  Texto: "Lucas Muller Rodrigues\\nSenior Project Manager\\nResumo: Projetos que geram impacto mensuravel para o negocio."
+  ERRADO: "name": "geram impacto mensuravel para o negocio."
+  CORRETO: "name": "Lucas Muller Rodrigues"
+
+Exemplo B - Skills poluidas com frases narrativas:
+  Texto em "Principais competencias": "PMO Leadership\\nexperiencia consolidada em PMO Leadership, estruturando\\nAndroid Enterprise Certified Expert\\nmetodologias ageis e hibridas (PMI, SCRUM, Kanban, SAFe) e\\nadequando frameworks a realidade de cada organizacao"
+  ERRADO: skills.technical = ["PMO Leadership", "experiencia consolidada em PMO Leadership, estruturando", "Android Enterprise Certified Expert", "metodologias ageis e hibridas (PMI, SCRUM, Kanban, SAFe) e", "adequando frameworks a realidade de cada organizacao"]
+  CORRETO: skills.technical = ["PMO Leadership", "Android Enterprise Certified Expert", "Metodologias Ageis (SCRUM, Kanban, SAFe)", "PMI"]
+  REGRA: cada skill deve ter <= 50 caracteres, sem gerundio no final, sem verbos em sentencas completas.
+
+Exemplo C - LinkedIn do candidato vs perfis recomendados:
+  Texto: "Lucas Muller\\nwww.linkedin.com/in/lucas-muller-rodrigues-9905931b\\n...\\nPessoas que tambem viram: joao-silva-12345, maria-santos-67890"
+  ERRADO: "linkedin": "https://www.linkedin.com/in/joao-silva-12345"
+  CORRETO: "linkedin": "https://www.linkedin.com/in/lucas-muller-rodrigues-9905931b"
+  REGRA: o LinkedIn deve ser o do candidato - o slug costuma conter partes do nome dele.
+
+Exemplo D - Idiomas duplicados:
+  Texto: "Languages\\nPortuguese (Native)\\nEnglish - Advanced\\nPortugues: Nativo"
+  ERRADO: [{"language": "Portuguese", "level": "Native"}, {"language": "Portugues", "level": "Nativo"}, {"language": "English", "level": "Advanced"}]
+  CORRETO: [{"language": "Portugues", "level": "Nativo"}, {"language": "Ingles", "level": "Avancado"}]
+  REGRA: use sempre o nome canonico em portugues (Portugues, Ingles, Espanhol, Frances, Alemao, Italiano, Chines, Japones) e nivel em portugues (Nativo, Fluente, Avancado, Intermediario, Basico).
+
+Exemplo E - Certificacoes com artefatos de PDF:
+  Texto: "Certificacoes\\nAWS Certified Solutions Architect - Associate\\nPage 1 of 9\\n[TABELA]\\nPMP\\nContato"
+  ERRADO: ["AWS Certified Solutions Architect - Associate", "Page 1 of 9", "[TABELA]", "PMP", "Contato"]
+  CORRETO: [{"name": "AWS Certified Solutions Architect - Associate", "institution": "AWS"}, {"name": "PMP"}]
+  REGRA: ignore paginacao ("Page X of Y", "Pagina X de Y"), placeholders ("[TABELA]", "[IMAGEM]") e titulos de secao ("Contato", "Resumo").
 
 FORMATO DE RESPOSTA (JSON):
 {{
@@ -277,7 +310,26 @@ class ResumeAIExtractionService:
                 continue
             except Exception as e:
                 last_error = str(e)
-                logger.error(f"Tentativa {attempt_idx + 1}: erro na extracao por IA: {e}")
+                # Detecta erros transientes (rate limit, timeout, 5xx) para backoff exponencial
+                err_msg = str(e).lower()
+                is_transient = any(
+                    marker in err_msg
+                    for marker in (
+                        "429", "rate limit", "rate_limit",
+                        "503", "502", "504", "timeout", "timed out",
+                        "connection", "temporarily unavailable",
+                    )
+                )
+                if is_transient and attempt_idx < len(attempts) - 1:
+                    import asyncio
+                    backoff_s = 2 ** attempt_idx  # 1s, 2s, 4s
+                    logger.warning(
+                        f"Tentativa {attempt_idx + 1}: erro transiente ({e}). "
+                        f"Aguardando {backoff_s}s antes de retry."
+                    )
+                    await asyncio.sleep(backoff_s)
+                else:
+                    logger.error(f"Tentativa {attempt_idx + 1}: erro na extracao por IA: {e}")
                 continue
 
         return {"ai_available": True, "data": None, "error": last_error or "Todas as tentativas falharam"}
@@ -611,10 +663,47 @@ class ResumeAIExtractionService:
             }),
         }
 
+        # Telemetria: loga de onde veio cada campo critico e sinais de baixa confianca
+        telemetry = {
+            "name_source": validated_personal.get("name_source"),
+            "name_confidence": validated_personal.get("name_confidence"),
+            "linkedin_source": "ai" if chosen_linkedin == ai_linkedin else (
+                "regex" if chosen_linkedin == regex_linkedin else (
+                    "text_fallback" if chosen_linkedin else "none"
+                )
+            ),
+            "email_present": bool(validated_personal.get("email")),
+            "phone_present": bool(validated_personal.get("phone")),
+            "skills_count": sum(
+                len(v) for v in validated["skills"].values()
+                if isinstance(v, list)
+            ),
+            "certifications_count": len(validated.get("certifications") or []),
+            "languages_count": len(validated.get("languages") or []),
+            "validation_notes_count": len(notes),
+        }
+        logger.info(
+            "resume_extraction.validate",
+            extra={"event": "resume_extraction.validate", **telemetry},
+        )
+        # Alerta se o nome veio do fallback (geralmente indica problema na extracao)
+        if validated_personal.get("name_source") in ("heuristic_fallback", "none"):
+            logger.warning(
+                "resume_extraction.name_fallback",
+                extra={
+                    "event": "resume_extraction.name_fallback",
+                    "name": validated_personal.get("name"),
+                    "name_source": validated_personal.get("name_source"),
+                    "ai_name": ai_name,
+                    "regex_name": regex_name,
+                },
+            )
+
         return {
             "source": "ai_validated",
             "data": validated,
             "validation_notes": notes,
+            "telemetry": telemetry,
             "model_used": ai_data.get("model_used"),
             "tokens_used": ai_data.get("tokens_used", 0),
         }

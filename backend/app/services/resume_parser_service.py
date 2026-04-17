@@ -170,6 +170,76 @@ def _canonical_level(raw: Optional[str]) -> str:
     return _LEVEL_CANONICAL.get(key, 'Nao especificado')
 
 
+# Classificacao heuristica de skills em categorias
+_SOFT_SKILL_KEYWORDS = {
+    'lideranca', 'liderança', 'leadership', 'comunicacao', 'comunicação',
+    'trabalho em equipe', 'teamwork', 'proatividade', 'proativo',
+    'organizacao', 'organização', 'planejamento', 'gestao de tempo',
+    'gestão de tempo', 'negociacao', 'negociação', 'resolucao de problemas',
+    'resolução de problemas', 'pensamento critico', 'pensamento crítico',
+    'criatividade', 'empatia', 'resiliencia', 'resiliência',
+    'adaptabilidade', 'autonomia', 'colaboracao', 'colaboração',
+    'mentoria', 'coaching',
+}
+
+_TOOL_KEYWORDS = {
+    'git', 'github', 'gitlab', 'bitbucket', 'docker', 'kubernetes', 'k8s',
+    'terraform', 'ansible', 'jenkins', 'circleci', 'travis', 'jira',
+    'confluence', 'trello', 'asana', 'notion', 'slack', 'figma', 'sketch',
+    'adobe', 'photoshop', 'illustrator', 'excel', 'power bi', 'tableau',
+    'looker', 'datadog', 'grafana', 'prometheus', 'sentry', 'new relic',
+    'postman', 'insomnia', 'vscode', 'intellij', 'pycharm', 'sap', 'totvs',
+    'salesforce', 'hubspot', 'zendesk', 'jira', 'linux', 'windows', 'macos',
+}
+
+_FRAMEWORK_KEYWORDS = {
+    'react', 'angular', 'vue', 'svelte', 'next', 'nuxt', 'remix',
+    'django', 'flask', 'fastapi', 'rails', 'spring', 'spring boot',
+    'laravel', 'symfony', 'express', 'nestjs', 'koa',
+    'tensorflow', 'pytorch', 'keras', 'scikit-learn', 'pandas', 'numpy',
+    'bootstrap', 'tailwind', 'material-ui', 'mui', 'chakra',
+    'jest', 'pytest', 'mocha', 'cypress', 'selenium', 'playwright',
+    '.net', 'dotnet', 'asp.net', 'entity framework',
+}
+
+
+def categorize_skills(skills: list) -> Dict[str, list]:
+    """
+    Classifica skills em categorias: technical, soft, tools, frameworks.
+
+    Funciona como fallback quando a IA nao esta disponivel e o regex
+    extrai uma lista plana de strings.
+    """
+    result: Dict[str, list] = {
+        "technical": [],
+        "soft": [],
+        "tools": [],
+        "frameworks": [],
+    }
+    seen_lower = set()
+    for raw in skills or []:
+        if not isinstance(raw, str):
+            continue
+        item = raw.strip()
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen_lower:
+            continue
+        seen_lower.add(key)
+
+        # Classificacao por keyword match (ordem importa: framework > tool > soft > technical)
+        if any(fw in key for fw in _FRAMEWORK_KEYWORDS):
+            result["frameworks"].append(item)
+        elif any(tool in key for tool in _TOOL_KEYWORDS):
+            result["tools"].append(item)
+        elif any(soft in key for soft in _SOFT_SKILL_KEYWORDS):
+            result["soft"].append(item)
+        else:
+            result["technical"].append(item)
+    return result
+
+
 class ResumeParserService:
     """
     Servico para parsing estruturado de curriculos
@@ -222,7 +292,7 @@ class ResumeParserService:
         }
 
         # Email (normalizado: lower + strip + validacao de formato)
-        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
         email_match = re.search(email_pattern, text)
         if email_match:
             info["email"] = normalize_email(email_match.group()) or email_match.group().lower().strip()
@@ -323,7 +393,6 @@ class ResumeParserService:
                     break
                 # Se nao conseguiu parse, guardar raw como fallback
                 info["birth_date"] = raw
-                break
                 break
 
         # Nome - Estrategia robusta com protecao contra enderecos e competencias
