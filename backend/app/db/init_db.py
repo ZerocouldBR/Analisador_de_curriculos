@@ -43,6 +43,8 @@ from app.db.models import (
     SourcingSyncRun,
     ProviderConfig,
     CandidateAccessToken,
+    Job,
+    JobApplication,
 )
 
 

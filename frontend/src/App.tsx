@@ -32,6 +32,11 @@ import SnapshotTimelinePage from './pages/SnapshotTimelinePage';
 import DiagnosticsPage from './pages/DiagnosticsPage';
 import BatchImportPage from './pages/BatchImportPage';
 import CandidatePortalPage from './pages/CandidatePortalPage';
+import JobsPage from './pages/JobsPage';
+import JobFormPage from './pages/JobFormPage';
+import JobDetailPage from './pages/JobDetailPage';
+import PublicCareersPage from './pages/PublicCareersPage';
+import PublicJobApplyPage from './pages/PublicJobApplyPage';
 
 interface ProtectedRouteProps {
   children: React.ReactElement;
@@ -96,6 +101,13 @@ function App() {
                 {/* Portal publico do candidato (magic link) */}
                 <Route path="/me/:token" element={<CandidatePortalPage />} />
 
+                {/* Painel publico de vagas (sem auth) */}
+                <Route path="/careers/:companySlug" element={<PublicCareersPage />} />
+                <Route
+                  path="/careers/:companySlug/:jobSlug"
+                  element={<PublicJobApplyPage />}
+                />
+
                 {/* Protected routes */}
                 <Route
                   path="/"
@@ -123,6 +135,10 @@ function App() {
                   <Route path="candidates/:id/snapshots" element={<SnapshotTimelinePage />} />
                   <Route path="diagnostics" element={<AdminGuard><DiagnosticsPage /></AdminGuard>} />
                   <Route path="batch-import" element={<BatchImportPage />} />
+                  <Route path="jobs" element={<JobsPage />} />
+                  <Route path="jobs/new" element={<JobFormPage />} />
+                  <Route path="jobs/:id" element={<JobDetailPage />} />
+                  <Route path="jobs/:id/edit" element={<JobFormPage />} />
                 </Route>
 
                 {/* Catch-all */}
