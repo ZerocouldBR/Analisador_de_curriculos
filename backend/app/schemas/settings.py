@@ -8,7 +8,7 @@ class PromptConfigBase(BaseModel):
     user_prompt_template: str = Field(..., description="Template de prompt do usuário")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1000, ge=1)
-    model: str = Field(default="gpt-4-turbo-preview")
+    model: str = Field(default="gpt-4o")
 
 
 class PromptConfigUpdate(BaseModel):

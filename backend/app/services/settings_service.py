@@ -139,7 +139,7 @@ class SettingsService:
                 ),
                 "temperature": 0.7,
                 "max_tokens": 1000,
-                "model": "gpt-4-turbo-preview"
+                "model": "gpt-4o"
             }
 
             setting = SettingsService.create_setting(
