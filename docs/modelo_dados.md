@@ -18,7 +18,13 @@
 
 ### 4) **candidates** (PII separada e protegida)
 - id (PK), full_name, email, phone, doc_id (CPF), birth_date, address, city, state, country, created_at, updated_at
-- Relacionamentos cascade: profiles, documents, chunks, experiences, consents, external_enrichments
+- **Campos adicionais (PR #32)**:
+  - `professional_title` (String) — headline profissional extraido do curriculo
+    (ex: "Senior Project Manager | IA & Transformacao Digital")
+  - `professional_summary` (Text) — resumo completo da secao "Sobre/Resumo"
+  - `linkedin_url` (String) — URL canonica (preserva `/in/` vs `/pub/`)
+  - `photo_url` (String) — caminho relativo no storage (`photos/<id>/profile.jpg`)
+- Relacionamentos cascade: profiles, documents, chunks, experiences, consents, external_enrichments, sources
 
 ### 5) **candidate_profiles**
 - id (PK), candidate_id (FK CASCADE), version, profile_json (JSONB), created_at
@@ -116,26 +122,89 @@ users      1:N           audit_logs
 - rate_limit_rpm, rate_limit_daily, created_at, updated_at
 - Unique: (company_id, provider_name)
 
+## Tabelas de Vagas e Portal do Candidato (PR #33, #34, #35)
+
+### 20) **jobs** (Vagas publicas da empresa)
+- id (PK), company_id (FK companies, CASCADE)
+- `slug` (String, UNIQUE, indexado) — identificador publico da vaga no link
+  `/careers/<company_slug>/<job_slug>`
+- title, description (markdown permitido), requirements, responsibilities, benefits
+- location, employment_type (CLT, PJ, Estagio...), seniority_level, work_mode
+  (presencial/remoto/hibrido)
+- salary_range_min, salary_range_max, salary_currency (default BRL), salary_visible
+- skills_required (JSONB, lista), skills_desired (JSONB, lista)
+- is_active (indexado), published_at, closes_at, created_by, created_at, updated_at
+- Indice composto: (company_id, is_active)
+- Relacionamento 1:N com `job_applications` (cascade)
+- **Nota do ROADMAP:** o UNIQUE em `slug` deveria ser composto com `company_id`
+  (bug #3.3 do ROADMAP).
+
+### 21) **job_applications** (Candidaturas a vagas)
+- id (PK), job_id (FK jobs CASCADE), candidate_id (FK candidates CASCADE)
+- document_id (FK documents SET NULL) — curriculo usado na candidatura
+- applicant_name, applicant_email (indexado), applicant_phone, cover_letter
+- `fit_score` (Integer, 0-100) — pontuacao da IA
+- `fit_analysis` (JSONB) — estrutura com strengths, gaps, matched_skills,
+  missing_skills, recommendation (`strong_match`/`good_match`/`weak_match`/`no_match`)
+- `fit_status` — `pending`, `analyzed`, `failed`
+- `stage` (indexado) — pipeline: `received` → `screening` → `interview` →
+  `technical` → `offer` → `hired` / `rejected`
+- stage_notes, source (default `public_form`), consent_given (LGPD), created_at
+  (indexado), updated_at
+- Indice composto: (job_id, stage), (applicant_email, job_id)
+
+### 22) **candidate_access_tokens** (Magic link do portal do candidato)
+- id (PK), candidate_id (FK candidates CASCADE)
+- `token` (String, UNIQUE) — 256 bits gerado com `secrets.token_urlsafe(32)`
+- `expires_at` — tipicamente 72h apos criacao
+- created_by (FK users, SET NULL), created_at, last_used_at, use_count, revoked_at
+- `purpose` — `self_edit` ou `apply_with_profile`
+- Indice: candidate_id
+- URL gerada: `<PUBLIC_BASE_URL>/me/<token>`
+
 ## Roles Padrao
 
 | Role | Descricao | Permissoes Principais |
 |------|-----------|----------------------|
-| admin | Acesso completo | Todas as permissoes (incl. sourcing.config, sourcing.merge) |
-| company_admin | Admin de empresa | Todas as permissoes (incl. sourcing.*) |
-| recruiter | Gerencia candidatos | CRUD candidatos/docs (sem delete), LinkedIn, busca avancada, sourcing.read, sourcing.sync |
-| viewer | Apenas leitura | Leitura de candidatos, docs e settings |
+| admin | Acesso completo | Todas as permissoes (incl. sourcing.*, jobs.*) |
+| company_admin | Admin de empresa | Todas as permissoes (incl. sourcing.*, jobs.*) |
+| recruiter | Gerencia candidatos + vagas | CRUD candidatos/docs/vagas (sem delete), LinkedIn, busca avancada, sourcing.read, sourcing.sync, jobs.create/read/update |
+| viewer | Apenas leitura | Leitura de candidatos, docs, settings e vagas |
+
+Novas permissoes introduzidas pelo PR #33: `jobs.create`, `jobs.read`,
+`jobs.update`, `jobs.delete`. Sao adicionadas a roles existentes via merge
+nao-destrutivo no `init_roles.py`.
 
 ## Fluxo de Dados no Processamento
 
 1. Upload do arquivo -> `documents` (com sha256 para dedup)
 2. Celery task processa o documento:
    - Extrai texto (PDF/DOCX/OCR) -> normaliza
-   - Parseia estrutura do curriculo (ResumeParserService)
-   - Atualiza `candidates` com dados pessoais extraidos (nome, email, telefone, CPF, data nascimento, cidade, estado)
+   - Parseia estrutura do curriculo (ResumeParserService) com validacoes de:
+     - **CPF** via checksum mod 11 (descarta CPFs invalidos)
+     - **Email** normalizado (lowercase + strip + regex de formato)
+     - **Telefone** normalizado para E.164 (`+5511999998888`)
+     - **Data de nascimento** via parser flexivel (aceita "15 de janeiro de 1990")
+     - **LinkedIn URL** canonica preservando `/in/` vs `/pub/`
+   - Executa pipeline de enriquecimento (`ResumeEnrichmentPipeline`):
+     1. Regex (ResumeParserService)
+     2. IA (ResumeAIExtractionService) — multi-pass com 24k/16k/10k chars
+     3. Validacao cruzada (ResumeValidationService) incluindo:
+        - **Nome vs email**: se `name_email_match_ratio < 0.3`, gera alerta
+        - **Nome no texto bruto**: fuzzy match unicode-aware (ignora acentos)
+        - **CPF**: checksum mod 11
+        - **OCR**: alerta se `ocr_confidence < 0.6` em paginas OCR'ed
+     4. Scoring de confianca por campo
+   - Extrai foto de perfil (PhotoExtractionService) -> `candidates.photo_url`
+   - Atualiza `candidates` com dados pessoais + `professional_title` + `professional_summary` + `linkedin_url`
    - Popula tabela `experiences` com experiencias profissionais
-   - Salva snapshot em `candidate_profiles`
+   - Salva snapshot versionado em `candidate_profiles` (cada edit pelo portal
+     cria nova versao)
    - Limpa chunks/embeddings antigos do documento
    - Cria novos `chunks` por secao com metadados enriquecidos
    - Extrai keywords categorizadas (producao, logistica, qualidade, TI)
    - Cria `audit_logs` do processamento
 3. Embeddings gerados sob demanda para busca semantica -> `embeddings`
+4. Quando vinculado a candidatura: `job_fit_tasks.analyze_application_fit_task`
+   aguarda o processamento do curriculo (ate 90s) e entao chama a IA para
+   gerar `fit_score`, `fit_analysis` e `recommendation` em `job_applications`.

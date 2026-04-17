@@ -380,24 +380,40 @@ class ResumeAIExtractionService:
         if name_result.get("note"):
             notes.append(name_result["note"])
 
-        # --- EMAIL ---
-        ai_email = ai_personal.get("email")
-        regex_email = regex_personal.get("email")
-        if ai_email and re.match(r'^[^@]+@[^@]+\.[^@]+$', ai_email):
-            validated_personal["email"] = ai_email
-            validated_personal["email_confidence"] = ai_personal.get("email_confidence", 0.95)
-        elif regex_email:
-            validated_personal["email"] = regex_email
-            validated_personal["email_confidence"] = 0.9
+        # --- EMAIL (normalizado: lower + strip + valida formato) ---
+        from app.services.brazilian_validators import (
+            normalize_email,
+            normalize_phone_br,
+            format_cpf,
+            is_valid_cpf,
+            parse_birth_date,
+            name_email_match_ratio,
+        )
+        ai_email_norm = normalize_email(ai_personal.get("email"))
+        regex_email_norm = normalize_email(regex_personal.get("email"))
+        chosen_email = ai_email_norm or regex_email_norm
+        validated_personal["email"] = chosen_email
+        if chosen_email:
+            validated_personal["email_confidence"] = (
+                ai_personal.get("email_confidence", 0.95) if ai_email_norm else 0.9
+            )
         else:
-            validated_personal["email"] = None
             validated_personal["email_confidence"] = 0.0
 
-        # --- TELEFONE ---
-        ai_phone = ai_personal.get("phone")
-        regex_phone = regex_personal.get("phone")
-        validated_personal["phone"] = ai_phone or regex_phone
-        validated_personal["phone_confidence"] = ai_personal.get("phone_confidence", 0.9) if ai_phone else (0.85 if regex_phone else 0.0)
+        # --- TELEFONE (normalizado E.164) ---
+        ai_phone_norm = normalize_phone_br(ai_personal.get("phone"))
+        regex_phone_norm = normalize_phone_br(regex_personal.get("phone"))
+        chosen_phone = ai_phone_norm or regex_phone_norm or ai_personal.get("phone") or regex_personal.get("phone")
+        validated_personal["phone"] = chosen_phone
+        if ai_phone_norm or regex_phone_norm:
+            validated_personal["phone_confidence"] = (
+                ai_personal.get("phone_confidence", 0.9) if ai_phone_norm else 0.85
+            )
+        elif chosen_phone:
+            # telefone existe mas nao passou na normalizacao (formato incomum)
+            validated_personal["phone_confidence"] = 0.5
+        else:
+            validated_personal["phone_confidence"] = 0.0
 
         # --- LOCALIZACAO ---
         ai_location = ai_personal.get("location")
@@ -426,10 +442,47 @@ class ResumeAIExtractionService:
             validated_personal["linkedin_confidence"] = 0.0
 
         # --- OUTROS CAMPOS PESSOAIS ---
-        for field in ["github", "portfolio", "cpf", "rg", "birth_date"]:
+        for field in ["github", "portfolio", "rg"]:
             ai_val = ai_personal.get(field)
             regex_val = regex_personal.get(field)
             validated_personal[field] = ai_val or regex_val
+
+        # CPF: aceitar apenas se passar no checksum (mod 11)
+        cpf_candidates = [ai_personal.get("cpf"), regex_personal.get("cpf")]
+        validated_cpf = None
+        for c in cpf_candidates:
+            if c and is_valid_cpf(c):
+                validated_cpf = format_cpf(c)
+                break
+        validated_personal["cpf"] = validated_cpf
+        if cpf_candidates[0] and not validated_cpf:
+            notes.append(
+                f"CPF '{cpf_candidates[0]}' descartado (falhou na validacao mod 11)"
+            )
+
+        # birth_date: normalizar para dd/mm/yyyy quando possivel
+        raw_birth = ai_personal.get("birth_date") or regex_personal.get("birth_date")
+        parsed_birth = parse_birth_date(raw_birth) if raw_birth else None
+        if parsed_birth:
+            validated_personal["birth_date"] = parsed_birth.strftime("%d/%m/%Y")
+        else:
+            validated_personal["birth_date"] = raw_birth
+
+        # --- CROSS-VALIDATION: nome vs email ---
+        # Se o email e o nome divergem muito, baixa a confianca do nome
+        if validated_personal.get("name") and chosen_email:
+            match_ratio = name_email_match_ratio(
+                validated_personal["name"], chosen_email,
+            )
+            validated_personal["name_email_match"] = round(match_ratio, 2)
+            if match_ratio < 0.3:
+                notes.append(
+                    f"Nome '{validated_personal['name']}' nao combina com o email "
+                    f"'{chosen_email}' (overlap {match_ratio:.0%})"
+                )
+                # Reduzir confianca do nome em 20 pontos percentuais
+                cur = validated_personal.get("name_confidence", 0.5)
+                validated_personal["name_confidence"] = round(max(cur * 0.8, 0.0), 2)
 
         # --- FOTO DO CANDIDATO ---
         validated_personal["has_photo"] = bool(ai_personal.get("has_photo"))
@@ -641,54 +694,35 @@ class ResumeAIExtractionService:
     @staticmethod
     def _normalize_linkedin_url(url: Optional[str]) -> Optional[str]:
         """
-        Normaliza URL do LinkedIn para formato canonico https://www.linkedin.com/in/<slug>.
-        Aceita variacoes: com/sem protocolo, com/sem www, com/sem barra final.
+        Normaliza URL do LinkedIn, preservando /in/ vs /pub/.
+
+        Delega para brazilian_validators.normalize_linkedin_url.
         """
-        if not url or not isinstance(url, str):
-            return None
-        url = url.strip().rstrip('/,;.)')
-        if not url:
-            return None
-
-        # Extrair slug (parte apos /in/)
-        match = re.search(
-            r'(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/([A-Za-z0-9\-_%]+)',
-            url,
-            re.IGNORECASE,
-        )
-        if match:
-            slug = match.group(1).rstrip('-_')
-            if len(slug) >= 3:
-                return f"https://www.linkedin.com/in/{slug}"
-
-        # Se a URL mencionada nao tem /in/ mas menciona linkedin.com, manter como foi fornecida
-        if 'linkedin.com' in url.lower():
-            if not url.lower().startswith('http'):
-                url = 'https://' + url
-            return url
-
-        return None
+        from app.services.brazilian_validators import normalize_linkedin_url
+        return normalize_linkedin_url(url)
 
     @staticmethod
     def _find_linkedin_in_text(text: str) -> Optional[str]:
         """
         Busca URL do LinkedIn no texto bruto, lidando com quebras de linha.
-        PDFs as vezes quebram URLs em multiplas linhas.
+        PDFs as vezes quebram URLs em multiplas linhas. Preserva /in/ vs /pub/.
         """
         if not text:
             return None
 
-        # Juntar linhas que terminam com hifen ou com 'linkedin.com/in/' incompletos
-        normalized = re.sub(r'(linkedin\.com/in/[A-Za-z0-9\-_]*)\s*\n\s*([A-Za-z0-9\-_]+)',
-                           r'\1\2', text, flags=re.IGNORECASE)
-        normalized = re.sub(r'([A-Za-z0-9\-_]+)-\s*\n\s*([A-Za-z0-9\-_]+)',
-                           r'\1-\2', normalized)
+        # Juntar linhas que terminam com hifen ou com URLs incompletas (tanto /in/ quanto /pub/)
+        normalized = re.sub(
+            r'(linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_]*)\s*\n\s*([A-Za-z0-9\-_]+)',
+            r'\1\2', text, flags=re.IGNORECASE,
+        )
+        normalized = re.sub(
+            r'([A-Za-z0-9\-_]+)-\s*\n\s*([A-Za-z0-9\-_]+)',
+            r'\1-\2', normalized,
+        )
 
-        # Padroes aceitos
         patterns = [
-            r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/[A-Za-z0-9\-_%]+',
-            r'(?:[a-z]{2,3}\.)?linkedin\.com/in/[A-Za-z0-9\-_%]+',
-            r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/pub/[A-Za-z0-9\-_%]+',
+            r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+',
+            r'(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+',
         ]
         for pattern in patterns:
             match = re.search(pattern, normalized, re.IGNORECASE)
