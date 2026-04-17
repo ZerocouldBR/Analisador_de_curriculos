@@ -8,19 +8,16 @@ Atualizado em: 2026-04-17.
 
 ---
 
-## 1. PRs em review (aguardando merge)
+## 1. PRs desta cadeia (merged)
 
-Ordem logica de merge sugerida:
+Todos os 4 PRs desta serie ja foram merged em `main`:
 
-| PR  | Titulo                                                        | Branch                                              | Depende de |
-| --- | ------------------------------------------------------------- | --------------------------------------------------- | ---------- |
-| #32 | Fix extracao de curriculo + foto + LinkedIn + titulo          | `claude/fix-document-extraction-ocr-pf1OR`          | —          |
-| #33 | Painel publico de vagas + analise de fit por IA               | `claude/public-jobs-portal-fit-ai`                  | —          |
-| #34 | Portal do candidato via magic link + sugestoes de melhoria    | `claude/candidate-portal-magic-link-ai-improve`     | —          |
-| #35 | Portal aplica em vagas sem reupload (fecha o loop com #33/34) | `claude/candidate-portal-apply-jobs`                | #33, #34   |
-
-PR #35 foi empilhado sobre #33 + #34 via merge. Apos #33 e #34 virem
-para `main`, fazer rebase de #35 para remover o commit de merge.
+| PR  | Titulo                                                        | Status |
+| --- | ------------------------------------------------------------- | ------ |
+| #32 | Fix extracao de curriculo + foto + LinkedIn + titulo          | merged |
+| #33 | Painel publico de vagas + analise de fit por IA               | merged |
+| #34 | Portal do candidato via magic link + sugestoes de melhoria    | merged |
+| #35 | Portal aplica em vagas sem reupload (fecha o loop com #33/34) | merged |
 
 ---
 
