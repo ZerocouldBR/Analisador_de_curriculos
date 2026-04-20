@@ -219,6 +219,59 @@ def process_document_task(
             if professional_obj.get("summary") and hasattr(candidate, "professional_summary"):
                 candidate.professional_summary = professional_obj["summary"]
 
+            # Pretensao salarial (estruturada pela IA)
+            salary = (
+                enriched_data.get("salary_expectations", {}) if enriched_data else {}
+            )
+            if salary:
+                if salary.get("minimum") is not None and hasattr(candidate, "salary_min"):
+                    candidate.salary_min = salary.get("minimum")
+                if salary.get("maximum") is not None and hasattr(candidate, "salary_max"):
+                    candidate.salary_max = salary.get("maximum")
+                if salary.get("currency") and hasattr(candidate, "salary_currency"):
+                    candidate.salary_currency = str(salary["currency"])[:3]
+                if salary.get("period") and hasattr(candidate, "salary_period"):
+                    candidate.salary_period = str(salary["period"])[:16]
+                if salary.get("notes") and hasattr(candidate, "salary_notes"):
+                    candidate.salary_notes = salary["notes"]
+
+            # Scores de confianca (personal_info.*_confidence -> candidate.*)
+            def _coerce_conf(v):
+                try:
+                    f = float(v) if v is not None else None
+                except (TypeError, ValueError):
+                    return None
+                if f is None:
+                    return None
+                return max(0.0, min(1.0, f))
+
+            for src_key, db_key in (
+                ("name_confidence", "name_confidence"),
+                ("email_confidence", "email_confidence"),
+                ("phone_confidence", "phone_confidence"),
+                ("linkedin_confidence", "linkedin_confidence"),
+            ):
+                if hasattr(candidate, db_key):
+                    conf = _coerce_conf(personal.get(src_key))
+                    if conf is not None:
+                        setattr(candidate, db_key, conf)
+
+            # Confianca geral e metodo de extracao vem do resultado do pipeline
+            if enriched_result:
+                metadata = enriched_result.get("metadata", {}) or {}
+                if hasattr(candidate, "overall_extraction_confidence"):
+                    oc = _coerce_conf(metadata.get("overall_confidence"))
+                    if oc is not None:
+                        candidate.overall_extraction_confidence = oc
+                if hasattr(candidate, "extraction_method"):
+                    em = enriched_result.get("extraction_method")
+                    if em:
+                        candidate.extraction_method = str(em)[:32]
+                if hasattr(candidate, "extraction_quality_label"):
+                    ql = metadata.get("quality_label")
+                    if ql:
+                        candidate.extraction_quality_label = str(ql)[:32]
+
             db.commit()
 
         _update_document_status(db, document_id, "processing", 58, "Dados do candidato atualizados")

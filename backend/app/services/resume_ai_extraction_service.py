@@ -18,6 +18,7 @@ import re
 from typing import Dict, Any, Optional, List
 
 from app.core.config import settings
+from app.schemas.resume_extraction import validate_ai_extraction
 from app.services.llm_client import llm_client
 
 logger = logging.getLogger(__name__)
@@ -75,13 +76,34 @@ REGRAS CRITICAS - LEIA ATENTAMENTE:
    - Extraia TODAS, mesmo que haja dezenas.
    - Para cada uma: nome, emissor quando identificavel, codigo (NR-10, PMP, etc).
 
-10. GERAL
-    - Extraia TODOS os campos disponiveis. Se nao encontrar, use null.
+10. PRETENSAO SALARIAL
+    - Procure ativamente por: "pretensao salarial", "salario desejado", "expectativa salarial",
+      "remuneracao pretendida", "salary expectation", "R$ X,XX", "CLT + beneficios".
+    - Extraia: valor minimo, valor maximo, moeda (BRL/USD/EUR) e periodo (mensal/anual/hora).
+    - Se houver apenas um valor, use-o em ambos min e max.
+    - Se nao encontrar, retorne null em todos os subcampos.
+
+11. DISPONIBILIDADE E OBJETIVO
+    - Captura "disponibilidade imediata", "aviso previo de X dias", "disposto a viajar",
+      "aberto a mudanca", "remoto/hibrido/presencial".
+    - Objetivo profissional: cargo desejado, industria de interesse, metas de carreira.
+
+12. DATAS E NORMALIZACAO
+    - Datas parciais (apenas ano): use "YYYY" sem inventar mes/dia.
+    - Datas completas: prefira MM/YYYY; formato DD/MM/YYYY so se dia explicito.
+    - "atual", "presente", "current", "till date" = vigente (end_date: "atual").
+
+13. GERAL
+    - Extraia TODOS os campos disponiveis. Se nao encontrar, use null (NUNCA invente).
     - Para cada campo principal, forneca score de confianca de 0.0 a 1.0.
     - Use confianca baseada em evidencia: 0.95+ apenas quando o campo esta explicito
       (rotulado ou sem ambiguidade). Campos inferidos = 0.6-0.8.
-    - Responda APENAS com JSON valido, sem markdown, sem explicacoes.
-    - NAO trunque: se faltar espaco, priorize campos pessoais e titulo; encurte descricoes longas.
+    - Responda APENAS com JSON valido (UTF-8, sem BOM), sem markdown, sem explicacoes.
+    - NAO trunque: se faltar espaco, priorize (nesta ordem) nome, email, telefone,
+      experiencias, formacao, skills, certificacoes; encurte descricoes longas.
+    - Telefones: preserve formato original alem de tentar normalizar para E.164 (+55...).
+    - Emails: sempre em lowercase.
+    - URLs: sempre com protocolo https://.
 
 EXEMPLOS DE ERROS COMUNS A EVITAR:
 
@@ -104,14 +126,14 @@ Exemplo C - LinkedIn do candidato vs perfis recomendados:
 
 Exemplo D - Idiomas duplicados:
   Texto: "Languages\\nPortuguese (Native)\\nEnglish - Advanced\\nPortugues: Nativo"
-  ERRADO: [{"language": "Portuguese", "level": "Native"}, {"language": "Portugues", "level": "Nativo"}, {"language": "English", "level": "Advanced"}]
-  CORRETO: [{"language": "Portugues", "level": "Nativo"}, {"language": "Ingles", "level": "Avancado"}]
+  ERRADO: [{{"language": "Portuguese", "level": "Native"}}, {{"language": "Portugues", "level": "Nativo"}}, {{"language": "English", "level": "Advanced"}}]
+  CORRETO: [{{"language": "Portugues", "level": "Nativo"}}, {{"language": "Ingles", "level": "Avancado"}}]
   REGRA: use sempre o nome canonico em portugues (Portugues, Ingles, Espanhol, Frances, Alemao, Italiano, Chines, Japones) e nivel em portugues (Nativo, Fluente, Avancado, Intermediario, Basico).
 
 Exemplo E - Certificacoes com artefatos de PDF:
   Texto: "Certificacoes\\nAWS Certified Solutions Architect - Associate\\nPage 1 of 9\\n[TABELA]\\nPMP\\nContato"
   ERRADO: ["AWS Certified Solutions Architect - Associate", "Page 1 of 9", "[TABELA]", "PMP", "Contato"]
-  CORRETO: [{"name": "AWS Certified Solutions Architect - Associate", "institution": "AWS"}, {"name": "PMP"}]
+  CORRETO: [{{"name": "AWS Certified Solutions Architect - Associate", "institution": "AWS"}}, {{"name": "PMP"}}]
   REGRA: ignore paginacao ("Page X of Y", "Pagina X de Y"), placeholders ("[TABELA]", "[IMAGEM]") e titulos de secao ("Contato", "Resumo").
 
 FORMATO DE RESPOSTA (JSON):
@@ -138,7 +160,18 @@ FORMATO DE RESPOSTA (JSON):
   "professional_objective": {{
     "title": "Cargo ou headline profissional (ex: Senior Project Manager | IA & Transformacao Digital)",
     "summary": "Resumo profissional COMPLETO do candidato, todos os paragrafos",
+    "desired_position": "Cargo que o candidato busca (se mencionado)",
+    "desired_industries": ["Industria ou setor de interesse"],
+    "career_goals": "Metas ou objetivos de carreira explicitos",
     "confidence": 0.85
+  }},
+  "salary_expectations": {{
+    "minimum": null,
+    "maximum": null,
+    "currency": "BRL",
+    "period": "mensal",
+    "notes": "Observacoes do candidato (ex: 'a combinar', 'CLT + beneficios')",
+    "confidence": 0.0
   }},
   "experiences": [
     {{
@@ -183,7 +216,15 @@ FORMATO DE RESPOSTA (JSON):
     {{"type": "CNH", "category": "B", "description": "Carteira de motorista categoria B"}}
   ],
   "additional_info": {{
-    "availability": {{"shifts": [], "travel": false, "relocation": false, "immediate_start": false}},
+    "availability": {{
+      "shifts": [],
+      "travel": false,
+      "relocation": false,
+      "immediate_start": false,
+      "notice_period_days": null,
+      "work_mode": null,
+      "notes": null
+    }},
     "equipment": [],
     "erp_systems": [],
     "safety_certifications": []
@@ -245,19 +286,24 @@ class ResumeAIExtractionService:
             logger.warning(f"{settings.llm_provider.value} API key nao configurada - pulando extracao por IA")
             return {"ai_available": False, "data": None}
 
-        # Estrategia multi-pass: primeira tentativa com texto mais completo (ate 24k),
-        # em caso de falha faz retry com texto reduzido.
+        # Estrategia multi-pass com priorizacao de contexto:
+        # - Passo 1: texto completo (ate 24k chars) - tudo disponivel
+        # - Passo 2: preserva inicio (cabecalho com nome/contato) + final (certificacoes)
+        # - Passo 3: apenas cabecalho reduzido + marcadores de secoes criticas
+        # Isso evita perder nome/email/telefone caso o LLM reduza contexto em retry.
         attempts = [
-            {"chars": 24000, "max_tokens": 8000},
-            {"chars": 16000, "max_tokens": 6000},
-            {"chars": 10000, "max_tokens": 4000},
+            {"chars": 24000, "max_tokens": 8000, "strategy": "full"},
+            {"chars": 16000, "max_tokens": 6000, "strategy": "head_tail"},
+            {"chars": 10000, "max_tokens": 4000, "strategy": "head_tail"},
         ]
 
         last_error: Optional[str] = None
 
         for attempt_idx, cfg in enumerate(attempts):
             try:
-                truncated = text[: cfg["chars"]] if len(text) > cfg["chars"] else text
+                truncated = ResumeAIExtractionService._truncate_preserving_priority(
+                    text, cfg["chars"], strategy=cfg["strategy"]
+                )
 
                 prompt = RESUME_EXTRACTION_PROMPT.format(resume_text=truncated)
 
@@ -275,6 +321,7 @@ class ResumeAIExtractionService:
                     ],
                     temperature=0.0,
                     max_tokens=cfg["max_tokens"],
+                    cache_system_prompt=True,
                 )
 
                 raw = (response.content or "").strip()
@@ -294,6 +341,60 @@ class ResumeAIExtractionService:
                     )
                     continue
 
+                # Validacao Pydantic: garante que o dict tem a estrutura esperada
+                # (preenche defaults, coage tipos, ignora campos desconhecidos)
+                ai_data = validate_ai_extraction(ai_data)
+
+                # Fallback campo-a-campo: se os campos criticos ficaram vazios,
+                # faz uma segunda chamada focada so neles usando o texto completo.
+                needs_refill = ResumeAIExtractionService._needs_critical_refill(ai_data)
+                if needs_refill and attempt_idx == 0:
+                    logger.warning(
+                        "Extracao principal sem campos criticos - acionando fallback campo-a-campo"
+                    )
+                    try:
+                        refilled = await ResumeAIExtractionService._extract_critical_fields(
+                            text[: cfg["chars"]]
+                        )
+                        ai_data = ResumeAIExtractionService._merge_critical(
+                            ai_data, refilled
+                        )
+                    except Exception as refill_err:
+                        logger.warning(f"Fallback critico falhou: {refill_err}")
+
+                # Re-extracao com extended thinking quando a confianca do nome
+                # esta abaixo do limiar (apenas para Anthropic e se configurado).
+                try:
+                    from app.core.config import LLMProvider as _LP
+
+                    thinking_budget = int(
+                        getattr(settings, "extraction_thinking_budget", 0) or 0
+                    )
+                    threshold = float(
+                        getattr(settings, "extraction_low_confidence_threshold", 0.6) or 0.6
+                    )
+                    name_conf = float(
+                        (ai_data.get("personal_info") or {}).get("name_confidence") or 0
+                    )
+                    if (
+                        thinking_budget > 0
+                        and settings.llm_provider == _LP.ANTHROPIC
+                        and name_conf < threshold
+                        and attempt_idx == 0
+                    ):
+                        logger.info(
+                            f"Confianca baixa ({name_conf:.2f}) - re-extraindo com extended thinking"
+                        )
+                        deep = await ResumeAIExtractionService._extract_with_thinking(
+                            text[: cfg["chars"]], thinking_budget
+                        )
+                        if deep:
+                            ai_data = ResumeAIExtractionService._merge_critical(
+                                ai_data, deep
+                            )
+                except Exception as think_err:
+                    logger.warning(f"Extended thinking falhou: {think_err}")
+
                 return {
                     "ai_available": True,
                     "data": ai_data,
@@ -302,6 +403,7 @@ class ResumeAIExtractionService:
                     "input_tokens": getattr(response, "input_tokens", 0) or 0,
                     "output_tokens": getattr(response, "output_tokens", 0) or 0,
                     "attempt": attempt_idx + 1,
+                    "truncation_strategy": cfg["strategy"],
                 }
 
             except json.JSONDecodeError as e:
@@ -333,6 +435,141 @@ class ResumeAIExtractionService:
                 continue
 
         return {"ai_available": True, "data": None, "error": last_error or "Todas as tentativas falharam"}
+
+    @staticmethod
+    def _truncate_preserving_priority(text: str, max_chars: int, strategy: str = "full") -> str:
+        """Trunca texto garantindo preservacao de dados criticos.
+
+        - "full": corte simples no final (comportamento antigo)
+        - "head_tail": preserva 70% inicio (onde fica nome/contato) + 30% fim
+          (onde costumam ficar certificacoes/idiomas)
+        """
+        if not text or len(text) <= max_chars:
+            return text or ""
+
+        if strategy == "head_tail" and max_chars > 2000:
+            head_size = int(max_chars * 0.7)
+            tail_size = max_chars - head_size - 40  # desconta separador
+            head = text[:head_size]
+            tail = text[-tail_size:] if tail_size > 0 else ""
+            return f"{head}\n\n[...texto intermediario omitido...]\n\n{tail}"
+
+        return text[:max_chars]
+
+    @staticmethod
+    def _needs_critical_refill(ai_data: Optional[Dict[str, Any]]) -> bool:
+        """Retorna True se nome, email ou telefone nao foram extraidos."""
+        if not ai_data:
+            return True
+        pi = ai_data.get("personal_info") or {}
+        if not pi.get("name"):
+            return True
+        if not pi.get("email") and not pi.get("phone"):
+            return True
+        name_conf = float(pi.get("name_confidence") or 0)
+        return name_conf < 0.6
+
+    @staticmethod
+    async def _extract_critical_fields(text: str) -> Dict[str, Any]:
+        """Segunda chamada focada apenas em nome, email, telefone e LinkedIn.
+
+        Usada como fallback quando a extracao principal falha em capturar
+        os campos mais importantes. Prompt menor e mais direto = maior
+        probabilidade de acerto.
+        """
+        focused_prompt = (
+            "Extraia APENAS os 4 campos criticos deste curriculo. "
+            "Responda SOMENTE com JSON valido:\n\n"
+            "{\n"
+            '  "name": "Nome Completo do Candidato (so o nome proprio da pessoa)",\n'
+            '  "email": "email@exemplo.com ou null",\n'
+            '  "phone": "(11) 99999-9999 ou null",\n'
+            '  "linkedin": "https://linkedin.com/in/... ou null",\n'
+            '  "confidence": 0.0 a 1.0\n'
+            "}\n\n"
+            "REGRAS:\n"
+            "- O nome NUNCA e um endereco, cargo, competencia ou frase narrativa.\n"
+            "- Se nao achar, retorne null (NUNCA invente).\n\n"
+            f"CURRICULO:\n---\n{text[:12000]}\n---"
+        )
+
+        response = await llm_client.chat_completion(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Extrator focado em 4 campos criticos. Responda APENAS JSON.",
+                },
+                {"role": "user", "content": focused_prompt},
+            ],
+            temperature=0.0,
+            max_tokens=500,
+            cache_system_prompt=False,
+        )
+
+        raw = (response.content or "").strip()
+        if raw.startswith("```"):
+            raw = re.sub(r'^```(?:json)?\s*', '', raw)
+            raw = re.sub(r'\s*```$', '', raw)
+
+        return ResumeAIExtractionService._parse_json_robust(raw) or {}
+
+    @staticmethod
+    async def _extract_with_thinking(text: str, budget_tokens: int) -> Dict[str, Any]:
+        """Re-extracao com extended thinking do Claude para desambiguar nome
+        e LinkedIn em curriculos com baixa confianca.
+        """
+        focused_prompt = (
+            "Analise este curriculo e desambigue os 4 campos mais criticos. "
+            "Use raciocinio profundo para identificar o nome correto do candidato, "
+            "distinguindo-o de enderecos, cargos, competencias e frases narrativas.\n\n"
+            "Responda SOMENTE com JSON valido:\n"
+            "{\n"
+            '  "name": "Nome Completo do Candidato ou null",\n'
+            '  "email": "email@exemplo.com ou null",\n'
+            '  "phone": "(11) 99999-9999 ou null",\n'
+            '  "linkedin": "https://linkedin.com/in/... ou null",\n'
+            '  "confidence": 0.0 a 1.0,\n'
+            '  "reasoning_summary": "Breve resumo do raciocinio (1 frase)"\n'
+            "}\n\n"
+            f"CURRICULO:\n---\n{text[:14000]}\n---"
+        )
+
+        response = await llm_client.chat_completion(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Extrator de alta precisao para dados criticos de curriculos. "
+                        "Raciocine passo a passo antes de responder."
+                    ),
+                },
+                {"role": "user", "content": focused_prompt},
+            ],
+            max_tokens=budget_tokens + 1024,
+            thinking_budget=budget_tokens,
+        )
+
+        raw = (response.content or "").strip()
+        if raw.startswith("```"):
+            raw = re.sub(r'^```(?:json)?\s*', '', raw)
+            raw = re.sub(r'\s*```$', '', raw)
+        return ResumeAIExtractionService._parse_json_robust(raw) or {}
+
+    @staticmethod
+    def _merge_critical(
+        ai_data: Dict[str, Any], critical: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Preenche personal_info com resultados do fallback critico."""
+        if not critical:
+            return ai_data
+        pi = ai_data.setdefault("personal_info", {})
+        conf = float(critical.get("confidence") or 0.7)
+        for key in ("name", "email", "phone", "linkedin"):
+            val = critical.get(key)
+            if val and not pi.get(key):
+                pi[key] = val
+                pi[f"{key}_confidence"] = conf
+        return ai_data
 
     @staticmethod
     def _parse_json_robust(raw: str) -> Optional[Dict[str, Any]]:
