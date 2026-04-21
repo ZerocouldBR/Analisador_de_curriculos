@@ -16,6 +16,7 @@ from app.services.resume_parser_service import (
     _is_clean_list_item,
     _is_pdf_artifact,
     _looks_like_narrative,
+    _looks_like_certification_item,
     categorize_skills,
 )
 from app.services.resume_ai_extraction_service import ResumeAIExtractionService
@@ -217,6 +218,33 @@ class TestExtractCertifications:
         for bad in ("Page 1 of 9", "[TABELA]", "Contato"):
             assert bad not in out
 
+    def test_rejects_narrative_pollution_in_certifications(self):
+        text = """
+        Certificacoes
+        experiencia consolidada em PMO Leadership, estruturando
+        Android Enterprise Certified Expert
+        metodologias ageis e hibridas (PMI, SCRUM, Kanban, SAFe) e
+        Android Enterprise Professional
+        Conduzi projetos de transformacao digital end-to-end, aplicando
+        Page 1 of 9
+        [TABELA]
+        """
+        out = ResumeParserService.extract_certifications(text)
+        assert "Android Enterprise Certified Expert" in out
+        assert "Android Enterprise Professional" in out
+        assert not any("estruturando" in c.lower() for c in out)
+        assert not any("conduzi" in c.lower() for c in out)
+
+
+class TestCertificationValidator:
+    def test_accepts_real_certification_items(self):
+        assert _looks_like_certification_item("PMP")
+        assert _looks_like_certification_item("AWS Certified Solutions Architect - Associate")
+
+    def test_rejects_dirty_non_cert_items(self):
+        assert not _looks_like_certification_item("Conduzi projetos de transformação digital end-to-end, aplicando")
+        assert not _looks_like_certification_item("www.linkedin.com/in/lucas-muller")
+
 
 # ---------------------------------------------------------------------------
 # Categorizacao de skills
@@ -331,6 +359,24 @@ class TestLinkedinPicker:
         assert ResumeAIExtractionService._pick_best_linkedin("X", []) is None
         assert ResumeAIExtractionService._pick_best_linkedin("X", [None, None]) is None
 
+    def test_rebuilds_linkedin_url_broken_across_lines(self):
+        raw = """
+        Contato
+        www.linkedin.com/in/lucas-muller-
+        rodrigues-9905931b
+        """
+        urls = ResumeAIExtractionService._find_all_linkedin_urls(raw)
+        assert "https://www.linkedin.com/in/lucas-muller-rodrigues-9905931b" in urls
+
+    def test_rebuilds_linkedin_url_broken_after_in_prefix(self):
+        raw = """
+        Contato
+        www.linkedin.com/in/
+        lucas-muller-rodrigues-9905931b
+        """
+        url = ResumeAIExtractionService._find_linkedin_in_text(raw)
+        assert url == "https://www.linkedin.com/in/lucas-muller-rodrigues-9905931b"
+
 
 # ---------------------------------------------------------------------------
 # Bugs corrigidos (regressao)
@@ -358,3 +404,17 @@ class TestBugRegressions:
             "Data de nascimento: 15/03/1990"
         )
         assert info.get("birth_date") == "15/03/1990"
+
+    def test_parser_extracts_name_in_linkedin_multicolumn_style(self):
+        text = """
+        Contato
+        lucas@mullerrodrigues.com
+        www.linkedin.com/in/lucas-muller-
+        rodrigues-9905931b
+
+        Lucas Muller Rodrigues
+        Senior Project Manager | IA & Transformacao Digital
+        """
+        info = ResumeParserService.extract_personal_info(text)
+        assert info.get("name") == "Lucas Muller Rodrigues"
+        assert info.get("linkedin") == "https://www.linkedin.com/in/lucas-muller-rodrigues-9905931b"

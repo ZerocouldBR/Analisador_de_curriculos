@@ -258,6 +258,12 @@ _COMPETENCY_PATTERNS = [
     r'\bmachine\s+learning\b',
 ]
 
+_LINKEDIN_BREAK_STOPWORDS = {
+    "contato", "contact", "resumo", "summary", "sobre", "about",
+    "principais", "competencias", "competências", "skills", "idiomas",
+    "languages", "certificacoes", "certificações", "experiencia", "experiência",
+}
+
 
 class ResumeAIExtractionService:
     """
@@ -795,6 +801,7 @@ class ResumeAIExtractionService:
             _is_clean_list_item,
             _canonical_language,
             _canonical_level,
+            _looks_like_certification_item,
         )
 
         def _clean_list(items, max_len=50):
@@ -833,7 +840,7 @@ class ResumeAIExtractionService:
             for c in certs:
                 if isinstance(c, dict):
                     name = (c.get("name") or "").strip()
-                    if not _is_clean_list_item(name, max_len=100, min_len=4):
+                    if not _looks_like_certification_item(name):
                         continue
                     key = name.lower()
                     if key in seen:
@@ -842,7 +849,7 @@ class ResumeAIExtractionService:
                     out.append(c)
                 elif isinstance(c, str):
                     name = c.strip()
-                    if not _is_clean_list_item(name, max_len=100, min_len=4):
+                    if not _looks_like_certification_item(name):
                         continue
                     key = name.lower()
                     if key in seen:
@@ -1169,15 +1176,7 @@ class ResumeAIExtractionService:
         if not text:
             return None
 
-        # Juntar linhas que terminam com hifen ou com URLs incompletas (tanto /in/ quanto /pub/)
-        normalized = re.sub(
-            r'(linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_]*)\s*\n\s*([A-Za-z0-9\-_]+)',
-            r'\1\2', text, flags=re.IGNORECASE,
-        )
-        normalized = re.sub(
-            r'([A-Za-z0-9\-_]+)-\s*\n\s*([A-Za-z0-9\-_]+)',
-            r'\1-\2', normalized,
-        )
+        normalized = ResumeAIExtractionService._normalize_broken_linkedin_text(text)
 
         patterns = [
             r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+',
@@ -1195,14 +1194,7 @@ class ResumeAIExtractionService:
         """Retorna TODAS as URLs do LinkedIn no texto, normalizadas e sem duplicatas."""
         if not text:
             return []
-        normalized = re.sub(
-            r'(linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_]*)\s*\n\s*([A-Za-z0-9\-_]+)',
-            r'\1\2', text, flags=re.IGNORECASE,
-        )
-        normalized = re.sub(
-            r'([A-Za-z0-9\-_]+)-\s*\n\s*([A-Za-z0-9\-_]+)',
-            r'\1-\2', normalized,
-        )
+        normalized = ResumeAIExtractionService._normalize_broken_linkedin_text(text)
         pattern = r'(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+'
         seen: set = set()
         out: List[str] = []
@@ -1212,6 +1204,68 @@ class ResumeAIExtractionService:
                 seen.add(canonical)
                 out.append(canonical)
         return out
+
+    @staticmethod
+    def _normalize_broken_linkedin_text(text: str) -> str:
+        """Reconstrói URLs do LinkedIn quebradas por OCR, colunas e quebras de pagina."""
+        if not text:
+            return ""
+
+        normalized = re.sub(
+            r'([A-Za-z0-9])-\s*\n+\s*([A-Za-z0-9])',
+            r'\1-\2',
+            text,
+        )
+        normalized = re.sub(
+            r'(linkedin\.com/(?:in|pub)/)\s*\n+\s*([A-Za-z0-9])',
+            r'\1\2',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(
+            r'(linkedin\.com/(?:in|pub)/)([A-Za-z0-9][A-Za-z0-9\-_ ]{1,120})',
+            lambda m: m.group(1) + re.sub(r'\s+', '-', m.group(2).strip()),
+            normalized,
+            flags=re.IGNORECASE,
+        )
+
+        lines = [ln.strip() for ln in text.splitlines()]
+        rebuilt_chunks: List[str] = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            low = line.lower()
+            if "linkedin.com/in/" not in low and "linkedin.com/pub/" not in low:
+                i += 1
+                continue
+            chunk = line
+            j = i + 1
+            while j < len(lines) and len(chunk) < 180:
+                nxt = lines[j].strip()
+                if not nxt:
+                    j += 1
+                    continue
+                nxt_low = nxt.lower().strip(":")
+                if any(tok in nxt_low.split() for tok in _LINKEDIN_BREAK_STOPWORDS):
+                    break
+                if "@" in nxt or "http://" in nxt_low or "https://" in nxt_low:
+                    break
+                if re.search(r'^[A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç]+\s+[A-Z]', nxt):
+                    break
+                if re.search(r'^[A-Za-z0-9\-_]{2,}$', nxt):
+                    chunk += nxt
+                else:
+                    compact = re.sub(r'[^A-Za-z0-9\-_]', '', nxt)
+                    if not compact:
+                        break
+                    chunk += compact
+                j += 1
+            rebuilt_chunks.append(chunk)
+            i = j
+
+        if rebuilt_chunks:
+            normalized += "\n" + "\n".join(rebuilt_chunks)
+        return normalized
 
     @staticmethod
     def _linkedin_slug(url: Optional[str]) -> Optional[str]:
@@ -1308,7 +1362,8 @@ class ResumeAIExtractionService:
 
         lines = [line.strip() for line in text.split('\n') if line.strip()]
 
-        for line in lines[:25]:
+        ranked: List[tuple[int, str]] = []
+        for idx, line in enumerate(lines[:40]):
             # Pular linhas muito curtas ou muito longas
             if len(line) < 5 or len(line) > 60:
                 continue
@@ -1350,7 +1405,16 @@ class ResumeAIExtractionService:
             non_prep = [w for w in words if w.lower() not in preps]
             if not all(w[0].isupper() for w in non_prep if w):
                 continue
-            # Parece um nome valido
-            return line
+            score = 100 - idx * 2
+            if len(words) == 3:
+                score += 8
+            elif len(words) == 2:
+                score += 4
+            if all(len(w) >= 3 for w in non_prep):
+                score += 4
+            ranked.append((score, line))
 
-        return None
+        if not ranked:
+            return None
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        return ranked[0][1]

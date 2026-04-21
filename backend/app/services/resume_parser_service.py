@@ -26,6 +26,12 @@ from app.services.brazilian_validators import (
     parse_birth_date,
 )
 
+_LINKEDIN_BREAK_STOPWORDS = {
+    "contato", "contact", "resumo", "summary", "sobre", "about",
+    "principais", "competencias", "competências", "skills", "idiomas",
+    "languages", "certificacoes", "certificações", "experiencia", "experiência",
+}
+
 
 # Stopwords comuns que indicam frase narrativa (nao e skill/certificacao)
 _NARRATIVE_STOPWORDS = {
@@ -34,6 +40,10 @@ _NARRATIVE_STOPWORDS = {
     'também', 'muito', 'mais', 'menos', 'ainda', 'apenas', 'sempre',
     'nunca', 'assim', 'então', 'entao', 'deste', 'desta', 'nesta',
     'neste', 'nessa', 'nesse', 'aos', 'nos', 'nas',
+}
+_NARRATIVE_VERBS = {
+    "atuei", "conduzi", "possuo", "tenho", "desenvolvi", "implementei",
+    "liderei", "apoiei", "busco", "garantir", "entregando", "estruturando",
 }
 
 # Conjuncoes/preposicoes que terminam fragmentos incompletos
@@ -48,6 +58,15 @@ _SECTION_HEADERS_LOWER = {
     'endereço', 'dados', 'dados pessoais', 'principais competencias',
     'principais competências', 'top skills', 'summary', 'education',
     'languages', 'about', 'references', 'referencias', 'referências',
+}
+
+_CERTIFICATION_KEYWORDS = {
+    "certified", "certification", "certificate", "certificacao", "certificação",
+    "scrum", "pmp", "itil", "cobit", "iso", "green belt", "black belt",
+    "aws", "azure", "google cloud", "gcp", "oracle", "microsoft", "cisco",
+    "ccna", "comptia", "linux", "kubernetes", "safe", "saFe".lower(),
+    "android enterprise", "profissional", "professional", "expert", "foundation",
+    "associate", "practitioner",
 }
 
 
@@ -79,6 +98,9 @@ def _looks_like_narrative(line: str) -> bool:
     words = line_clean.split()
     if len(words) > 8:
         return True
+    # Frases com virgula geralmente sao narrativas, nao item de skill/cert
+    if ',' in line_clean and len(words) >= 5:
+        return True
     # Termina com conjuncao/preposicao -> fragmento cortado
     lower = line_clean.lower().rstrip('.,;:')
     for conj in _TRAILING_CONJUNCTIONS:
@@ -90,6 +112,8 @@ def _looks_like_narrative(line: str) -> bool:
         return True
     # Tem muitas stopwords narrativas
     words_lower = [w.lower().rstrip('.,;:') for w in words]
+    if any(v in words_lower for v in _NARRATIVE_VERBS):
+        return True
     stopword_count = sum(1 for w in words_lower if w in _NARRATIVE_STOPWORDS)
     if stopword_count >= 2:
         return True
@@ -127,6 +151,28 @@ def _is_clean_list_item(line: str, max_len: int = 80, min_len: int = 2) -> bool:
     if _looks_like_narrative(stripped):
         return False
     return True
+
+
+def _looks_like_certification_item(line: str) -> bool:
+    """Valida se o item parece certificacao real (evita frases narrativas/sujeira)."""
+    if not line:
+        return False
+    item = line.strip()
+    if not _is_clean_list_item(item, max_len=110, min_len=3):
+        return False
+    low = item.lower()
+    # Evitar lixo comum de PDF e contato
+    if any(token in low for token in ("linkedin.com", "@", "www.", "http", "[tabela]", "page ")):
+        return False
+    # Certificacoes costumam ter indicadores fortes
+    if any(k in low for k in _CERTIFICATION_KEYWORDS):
+        return True
+    # Aceitar siglas classicas (PMP, ITIL, COBIT, NR10, etc.)
+    if re.fullmatch(r'[A-Z]{2,8}(?:[-\s]?[A-Z0-9]{1,8})*', item):
+        return True
+    if re.fullmatch(r'NR[\s-]?\d{1,2}', item, re.IGNORECASE):
+        return True
+    return False
 
 
 # Mapeamento de variacoes de idiomas para forma canonica
@@ -325,12 +371,8 @@ class ResumeParserService:
                     info["phone"] = phone_match.group().strip()
                     break
 
-        # LinkedIn - com varias variacoes e correcao de quebras de linha
-        # Primeiro normaliza o texto unindo URLs quebradas (tanto /in/ quanto /pub/)
-        ln_normalized = re.sub(
-            r'(linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_]*)\s*\n\s*([A-Za-z0-9\-_]+)',
-            r'\1\2', text, flags=re.IGNORECASE,
-        )
+        # LinkedIn - com varias variacoes e correcao de quebras de linha/colunas.
+        ln_normalized = ResumeParserService._normalize_broken_linkedin_text(text)
         linkedin_patterns = [
             r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+',
             r'(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+',
@@ -547,6 +589,10 @@ class ResumeParserService:
             # Limpar nome: remover titulos e prefixos
             name = re.sub(r'^(?:Sr\.?|Sra\.?|Dr\.?|Dra\.?|Prof\.?)\s+', '', name, flags=re.IGNORECASE)
             info["name"] = name.strip()
+        else:
+            best_candidate = ResumeParserService._extract_best_name_candidate(text)
+            if best_candidate:
+                info["name"] = best_candidate
 
         # Localizacao (mais padroes)
         location_patterns = [
@@ -566,6 +612,114 @@ class ResumeParserService:
                     break
 
         return info
+
+    @staticmethod
+    def _normalize_broken_linkedin_text(text: str) -> str:
+        """Reconstrói URLs do LinkedIn quebradas por OCR/paginacao/colunas."""
+        if not text:
+            return ""
+
+        # Quebra de linha comum em slug (termina com '-' e continua na proxima linha)
+        normalized = re.sub(
+            r'([A-Za-z0-9])-\s*\n+\s*([A-Za-z0-9])',
+            r'\1-\2',
+            text,
+        )
+        # Quebra logo apos /in/ ou /pub/
+        normalized = re.sub(
+            r'(linkedin\.com/(?:in|pub)/)\s*\n+\s*([A-Za-z0-9])',
+            r'\1\2',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        # Remover espacos indevidos dentro do slug (OCR de duas colunas)
+        normalized = re.sub(
+            r'(linkedin\.com/(?:in|pub)/)([A-Za-z0-9][A-Za-z0-9\-_ ]{1,120})',
+            lambda m: m.group(1) + re.sub(r'\s+', '-', m.group(2).strip()),
+            normalized,
+            flags=re.IGNORECASE,
+        )
+
+        # Reconstrucao orientada a linhas para slugs espalhados em multiplas colunas.
+        lines = [ln.strip() for ln in text.splitlines()]
+        rebuilt_chunks = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            lower = line.lower()
+            if "linkedin.com/in/" not in lower and "linkedin.com/pub/" not in lower:
+                i += 1
+                continue
+
+            chunk = line
+            j = i + 1
+            while j < len(lines) and len(chunk) < 180:
+                nxt = lines[j].strip()
+                if not nxt:
+                    j += 1
+                    continue
+                nxt_lower = nxt.lower().strip(":")
+                if any(tok in nxt_lower.split() for tok in _LINKEDIN_BREAK_STOPWORDS):
+                    break
+                if "@" in nxt or "http://" in nxt_lower or "https://" in nxt_lower:
+                    break
+                if re.search(r'^[A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç]+\s+[A-Z]', nxt):
+                    break
+                if re.search(r'^[A-Za-z0-9\-_]{2,}$', nxt):
+                    chunk += nxt
+                else:
+                    compact = re.sub(r'[^A-Za-z0-9\-_]', '', nxt)
+                    if not compact:
+                        break
+                    chunk += compact
+                j += 1
+            rebuilt_chunks.append(chunk)
+            i = j
+
+        if rebuilt_chunks:
+            normalized += "\n" + "\n".join(rebuilt_chunks)
+        return normalized
+
+    @staticmethod
+    def _extract_best_name_candidate(text: str) -> Optional[str]:
+        """Extrai melhor candidato a nome entre primeiras linhas com score."""
+        if not text:
+            return None
+        candidates = []
+        preps = {'de', 'da', 'do', 'dos', 'das', 'e', 'di', 'del'}
+        for idx, line in enumerate([ln.strip() for ln in text.splitlines() if ln.strip()][:40]):
+            if len(line) < 5 or len(line) > 70:
+                continue
+            if re.search(r'\d|@|https?://|linkedin|github|\.com', line, re.IGNORECASE):
+                continue
+            if "|" in line or "," in line:
+                continue
+            words = [w.strip('.,;:') for w in line.split() if w.strip('.,;:')]
+            if len(words) < 2 or len(words) > 6:
+                continue
+            if any(w.lower() in _SECTION_HEADERS_LOWER for w in words):
+                continue
+            non_prep = [w for w in words if w.lower() not in preps]
+            if len(non_prep) < 2:
+                continue
+            if not all(w and w[0].isupper() for w in non_prep):
+                continue
+            if any(_looks_like_narrative(w) for w in (" ".join(words),)):
+                continue
+
+            score = 100 - idx * 2
+            if len(words) == 3:
+                score += 8
+            if len(words) == 2:
+                score += 4
+            if all(len(w) >= 3 for w in non_prep):
+                score += 4
+            candidates.append((score, line))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return candidates[0][1]
 
     @staticmethod
     def _find_section(text: str, keywords: list, next_keywords: list = None) -> str:
@@ -964,16 +1118,20 @@ class ResumeParserService:
 
             # Remove bullets
             line = re.sub(r'^[-•*–—·]\s*', '', line).strip()
-
-            # Certificacoes podem ter ate ~100 chars (ex: "AWS Certified Solutions Architect - Associate")
-            if not _is_clean_list_item(line, max_len=100, min_len=5):
-                continue
-
-            key = line.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            certifications.append(line)
+            # Divide por separadores comuns de listas, mas nao quebra em " - Associate"
+            parts = re.split(r'[;|•]+', line)
+            for part in parts:
+                part = part.strip(" -\t")
+                if not part:
+                    continue
+                # Rejeita frases sujas e aceita somente itens com semantica de certificacao
+                if not _looks_like_certification_item(part):
+                    continue
+                key = part.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                certifications.append(part)
 
         return certifications
 
