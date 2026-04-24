@@ -56,6 +56,42 @@ def test_normalizes_linkedin_pdf_export_with_broken_url_and_sidebar():
     assert "LinkedIn: https://www.linkedin.com/in/candidato-teste-perfil-12345" in normalized_text
 
 
+def test_strips_contact_label_glued_to_name_and_uses_hyperlink_uri():
+    """Cenario real: extracao em duas colunas grudou 'Contato' na linha do
+    nome e a URL do LinkedIn quebrou em duas linhas misturando texto da
+    coluna direita. O PDF traz a URL real como anotacao de hiperlink,
+    que precisa ter prioridade sobre o texto visivel reconstruido."""
+    raw = """
+    [HYPERLINK] https://www.linkedin.com/in/lucas-muller-rodrigues-9905931b
+    [HYPERLINK] https://www.mullerrodrigues.com
+    Contato Lucas Muller Rodrigues
+    lucas@mullerrodrigues.com Senior Project Manager | IA & Transformação Digital
+    www.linkedin.com/in/lucas-muller- equipes e inovação para resultados escaláveis
+    rodrigues-9905931b (LinkedIn) São Leopoldo, Rio Grande do Sul, Brasil
+    www.mullerrodrigues.com Resumo
+    (Personal) Possuo mais de 15 anos de experiência em Gestão de Projetos.
+    Principais competências
+    Gestão de data center
+    Workspace one
+    Active Directory
+    Languages
+    English
+    Certifications
+    Android Enterprise Certified Expert
+    """
+
+    result = normalize_linkedin_pdf_text(raw)
+    meta = result["metadata"]
+
+    assert result["is_linkedin_pdf"] is True
+    assert meta["name"] == "Lucas Muller Rodrigues"
+    assert meta["linkedin"] == "https://www.linkedin.com/in/lucas-muller-rodrigues-9905931b"
+    assert meta["portfolio"] == "https://www.mullerrodrigues.com"
+    assert meta["email"] == "lucas@mullerrodrigues.com"
+    # Marcadores [HYPERLINK] nao devem vazar para o texto normalizado.
+    assert "[HYPERLINK]" not in result["text"]
+
+
 def test_does_not_mark_plain_resume_without_linkedin_url_as_linkedin_pdf():
     raw = """
     Maria Silva
