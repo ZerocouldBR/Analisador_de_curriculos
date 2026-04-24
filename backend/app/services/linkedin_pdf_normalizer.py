@@ -49,10 +49,7 @@ _ALLOWED_PARTICLES = {"de", "da", "do", "dos", "das", "e", "di", "del", "van", "
 
 
 def _strip_accents(value: str) -> str:
-    return "".join(
-        ch for ch in unicodedata.normalize("NFKD", value or "")
-        if not unicodedata.combining(ch)
-    )
+    return "".join(ch for ch in unicodedata.normalize("NFKD", value or "") if not unicodedata.combining(ch))
 
 
 def _tokenize(value: str) -> List[str]:
@@ -85,6 +82,10 @@ def _is_section(line: str) -> bool:
 
 def _looks_like_email(line: str) -> bool:
     return bool(re.search(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", line))
+
+
+def _looks_like_any_url(line: str) -> bool:
+    return bool(re.search(r"(?:https?://|www\.|[A-Za-z0-9-]+\.[A-Za-z]{2,})", line, re.I))
 
 
 def _looks_like_url(line: str) -> bool:
@@ -153,36 +154,47 @@ def _looks_like_person_name(line: str) -> bool:
     return True
 
 
-def _canonical_linkedin_url_from_lines(lines: List[str]) -> Optional[str]:
-    """Extrai LinkedIn mesmo quando a URL quebra em várias linhas/colunas.
+def _clean_linkedin_url(value: str) -> Optional[str]:
+    candidate = re.sub(r"\s*\(LinkedIn\).*", "", value or "", flags=re.I)
+    candidate = re.sub(r"\s+", "", candidate)
+    candidate = re.sub(r"(?i)^www\.", "https://www.", candidate)
+    candidate = re.sub(r"(?i)^(?<!https://)(?<!http://)linkedin\.com", "https://www.linkedin.com", candidate)
+    candidate = re.sub(r"(?i)^(?<!https://)(?<!http://)www\.linkedin\.com", "https://www.linkedin.com", candidate)
+    match = re.search(r"https?://(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9._%-]+", candidate, re.I)
+    if not match:
+        return None
+    url = match.group(0).rstrip(".-_/ ")
+    return re.sub(r"^http://", "https://", url, flags=re.I)
 
-    Exemplo real: www.linkedin.com/in/lucas-muller-\nrodrigues-9905931b (LinkedIn)
+
+def _canonical_linkedin_url_from_lines(lines: List[str]) -> Optional[str]:
+    """Extrai LinkedIn mesmo quando a URL quebra em linhas.
+
+    Para em qualquer nova URL/site que nao seja LinkedIn, evitando grudar portfolio
+    no slug do perfil.
     """
     for idx, line in enumerate(lines):
         if "linkedin.com/" not in line.lower():
             continue
         parts = [line]
-        for nxt in lines[idx + 1: idx + 5]:
-            key = _section_key(nxt)
-            if key in _LINKEDIN_STOP_SECTIONS or _looks_like_email(nxt):
+        for nxt in lines[idx + 1: idx + 6]:
+            nxt_clean = nxt.strip()
+            key = _section_key(nxt_clean)
+            if key in _LINKEDIN_STOP_SECTIONS or _looks_like_email(nxt_clean):
                 break
-            if "(" in nxt and "linkedin" not in nxt.lower():
+            if "linkedin.com/" in nxt_clean.lower():
                 break
-            # aceita continuações do slug, inclusive quando vêm sem domínio
-            if re.match(r"^[A-Za-z0-9._%-]+(?:\s*\(LinkedIn\))?$", nxt.strip(), re.I):
-                parts.append(nxt)
+            if _looks_like_any_url(nxt_clean):
+                break
+            if "(" in nxt_clean and "linkedin" not in nxt_clean.lower():
+                break
+            if re.match(r"^[A-Za-z0-9_-]+(?:\s*\(LinkedIn\))?$", nxt_clean, re.I):
+                parts.append(nxt_clean)
                 continue
             break
-        candidate = "".join(parts)
-        candidate = re.sub(r"\s*\(LinkedIn\).*", "", candidate, flags=re.I)
-        candidate = re.sub(r"\s+", "", candidate)
-        candidate = re.sub(r"(?i)^www\.", "https://www.", candidate)
-        candidate = re.sub(r"(?i)^(?<!https://)(?<!http://)linkedin\.com", "https://www.linkedin.com", candidate)
-        candidate = re.sub(r"(?i)^(?<!https://)(?<!http://)www\.linkedin\.com", "https://www.linkedin.com", candidate)
-        match = re.search(r"https?://(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9._%-]+", candidate, re.I)
-        if match:
-            url = match.group(0).rstrip(".-_/ ")
-            return re.sub(r"^http://", "https://", url, flags=re.I)
+        url = _clean_linkedin_url("".join(parts))
+        if url:
+            return url
     return None
 
 
@@ -190,16 +202,9 @@ def _join_broken_linkedin(lines: List[str]) -> str:
     joined = "\n".join(lines)
     canonical = _canonical_linkedin_url_from_lines(lines)
     if canonical:
-        # adiciona a URL reconstruída no topo para parser/IA usarem a fonte correta
         joined = f"{canonical}\n{joined}"
-    joined = re.sub(
-        r"((?:https?://)?(?:www\.)?linkedin\.com/(?:in|pub)/)\s*\n\s*([A-Za-z0-9][A-Za-z0-9._%-]+)",
-        r"\1\2", joined, flags=re.I,
-    )
-    joined = re.sub(
-        r"((?:https?://)?(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9._%]+-)\s*\n\s*([A-Za-z0-9][A-Za-z0-9._%-]+)",
-        r"\1\2", joined, flags=re.I,
-    )
+    joined = re.sub(r"((?:https?://)?(?:www\.)?linkedin\.com/(?:in|pub)/)\s*\n\s*([A-Za-z0-9][A-Za-z0-9_-]+)", r"\1\2", joined, flags=re.I)
+    joined = re.sub(r"((?:https?://)?(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9_-]+-)\s*\n\s*([A-Za-z0-9][A-Za-z0-9_-]+)", r"\1\2", joined, flags=re.I)
     joined = re.sub(r"(?i)(?<!https://)(?<!http://)(www\.linkedin\.com/[\w./%-]+)", r"https://\1", joined)
     joined = re.sub(r"(?i)(?<!https://)(?<!http://)(linkedin\.com/[\w./%-]+)", r"https://www.\1", joined)
     return joined
@@ -233,8 +238,7 @@ def _score_name_against_slug(name: str, slug_tokens: List[str]) -> float:
     usable_slug = {t for t in slug_tokens if len(t) > 1 and not t.isdigit()}
     if not usable_slug:
         return 0.0
-    overlap = name_tokens & usable_slug
-    return len(overlap) / max(len(name_tokens), 1)
+    return len(name_tokens & usable_slug) / max(len(name_tokens), 1)
 
 
 def _extract_linkedin_profile_header(lines: List[str], linkedin_url: Optional[str] = None) -> Dict[str, Optional[str]]:
@@ -261,7 +265,6 @@ def _extract_linkedin_profile_header(lines: List[str], linkedin_url: Optional[st
         if score > best[3]:
             best = (line, headline, location, score)
 
-    # Se a URL contém slug do candidato, ela é o desempate principal contra nomes de empresa.
     if best[0] and best[3] >= 0.55:
         return {"name": best[0], "headline": best[1], "location": best[2]}
     return {"name": None, "headline": None, "location": best[2]}
@@ -330,6 +333,22 @@ def _dedupe(items: List[str], limit: int = 50) -> List[str]:
     return out
 
 
+def _extract_portfolio(lines: List[str], linkedin_url: Optional[str]) -> Optional[str]:
+    for line in lines:
+        if _looks_like_email(line) or "linkedin.com" in line.lower():
+            continue
+        matches = re.findall(r"(?i)(?:https?://)?(?:www\.)?[A-Za-z0-9-]+\.[A-Za-z]{2,}(?:/[\w./%-]*)?", line)
+        for site in matches:
+            clean = site.strip().rstrip(".,;) ")
+            if not clean or "linkedin.com" in clean.lower() or clean.lower() in {"https", "http", "www.https"}:
+                continue
+            clean_url = clean if re.match(r"https?://", clean, re.I) else f"https://{clean}"
+            if linkedin_url and clean_url.lower() == linkedin_url.lower():
+                continue
+            return clean_url
+    return None
+
+
 def extract_linkedin_pdf_metadata(text: str) -> Dict[str, Any]:
     cleaned = _strip_pdf_noise(text)
     raw_lines = _lines(cleaned)
@@ -337,16 +356,9 @@ def extract_linkedin_pdf_metadata(text: str) -> Dict[str, Any]:
     rebuilt_text = _join_broken_linkedin(raw_lines)
     lines = _lines(rebuilt_text)
 
-    linkedin_url = canonical_url or _first_match(r"https?://(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9._%/-]+", rebuilt_text)
+    linkedin_url = canonical_url or _first_match(r"https?://(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9_-]+", rebuilt_text)
     email = _first_match(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", rebuilt_text, flags=0)
-
-    sites = re.findall(r"(?i)\b(?:https?://)?(?:www\.)?(?!linkedin\.com)[A-Za-z0-9-]+\.[A-Za-z]{2,}(?:/[\w./%-]*)?", rebuilt_text)
-    portfolio = None
-    for site in sites:
-        if "@" in site or "linkedin.com" in site.lower():
-            continue
-        portfolio = site if site.startswith("http") else f"https://{site}"
-        break
+    portfolio = _extract_portfolio(raw_lines, linkedin_url)
 
     name_data = _extract_name_headline_location(lines, linkedin_url)
     name_idx = next((idx for idx, line in enumerate(lines) if line == name_data.get("name")), None)
