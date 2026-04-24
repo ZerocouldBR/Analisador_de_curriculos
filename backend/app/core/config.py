@@ -207,6 +207,7 @@ class Settings(BaseSettings):
     )
 
     # -- LinkedIn --
+    # (NOTA: configuracoes adicionais de LinkedIn ficam em "LinkedIn" mais abaixo.)
     linkedin_api_enabled: bool = Field(default=False, description="Habilitar integracao LinkedIn API")
     linkedin_api_provider: str = Field(
         default="none",
@@ -215,7 +216,34 @@ class Settings(BaseSettings):
     linkedin_client_id: Optional[str] = Field(default=None, description="LinkedIn OAuth Client ID")
     linkedin_client_secret: Optional[str] = Field(default=None, description="LinkedIn OAuth Client Secret")
     linkedin_redirect_uri: Optional[str] = Field(default=None, description="LinkedIn OAuth Redirect URI")
-    proxycurl_api_key: Optional[str] = Field(default=None, description="Chave da API Proxycurl para enriquecimento LinkedIn")
+
+    # Proxycurl
+    proxycurl_api_key: Optional[str] = Field(
+        default=None,
+        description="Chave da API Proxycurl para enriquecimento LinkedIn"
+    )
+    proxycurl_base_url: str = Field(
+        default="https://nubela.co/proxycurl",
+        description="URL base da API Proxycurl (sem barra final)"
+    )
+
+    # RapidAPI (para provider 'rapidapi')
+    rapidapi_key: Optional[str] = Field(
+        default=None,
+        description="Chave RapidAPI usada quando provider LinkedIn e 'rapidapi'"
+    )
+    rapidapi_host: Optional[str] = Field(
+        default=None,
+        description="Host da API RapidAPI (ex: linkedin-profile-data.p.rapidapi.com)"
+    )
+    rapidapi_profile_endpoint: str = Field(
+        default="/profile",
+        description="Path do endpoint de perfil na API RapidAPI escolhida"
+    )
+    rapidapi_url_param: str = Field(
+        default="url",
+        description="Nome do parametro de query que recebe a URL do perfil"
+    )
 
     # ================================================================
     # LLM e Chat
@@ -606,7 +634,8 @@ REGRAS:
     )
 
     # ================================================================
-    # LinkedIn
+    # LinkedIn - Comportamento de Busca/Enriquecimento
+    # (ver tambem configuracoes de provider acima)
     # ================================================================
     linkedin_enrichment_score_weight: float = Field(
         default=0.3, description="Peso do score LinkedIn ao enriquecer resultados"
@@ -619,6 +648,13 @@ REGRAS:
     )
     linkedin_internal_search_limit: int = Field(
         default=200, description="Max candidatos internos a considerar em busca LinkedIn"
+    )
+    linkedin_search_country: str = Field(
+        default="BR",
+        description=(
+            "Codigo ISO do pais (ex: BR, US, PT) usado como filtro padrao "
+            "em buscas no LinkedIn. Deixe vazio para desabilitar o filtro."
+        ),
     )
 
     # ================================================================

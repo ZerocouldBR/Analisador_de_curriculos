@@ -20,7 +20,6 @@ from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 import httpx
-from bs4 import BeautifulSoup
 
 from app.db.models import (
     ExternalEnrichment, Candidate, AuditLog, LinkedInSearch, Chunk
@@ -52,35 +51,75 @@ class LinkedInService:
         Extrai dados de um perfil do LinkedIn.
 
         Usa o provider configurado (Proxycurl, RapidAPI, ou scraping basico).
+
+        Raises:
+            ValueError: Quando a URL e invalida, a integracao esta desabilitada
+                       ou o provider selecionado nao esta devidamente configurado.
         """
         linkedin_pattern = r'https?://(www\.)?linkedin\.com/in/[\w-]+'
         if not re.match(linkedin_pattern, profile_url):
-            raise ValueError("URL do LinkedIn invalida")
+            raise ValueError(
+                "URL do LinkedIn invalida. Use o formato "
+                "https://www.linkedin.com/in/usuario"
+            )
 
-        provider = settings.linkedin_api_provider
+        if not settings.linkedin_api_enabled:
+            raise ValueError(
+                "Integracao LinkedIn desabilitada. "
+                "Habilite em Configuracoes > LinkedIn > 'Habilitar LinkedIn'."
+            )
 
-        if provider == "proxycurl" and settings.proxycurl_api_key:
+        provider = (settings.linkedin_api_provider or "none").lower()
+
+        if provider == "proxycurl":
+            if not settings.proxycurl_api_key:
+                raise ValueError(
+                    "Proxycurl selecionado mas API key nao configurada. "
+                    "Adicione a chave em Configuracoes > LinkedIn > 'Proxycurl API Key'."
+                )
             return await LinkedInService._extract_via_proxycurl(profile_url)
 
-        # Fallback: scraping basico (demonstracao)
-        return await LinkedInService._extract_via_scraping(profile_url)
+        if provider == "rapidapi":
+            if not settings.rapidapi_key or not settings.rapidapi_host:
+                raise ValueError(
+                    "RapidAPI selecionado mas credenciais incompletas. "
+                    "Configure 'RapidAPI Key' e 'RapidAPI Host' em Configuracoes > LinkedIn."
+                )
+            return await LinkedInService._extract_via_rapidapi(profile_url)
+
+        if provider == "official":
+            raise ValueError(
+                "Extracao direta via API Oficial do LinkedIn ainda nao esta "
+                "disponivel. Use provider 'proxycurl' ou 'rapidapi', ou utilize "
+                "a aba 'Enriquecimento Manual' para inserir os dados."
+            )
+
+        # provider == "none" ou desconhecido
+        raise ValueError(
+            "Nenhum provider de LinkedIn configurado. "
+            "Selecione 'proxycurl' ou 'rapidapi' em Configuracoes > LinkedIn > 'Provider da API' "
+            "e informe as credenciais correspondentes."
+        )
 
     @staticmethod
     async def _extract_via_proxycurl(profile_url: str) -> Optional[Dict[str, Any]]:
         """Extrai perfil completo via Proxycurl API"""
         try:
+            base_url = settings.proxycurl_base_url.rstrip("/")
             async with httpx.AsyncClient(timeout=settings.linkedin_request_timeout) as client:
                 response = await client.get(
-                    "https://nubela.co/proxycurl/api/v2/linkedin",
+                    f"{base_url}/api/v2/linkedin",
                     params={"url": profile_url},
                     headers={"Authorization": f"Bearer {settings.proxycurl_api_key}"},
                 )
 
                 if response.status_code == 404:
                     logger.warning(f"Proxycurl: perfil nao encontrado: {profile_url}")
-                    return None
+                    raise ValueError(
+                        "Perfil nao encontrado no LinkedIn. Verifique a URL."
+                    )
 
-                if response.status_code == 403:
+                if response.status_code in (401, 403):
                     logger.error("Proxycurl: API key invalida ou sem creditos")
                     raise ValueError(
                         "Erro de autenticacao com Proxycurl. "
@@ -96,7 +135,10 @@ class LinkedInService:
 
                 if response.status_code != 200:
                     logger.error(f"Proxycurl erro {response.status_code}: {response.text[:200]}")
-                    return None
+                    raise ValueError(
+                        f"Proxycurl retornou status {response.status_code}. "
+                        "Consulte os logs para detalhes."
+                    )
 
                 data = response.json()
 
@@ -156,58 +198,95 @@ class LinkedInService:
             raise
         except Exception as e:
             logger.error(f"Erro Proxycurl ao extrair perfil: {str(e)}")
-            return None
+            raise ValueError(
+                "Falha ao consultar Proxycurl. "
+                "Verifique conectividade, URL base e credenciais."
+            )
 
     @staticmethod
-    async def _extract_via_scraping(profile_url: str) -> Optional[Dict[str, Any]]:
-        """Fallback: extrai dados basicos via scraping HTML (limitado)"""
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
+    async def _extract_via_rapidapi(profile_url: str) -> Optional[Dict[str, Any]]:
+        """Extrai perfil completo via RapidAPI (endpoint configuravel)"""
+        host = (settings.rapidapi_host or "").strip()
+        if not host:
+            raise ValueError(
+                "RapidAPI Host nao configurado. "
+                "Defina em Configuracoes > LinkedIn > 'RapidAPI Host'."
+            )
 
+        endpoint_path = (settings.rapidapi_profile_endpoint or "/profile").strip()
+        if not endpoint_path.startswith("/"):
+            endpoint_path = "/" + endpoint_path
+        url_param = settings.rapidapi_url_param or "url"
+
+        try:
             async with httpx.AsyncClient(timeout=settings.linkedin_request_timeout) as client:
                 response = await client.get(
-                    profile_url, headers=headers, follow_redirects=True
+                    f"https://{host}{endpoint_path}",
+                    params={url_param: profile_url},
+                    headers={
+                        "X-RapidAPI-Key": settings.rapidapi_key,
+                        "X-RapidAPI-Host": host,
+                    },
                 )
 
+                if response.status_code == 404:
+                    raise ValueError(
+                        "Perfil nao encontrado no LinkedIn. Verifique a URL."
+                    )
+
+                if response.status_code in (401, 403):
+                    raise ValueError(
+                        "Erro de autenticacao com RapidAPI. "
+                        "Verifique sua RapidAPI Key e o plano de assinatura."
+                    )
+
+                if response.status_code == 429:
+                    raise ValueError(
+                        "Limite de requisicoes atingido no RapidAPI. "
+                        "Aguarde alguns minutos ou faca upgrade do plano."
+                    )
+
                 if response.status_code != 200:
-                    return None
+                    logger.error(f"RapidAPI erro {response.status_code}: {response.text[:200]}")
+                    raise ValueError(
+                        f"RapidAPI retornou status {response.status_code}. "
+                        "Consulte os logs para detalhes."
+                    )
 
-                soup = BeautifulSoup(response.text, 'html.parser')
+                data = response.json() or {}
 
-                profile_data = {
+                # RapidAPI nao tem schema unico; extraimos os campos mais comuns
+                full_name = (
+                    data.get("full_name")
+                    or data.get("fullName")
+                    or data.get("name")
+                    or " ".join(filter(None, [data.get("first_name"), data.get("last_name")])).strip()
+                    or None
+                )
+
+                return {
                     "profile_url": profile_url,
-                    "full_name": None,
-                    "headline": None,
-                    "location": None,
-                    "about": None,
-                    "experiences": [],
-                    "education": [],
-                    "skills": [],
-                    "certifications": [],
-                    "languages": [],
+                    "full_name": full_name,
+                    "headline": data.get("headline") or data.get("title"),
+                    "location": data.get("location") or data.get("geo"),
+                    "about": data.get("summary") or data.get("about"),
+                    "experiences": data.get("experiences") or data.get("experience") or [],
+                    "education": data.get("education") or data.get("educations") or [],
+                    "skills": data.get("skills") or [],
+                    "certifications": data.get("certifications") or [],
+                    "languages": data.get("languages") or [],
+                    "profile_pic_url": data.get("profile_pic_url") or data.get("profileImage"),
                     "extracted_at": datetime.now(timezone.utc).isoformat(),
-                    "source": "scraping",
+                    "source": "rapidapi",
                 }
 
-                title_tag = soup.find('title')
-                if title_tag:
-                    title_text = title_tag.get_text()
-                    if '|' in title_text:
-                        profile_data["full_name"] = title_text.split('|')[0].strip()
-                    elif '-' in title_text:
-                        profile_data["full_name"] = title_text.split('-')[0].strip()
-
-                meta_desc = soup.find('meta', {'name': 'description'})
-                if meta_desc and meta_desc.get('content'):
-                    profile_data["headline"] = meta_desc['content'][:200]
-
-                return profile_data
-
+        except ValueError:
+            raise
         except Exception as e:
-            logger.error(f"Erro ao extrair perfil do LinkedIn via scraping: {str(e)}")
-            return None
+            logger.error(f"Erro RapidAPI ao extrair perfil: {str(e)}")
+            raise ValueError(
+                "Falha ao consultar RapidAPI. Verifique host, endpoint e credenciais."
+            )
 
     # ================================================================
     # Proxycurl Person Search
@@ -233,15 +312,17 @@ class LinkedInService:
             if not params:
                 return []
 
-            params["country"] = "BR"
+            if settings.linkedin_search_country:
+                params["country"] = settings.linkedin_search_country
             params["page_size"] = min(
                 criteria.get("limit", 10),
                 settings.linkedin_search_results_limit
             )
 
+            base_url = settings.proxycurl_base_url.rstrip("/")
             async with httpx.AsyncClient(timeout=settings.linkedin_request_timeout) as client:
                 response = await client.get(
-                    "https://nubela.co/proxycurl/api/search/person/",
+                    f"{base_url}/api/search/person/",
                     params=params,
                     headers={"Authorization": f"Bearer {settings.proxycurl_api_key}"},
                 )
@@ -326,12 +407,18 @@ class LinkedInService:
                 )
 
         elif provider == "rapidapi":
-            status["credentials_configured"] = False
-            status["ready"] = False
-            status["message"] = (
-                "RapidAPI selecionado. Configure a integracao diretamente "
-                "no codigo do servico."
-            )
+            has_creds = bool(settings.rapidapi_key and settings.rapidapi_host)
+            status["credentials_configured"] = has_creds
+            status["ready"] = has_creds
+            if has_creds:
+                status["message"] = (
+                    f"RapidAPI configurado ({settings.rapidapi_host}) e pronto para uso."
+                )
+            else:
+                status["message"] = (
+                    "RapidAPI selecionado mas credenciais incompletas. "
+                    "Configure 'RapidAPI Key' e 'RapidAPI Host' em Configuracoes > LinkedIn."
+                )
 
         else:
             status["message"] = (

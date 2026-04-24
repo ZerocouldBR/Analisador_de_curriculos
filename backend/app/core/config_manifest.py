@@ -632,44 +632,79 @@ CONFIG_MANIFEST: list[dict[str, Any]] = [
     },
 
     # ================================================================
-    # LinkedIn
+    # LinkedIn (todas as configuracoes da integracao em um unico menu)
     # ================================================================
     {
         "category": "linkedin",
         "label": "LinkedIn",
         "icon": "LinkedIn",
-        "description": "Integracao com LinkedIn para enriquecimento de perfis",
+        "description": (
+            "Integracao com LinkedIn para extracao e enriquecimento de perfis. "
+            "Todas as credenciais, URLs, timeouts e parametros de busca ficam aqui."
+        ),
         "fields": [
-            _field("linkedin_api_enabled", "Habilitar LinkedIn", "boolean",
-                   "Ativar integracao com a API do LinkedIn"),
+            # --- Conexao e Provider ---
+            _field("linkedin_api_enabled", "Habilitar Integracao LinkedIn", "boolean",
+                   "Ativar integracao com a API do LinkedIn. "
+                   "Quando desabilitada, nenhuma extracao automatica e tentada."),
             _field("linkedin_api_provider", "Provider da API", "select",
-                   "Escolha o provedor de dados do LinkedIn. "
-                   "Proxycurl e o recomendado (API centralizada, sem OAuth por empresa).",
+                   "Provedor de dados do LinkedIn. "
+                   "'proxycurl' e o recomendado (API centralizada, sem OAuth por empresa). "
+                   "'rapidapi' usa marketplaces (freemium). "
+                   "'official' usa a API OAuth do LinkedIn.",
                    options=["none", "proxycurl", "rapidapi", "official"]),
-            _field("proxycurl_api_key", "Proxycurl API Key", "password",
+
+            # --- Proxycurl ---
+            _field("proxycurl_api_key", "Proxycurl - API Key", "password",
                    "Chave da API Proxycurl (obtenha em nubela.co/proxycurl). "
                    "Uma unica chave atende todos os clientes.",
                    sensitive=True, placeholder="SUA_PROXYCURL_API_KEY"),
-            _field("linkedin_client_id", "Client ID (OAuth)", "text",
+            _field("proxycurl_base_url", "Proxycurl - URL Base", "text",
+                   "URL base da API Proxycurl (sem barra final). "
+                   "Altere apenas se estiver usando proxy ou mirror.",
+                   placeholder="https://nubela.co/proxycurl"),
+
+            # --- RapidAPI ---
+            _field("rapidapi_key", "RapidAPI - Key", "password",
+                   "Chave RapidAPI (x-rapidapi-key) usada quando provider e 'rapidapi'",
+                   sensitive=True),
+            _field("rapidapi_host", "RapidAPI - Host", "text",
+                   "Host da API LinkedIn no RapidAPI (ex: linkedin-profile-data.p.rapidapi.com)",
+                   placeholder="linkedin-profile-data.p.rapidapi.com"),
+            _field("rapidapi_profile_endpoint", "RapidAPI - Endpoint de Perfil", "text",
+                   "Path do endpoint que retorna dados de um perfil (ex: /profile)",
+                   placeholder="/profile"),
+            _field("rapidapi_url_param", "RapidAPI - Nome do Parametro URL", "text",
+                   "Nome do query parameter que recebe a URL do LinkedIn (ex: url, linkedin_url)",
+                   placeholder="url"),
+
+            # --- OAuth (API Oficial) ---
+            _field("linkedin_client_id", "Oficial - Client ID (OAuth)", "text",
                    "LinkedIn OAuth Client ID (apenas para provider 'official')",
                    placeholder="77..."),
-            _field("linkedin_client_secret", "Client Secret (OAuth)", "password",
+            _field("linkedin_client_secret", "Oficial - Client Secret (OAuth)", "password",
                    "LinkedIn OAuth Client Secret (apenas para provider 'official')",
                    sensitive=True),
-            _field("linkedin_redirect_uri", "Redirect URI", "text",
+            _field("linkedin_redirect_uri", "Oficial - Redirect URI", "text",
                    "URL de callback OAuth", placeholder="https://meusite.com/callback"),
-            _field("linkedin_request_timeout", "Timeout (s)", "number",
-                   "Timeout para requisicoes ao LinkedIn",
+
+            # --- Comportamento de busca/enriquecimento ---
+            _field("linkedin_request_timeout", "Timeout de Requisicao (s)", "number",
+                   "Timeout para requisicoes ao provider escolhido",
                    min_value=5, max_value=120, step=5),
-            _field("linkedin_search_results_limit", "Max Resultados", "number",
-                   "Limite de resultados por busca",
+            _field("linkedin_search_country", "Pais Padrao da Busca (ISO)", "text",
+                   "Codigo ISO do pais usado como filtro padrao em buscas "
+                   "(ex: BR, US, PT). Deixe vazio para desabilitar o filtro.",
+                   placeholder="BR"),
+            _field("linkedin_search_results_limit", "Max Resultados por Busca", "number",
+                   "Limite de resultados por busca externa",
                    min_value=10, max_value=200, step=10),
-            _field("linkedin_enrichment_score_weight", "Peso Score Enriquecimento", "number",
-                   "Peso do score do LinkedIn no ranking de enriquecimento",
-                   min_value=0.0, max_value=1.0, step=0.05),
             _field("linkedin_internal_search_limit", "Limite Busca Interna", "number",
-                   "Maximo de candidatos retornados na busca interna do LinkedIn",
+                   "Maximo de candidatos internos a considerar em busca LinkedIn",
                    min_value=10, max_value=500, step=10),
+            _field("linkedin_enrichment_score_weight", "Peso Score Enriquecimento", "number",
+                   "Peso do score do LinkedIn no ranking de enriquecimento (0.0-1.0)",
+                   min_value=0.0, max_value=1.0, step=0.05),
         ],
     },
 
