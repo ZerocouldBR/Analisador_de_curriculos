@@ -23,6 +23,24 @@ from app.vectorstore import get_vector_store
 logger = logging.getLogger(__name__)
 
 
+def _pgvector_similarity_expr(column: str, bind_name: str = "query_vector") -> str:
+    """Expressao segura de similaridade pgvector para SQLAlchemy/psycopg.
+
+    Evita a sintaxe :query_vector::vector, que pode quebrar no parser do
+    SQLAlchemy/psycopg. A forma segura e CAST(:query_vector AS vector).
+    """
+    metric = (settings.pgvector_distance_metric or "cosine").lower()
+    bind = f"CAST(:{bind_name} AS vector)"
+    if metric == "cosine":
+        return f"1 - ({column} <=> {bind})"
+    if metric == "l2":
+        return f"1 - ({column} <-> {bind})"
+    if metric in {"inner_product", "ip"}:
+        return f"({column} <#> {bind}) * -1"
+    logger.warning("Metrica pgvector invalida '%s', usando cosine", metric)
+    return f"1 - ({column} <=> {bind})"
+
+
 class SemanticChunker:
     """
     Chunker semantico que divide texto preservando contexto.
@@ -531,12 +549,11 @@ class EmbeddingService:
         limit: int = 10,
     ) -> List[Tuple[Candidate, float]]:
         """
-        Busca hibrida combinando multiplas estrategias.
-        Pesos configurados via settings.
+        Busca hibrida combinando busca vetorial, full-text search e score de dominio.
+        Corrige pgvector bind/cast usando CAST(:query_vector AS vector).
         """
         query_embedding = await self.generate_embedding(query)
-        dist_op = settings.pgvector_distance_operator
-        similarity_expr = settings.get_similarity_expression("e.vector", ":query_vector")
+        similarity_expr = _pgvector_similarity_expr("e.vector", "query_vector")
         pre_threshold = settings.vector_search_pre_filter_threshold
 
         filter_clauses = ""
@@ -550,7 +567,6 @@ class EmbeddingService:
                 filter_clauses += " AND LOWER(cand.state) = LOWER(:filter_state)"
                 filter_params["filter_state"] = filters["state"]
 
-        # Whitelist de idiomas validos para prevenir SQL injection
         _VALID_FTS_LANGS = {
             "portuguese", "english", "spanish", "french", "german",
             "italian", "dutch", "russian", "simple",
@@ -587,13 +603,16 @@ class EmbeddingService:
             domain_scores AS (
                 SELECT
                     c.candidate_id,
-                    CASE
-                        WHEN c.meta_json->>'candidate_profile_type' IS NOT NULL
-                        THEN :domain_w * :domain_multiplier
-                        ELSE 0
-                    END as domain_score
+                    MAX(
+                        CASE
+                            WHEN c.meta_json->>'candidate_profile_type' IS NOT NULL
+                            THEN :domain_w * :domain_multiplier
+                            ELSE 0
+                        END
+                    ) as domain_score
                 FROM chunks c
                 WHERE c.section = 'full_text'
+                GROUP BY c.candidate_id
             )
             SELECT
                 cand.id,
@@ -633,7 +652,7 @@ class EmbeddingService:
         for row in result:
             candidate = db.query(Candidate).filter(Candidate.id == row.id).first()
             if candidate:
-                results.append((candidate, row.total_score))
+                results.append((candidate, float(row.total_score)))
 
         return results
 
