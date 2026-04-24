@@ -68,8 +68,46 @@ def _strip_pdf_noise(text: str) -> str:
     return cleaned
 
 
+_CONTACT_LABEL_PREFIX = re.compile(
+    r"^\s*(?:contato|contact(?:\s+info(?:rmation)?)?)\s+(?=[A-ZÁÉÍÓÚÂÊÔÃÕÇ])",
+    re.IGNORECASE,
+)
+
+
+def _strip_contact_label(line: str) -> str:
+    """Remove rotulo 'Contato'/'Contact' grudado no inicio de linhas quando
+    a extracao do PDF junta a coluna lateral com o cabecalho do perfil."""
+    if not line:
+        return line
+    return _CONTACT_LABEL_PREFIX.sub("", line, count=1).strip()
+
+
+def _extract_hyperlink_uris(text: str) -> List[str]:
+    """Coleta URIs marcadas como [HYPERLINK] pela camada de extracao de PDF."""
+    if not text or "[HYPERLINK]" not in text:
+        return []
+    uris: List[str] = []
+    seen: set = set()
+    for match in re.finditer(r"\[HYPERLINK\]\s*(\S+)", text):
+        uri = match.group(1).strip().rstrip(".,;)")
+        if uri and uri not in seen:
+            seen.add(uri)
+            uris.append(uri)
+    return uris
+
+
+def _strip_hyperlink_markers(text: str) -> str:
+    if not text or "[HYPERLINK]" not in text:
+        return text
+    return re.sub(r"^[ \t]*\[HYPERLINK\][^\n]*\n?", "", text, flags=re.MULTILINE)
+
+
 def _lines(text: str) -> List[str]:
-    return [re.sub(r"\s+", " ", line).strip() for line in text.splitlines() if line.strip()]
+    return [
+        re.sub(r"\s+", " ", _strip_contact_label(line)).strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
 
 
 def _section_key(line: str) -> str:
@@ -351,14 +389,32 @@ def _extract_portfolio(lines: List[str], linkedin_url: Optional[str]) -> Optiona
 
 def extract_linkedin_pdf_metadata(text: str) -> Dict[str, Any]:
     cleaned = _strip_pdf_noise(text)
-    raw_lines = _lines(cleaned)
-    canonical_url = _canonical_linkedin_url_from_lines(raw_lines)
+    hyperlink_uris = _extract_hyperlink_uris(cleaned)
+    cleaned_no_links = _strip_hyperlink_markers(cleaned)
+    raw_lines = _lines(cleaned_no_links)
+
+    # URLs de anotacoes de hiperlink do PDF tem prioridade absoluta porque
+    # nao sofrem com quebras de linha/colunas no texto visivel.
+    linkedin_url_from_links = None
+    portfolio_from_links = None
+    for uri in hyperlink_uris:
+        cleaned_uri = _clean_linkedin_url(uri)
+        if cleaned_uri and not linkedin_url_from_links:
+            linkedin_url_from_links = cleaned_uri
+        elif (
+            not portfolio_from_links
+            and re.match(r"^https?://", uri, re.I)
+            and "linkedin.com" not in uri.lower()
+        ):
+            portfolio_from_links = uri.rstrip(".,;)")
+
+    canonical_url = linkedin_url_from_links or _canonical_linkedin_url_from_lines(raw_lines)
     rebuilt_text = _join_broken_linkedin(raw_lines)
     lines = _lines(rebuilt_text)
 
     linkedin_url = canonical_url or _first_match(r"https?://(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9_-]+", rebuilt_text)
     email = _first_match(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", rebuilt_text, flags=0)
-    portfolio = _extract_portfolio(raw_lines, linkedin_url)
+    portfolio = portfolio_from_links or _extract_portfolio(raw_lines, linkedin_url)
 
     name_data = _extract_name_headline_location(lines, linkedin_url)
     name_idx = next((idx for idx, line in enumerate(lines) if line == name_data.get("name")), None)

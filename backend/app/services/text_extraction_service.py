@@ -256,14 +256,39 @@ class TextExtractionService:
                             "y_tolerance": 3,
                             "keep_blank_chars": False,
                         }
-                        direct_text = page.extract_text(
+                        # Detectar layout em colunas (ex: LinkedIn PDF export tem
+                        # uma coluna lateral com fundo escuro). Se detectado,
+                        # extrair cada coluna separadamente preserva o significado
+                        # de "Contato"/"Skills"/etc. e evita grudar rotulos da
+                        # coluna esquerda na frente do nome da direita.
+                        column_text = TextExtractionService._extract_text_by_columns(
+                            page,
                             x_tolerance=extract_settings["x_tolerance"],
                             y_tolerance=extract_settings["y_tolerance"],
-                        ) or ""
+                        )
+                        if column_text is not None:
+                            direct_text = column_text
+                        else:
+                            direct_text = page.extract_text(
+                                x_tolerance=extract_settings["x_tolerance"],
+                                y_tolerance=extract_settings["y_tolerance"],
+                            ) or ""
                         direct_text = direct_text.strip()
                     except Exception as e:
                         direct_text = ""
                         warnings.append(f"Erro texto direto pagina {page_num + 1}: {str(e)}")
+
+                    # Capturar URLs de anotacoes de hiperlink do PDF (mais
+                    # confiavel que o texto visivel quando este quebra entre
+                    # linhas/colunas). Anexamos cada URI como linha "[HYPERLINK]"
+                    # para que o parser/normalizador possa preferi-las.
+                    try:
+                        link_uris = TextExtractionService._extract_pdf_hyperlinks(page)
+                        if link_uris:
+                            link_block = "\n".join(f"[HYPERLINK] {uri}" for uri in link_uris)
+                            direct_text = (direct_text + "\n" + link_block).strip() if direct_text else link_block
+                    except Exception as link_err:
+                        logger.debug(f"Erro hiperlinks pagina {page_num + 1}: {link_err}")
 
                     # Extrair tabelas da pagina (pdfplumber e bom nisso)
                     table_text = ""
@@ -364,6 +389,137 @@ class TextExtractionService:
 
         except Exception as e:
             raise ValueError(f"Erro ao extrair texto do PDF: {str(e)}")
+
+    @staticmethod
+    def _extract_text_by_columns(page, x_tolerance: float = 3, y_tolerance: float = 3) -> Optional[str]:
+        """
+        Detecta layout em duas colunas (ex: LinkedIn PDF export, com sidebar
+        de fundo colorido) e extrai cada coluna separadamente, na ordem de
+        leitura: coluna esquerda inteira, depois coluna direita inteira.
+
+        Retorna None quando o layout nao parece de duas colunas, deixando a
+        extracao padrao seguir.
+        """
+        try:
+            chars = page.chars or []
+        except Exception:
+            return None
+
+        if len(chars) < 40:
+            return None
+
+        page_width = float(page.width or 0)
+        if page_width <= 0:
+            return None
+
+        # Histograma simples de x0 em 20 bins; procuramos uma "valley" entre
+        # ~20% e ~55% da largura que separa duas massas significativas de
+        # caracteres. PDFs de coluna unica nao apresentam esse vale.
+        bins = 20
+        bin_width = page_width / bins
+        if bin_width <= 0:
+            return None
+
+        counts = [0] * bins
+        for ch in chars:
+            try:
+                x0 = float(ch.get("x0", 0))
+            except (TypeError, ValueError):
+                continue
+            idx = int(x0 / bin_width)
+            if 0 <= idx < bins:
+                counts[idx] += 1
+
+        total = sum(counts)
+        if total < 40:
+            return None
+
+        # Procurar split nas faixas plausiveis para sidebar.
+        min_bin = max(int(bins * 0.20), 1)
+        max_bin = min(int(bins * 0.55), bins - 1)
+        if max_bin <= min_bin:
+            return None
+
+        best_split_idx = None
+        best_score = 0.0
+        for i in range(min_bin, max_bin):
+            left_count = sum(counts[:i])
+            right_count = sum(counts[i:])
+            valley = counts[i]
+            # Cada lado deve ter massa apreciavel e o ponto de corte deve ser
+            # um vale (poucos caracteres atravessam ali).
+            if left_count < total * 0.15 or right_count < total * 0.30:
+                continue
+            if valley > total * 0.04:
+                continue
+            score = min(left_count, right_count) / max(valley + 1, 1)
+            if score > best_score:
+                best_score = score
+                best_split_idx = i
+
+        if best_split_idx is None or best_score < 5.0:
+            return None
+
+        split_x = best_split_idx * bin_width
+        page_height = float(page.height or 0)
+        if page_height <= 0:
+            return None
+
+        try:
+            left_crop = page.crop((0, 0, split_x, page_height), strict=False)
+            right_crop = page.crop((split_x, 0, page_width, page_height), strict=False)
+            left_text = (left_crop.extract_text(x_tolerance=x_tolerance, y_tolerance=y_tolerance) or "").strip()
+            right_text = (right_crop.extract_text(x_tolerance=x_tolerance, y_tolerance=y_tolerance) or "").strip()
+        except Exception:
+            return None
+
+        if not left_text and not right_text:
+            return None
+
+        # Coluna esquerda primeiro (rotulos: Contato, Skills, Languages...),
+        # depois coluna direita (nome, headline, resumo, experiencias).
+        return f"{left_text}\n\n{right_text}".strip()
+
+    @staticmethod
+    def _extract_pdf_hyperlinks(page) -> List[str]:
+        """
+        Coleta URIs de anotacoes de hiperlink da pagina. Util quando o texto
+        visivel da URL esta quebrado entre linhas/colunas mas o PDF contem
+        a URL real como anotacao clicavel.
+        """
+        uris: List[str] = []
+        seen = set()
+
+        def _add(uri):
+            if not uri or not isinstance(uri, str):
+                return
+            cleaned = uri.strip()
+            if not cleaned or cleaned in seen:
+                return
+            seen.add(cleaned)
+            uris.append(cleaned)
+
+        try:
+            for link in (getattr(page, "hyperlinks", None) or []):
+                _add(link.get("uri"))
+        except Exception:
+            pass
+
+        try:
+            for annot in (getattr(page, "annots", None) or []):
+                data = annot.get("data") if isinstance(annot, dict) else None
+                if not data:
+                    continue
+                action = data.get("A") or data.get("a") or {}
+                uri = None
+                if isinstance(action, dict):
+                    uri = action.get("URI") or action.get("uri")
+                _add(uri)
+                _add(annot.get("uri"))
+        except Exception:
+            pass
+
+        return uris
 
     @staticmethod
     def _ocr_pdf_page(page, page_num: int) -> Tuple[str, float]:

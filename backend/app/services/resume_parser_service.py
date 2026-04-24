@@ -371,20 +371,31 @@ class ResumeParserService:
                     info["phone"] = phone_match.group().strip()
                     break
 
-        # LinkedIn - com varias variacoes e correcao de quebras de linha/colunas.
-        ln_normalized = ResumeParserService._normalize_broken_linkedin_text(text)
-        linkedin_patterns = [
-            r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+',
-            r'(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+',
-        ]
-        for pattern in linkedin_patterns:
-            linkedin_match = re.search(pattern, ln_normalized, re.IGNORECASE)
-            if linkedin_match:
-                # Usar o normalizador central - preserva /in/ vs /pub/
-                canonical = normalize_linkedin_url(linkedin_match.group())
+        # LinkedIn - prioridade 1: anotacoes de hiperlink do PDF (resistentes
+        # a quebras de linha/colunas).
+        for hyperlink_match in re.finditer(r"\[HYPERLINK\]\s*(\S+)", text):
+            uri = hyperlink_match.group(1).strip().rstrip(".,;)")
+            if "linkedin.com" in uri.lower():
+                canonical = normalize_linkedin_url(uri)
                 if canonical:
                     info["linkedin"] = canonical
                     break
+
+        # Prioridade 2: regex no texto, com correcao de URLs quebradas.
+        if not info.get("linkedin"):
+            ln_normalized = ResumeParserService._normalize_broken_linkedin_text(text)
+            linkedin_patterns = [
+                r'https?://(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+',
+                r'(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%]+',
+            ]
+            for pattern in linkedin_patterns:
+                linkedin_match = re.search(pattern, ln_normalized, re.IGNORECASE)
+                if linkedin_match:
+                    # Usar o normalizador central - preserva /in/ vs /pub/
+                    canonical = normalize_linkedin_url(linkedin_match.group())
+                    if canonical:
+                        info["linkedin"] = canonical
+                        break
 
         # GitHub
         github_pattern = r'(?:https?://)?(?:www\.)?github\.com/[\w-]+'
@@ -548,7 +559,21 @@ class ResumeParserService:
 
         # 2. Se nao encontrou rotulado, tentar primeira linha significativa
         if not name:
-            lines = [line.strip() for line in text.split('\n') if line.strip()]
+            # Em PDFs LinkedIn em duas colunas, a label "Contato" da coluna
+            # esquerda pode aparecer grudada na linha do nome (coluna direita).
+            # Removemos esse prefixo antes de validar candidatos a nome.
+            contact_prefix_re = re.compile(
+                r"^(?:contato|contact(?:\s+info(?:rmation)?)?)\s+(?=[A-ZÁÉÍÓÚÂÊÔÃÕÇ])",
+                re.IGNORECASE,
+            )
+            lines = []
+            for raw_line in text.split('\n'):
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                cleaned = contact_prefix_re.sub('', stripped, count=1).strip()
+                if cleaned:
+                    lines.append(cleaned)
 
             for line in lines[:25]:
                 # Pular linhas muito curtas ou muito longas
