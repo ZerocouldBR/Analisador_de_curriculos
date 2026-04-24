@@ -3,20 +3,22 @@ Normalizador para PDFs exportados do LinkedIn.
 
 O export do LinkedIn costuma sair em duas colunas. Ao extrair texto do PDF,
 a coluna lateral (Contato, Principais competencias, Languages, Certifications)
-pode ser concatenada antes do corpo do curriculo. Isso faz importadores simples
-confundirem nome, headline, localizacao, skills e certificacoes.
+pode ser concatenada antes do corpo do curriculo. Este normalizador reconstrói
+o cabeçalho do perfil, corrige URLs quebradas e usa o slug do LinkedIn como
+sinal forte para validar o nome real do candidato.
 """
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+import unicodedata
+from typing import Any, Dict, List, Optional, Tuple
 
 _LINKEDIN_STOP_SECTIONS = {
     "contato", "contact", "principais competências", "principais competencias",
     "top skills", "competências", "competencias", "skills", "languages",
     "idiomas", "certifications", "certificações", "certificacoes", "resumo",
     "summary", "experiência", "experiencia", "experience", "formação acadêmica",
-    "formacao academica", "education",
+    "formacao academica", "education", "activity", "atividade", "publications",
 }
 
 _TECHNICAL_TERMS = {
@@ -26,6 +28,8 @@ _TECHNICAL_TERMS = {
     "transformacao", "languages", "english", "certifications", "certificações",
     "competências", "competencias", "resumo", "contato", "linkedin", "personal",
     "leadership", "pmo", "cloud", "analytics", "business", "intelligence",
+    "tecnologia", "technology", "ltda", "ltpa", "inc", "sa", "s/a", "company",
+    "empresa", "consultoria", "solutions", "solution", "sistemas", "system",
 }
 
 _HEADLINE_TERMS = {
@@ -33,7 +37,27 @@ _HEADLINE_TERMS = {
     "desenvolvedor", "diretor", "engenheiro", "especialista", "gerente", "gestor",
     "head", "lead", "leader", "manager", "project", "product", "program", "senior",
     "sênior", "supervisor", "tech", "ti", "ia", "dados", "data", "cloud", "digital",
+    "transformação", "transformacao", "pmo", "cto", "cio", "scrum", "agile",
 }
+
+_COMPANY_SUFFIX_TERMS = {
+    "ltda", "ltpa", "sa", "s/a", "inc", "corp", "corporation", "company", "empresa",
+    "tecnologia", "technology", "consultoria", "solutions", "sistemas", "system",
+}
+
+_ALLOWED_PARTICLES = {"de", "da", "do", "dos", "das", "e", "di", "del", "van", "von"}
+
+
+def _strip_accents(value: str) -> str:
+    return "".join(
+        ch for ch in unicodedata.normalize("NFKD", value or "")
+        if not unicodedata.combining(ch)
+    )
+
+
+def _tokenize(value: str) -> List[str]:
+    clean = _strip_accents(value).lower()
+    return [t for t in re.split(r"[^a-z0-9]+", clean) if t]
 
 
 def _strip_pdf_noise(text: str) -> str:
@@ -96,6 +120,11 @@ def _looks_like_professional_headline(line: str) -> bool:
     return bool(words & _HEADLINE_TERMS)
 
 
+def _looks_like_company_name(value: str) -> bool:
+    tokens = set(_tokenize(value))
+    return bool(tokens & _COMPANY_SUFFIX_TERMS)
+
+
 def _looks_like_person_name(line: str) -> bool:
     candidate = line.strip()
     if not candidate or len(candidate) > 80 or len(candidate) < 5:
@@ -104,6 +133,8 @@ def _looks_like_person_name(line: str) -> bool:
         return False
     if _looks_like_location(candidate) or _looks_like_page_marker(candidate):
         return False
+    if _looks_like_company_name(candidate):
+        return False
     if any(ch.isdigit() for ch in candidate):
         return False
     if any(sym in candidate for sym in ("|", "@", "/", "\\", ":", ";")):
@@ -111,10 +142,9 @@ def _looks_like_person_name(line: str) -> bool:
     words = candidate.split()
     if len(words) < 2 or len(words) > 7:
         return False
-    allowed_particles = {"de", "da", "do", "dos", "das", "e", "di", "del", "van", "von"}
     for word in words:
         low = word.lower().strip(".,()[]{}")
-        if low in allowed_particles:
+        if low in _ALLOWED_PARTICLES:
             continue
         if low in _TECHNICAL_TERMS:
             return False
@@ -123,18 +153,51 @@ def _looks_like_person_name(line: str) -> bool:
     return True
 
 
+def _canonical_linkedin_url_from_lines(lines: List[str]) -> Optional[str]:
+    """Extrai LinkedIn mesmo quando a URL quebra em várias linhas/colunas.
+
+    Exemplo real: www.linkedin.com/in/lucas-muller-\nrodrigues-9905931b (LinkedIn)
+    """
+    for idx, line in enumerate(lines):
+        if "linkedin.com/" not in line.lower():
+            continue
+        parts = [line]
+        for nxt in lines[idx + 1: idx + 5]:
+            key = _section_key(nxt)
+            if key in _LINKEDIN_STOP_SECTIONS or _looks_like_email(nxt):
+                break
+            if "(" in nxt and "linkedin" not in nxt.lower():
+                break
+            # aceita continuações do slug, inclusive quando vêm sem domínio
+            if re.match(r"^[A-Za-z0-9._%-]+(?:\s*\(LinkedIn\))?$", nxt.strip(), re.I):
+                parts.append(nxt)
+                continue
+            break
+        candidate = "".join(parts)
+        candidate = re.sub(r"\s*\(LinkedIn\).*", "", candidate, flags=re.I)
+        candidate = re.sub(r"\s+", "", candidate)
+        candidate = re.sub(r"(?i)^www\.", "https://www.", candidate)
+        candidate = re.sub(r"(?i)^(?<!https://)(?<!http://)linkedin\.com", "https://www.linkedin.com", candidate)
+        candidate = re.sub(r"(?i)^(?<!https://)(?<!http://)www\.linkedin\.com", "https://www.linkedin.com", candidate)
+        match = re.search(r"https?://(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9._%-]+", candidate, re.I)
+        if match:
+            url = match.group(0).rstrip(".-_/ ")
+            return re.sub(r"^http://", "https://", url, flags=re.I)
+    return None
+
+
 def _join_broken_linkedin(lines: List[str]) -> str:
     joined = "\n".join(lines)
+    canonical = _canonical_linkedin_url_from_lines(lines)
+    if canonical:
+        # adiciona a URL reconstruída no topo para parser/IA usarem a fonte correta
+        joined = f"{canonical}\n{joined}"
     joined = re.sub(
         r"((?:https?://)?(?:www\.)?linkedin\.com/(?:in|pub)/)\s*\n\s*([A-Za-z0-9][A-Za-z0-9._%-]+)",
         r"\1\2", joined, flags=re.I,
     )
     joined = re.sub(
         r"((?:https?://)?(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9._%]+-)\s*\n\s*([A-Za-z0-9][A-Za-z0-9._%-]+)",
-        r"\1\2", joined, flags=re.I,
-    )
-    joined = re.sub(
-        r"((?:https?://)?(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9._%]+-)\s*([A-Za-z0-9][A-Za-z0-9._%-]+)",
         r"\1\2", joined, flags=re.I,
     )
     joined = re.sub(r"(?i)(?<!https://)(?<!http://)(www\.linkedin\.com/[\w./%-]+)", r"https://\1", joined)
@@ -154,52 +217,79 @@ def _find_first_section_index(lines: List[str], labels: set[str]) -> Optional[in
     return None
 
 
-def _extract_linkedin_profile_header(lines: List[str]) -> Dict[str, Optional[str]]:
+def _slug_tokens(linkedin_url: Optional[str]) -> List[str]:
+    if not linkedin_url:
+        return []
+    match = re.search(r"linkedin\.com/(?:in|pub)/([^/?#\s]+)", linkedin_url, re.I)
+    if not match:
+        return []
+    return [t for t in _tokenize(match.group(1)) if not t.isdigit() and len(t) > 1]
+
+
+def _score_name_against_slug(name: str, slug_tokens: List[str]) -> float:
+    if not slug_tokens or not _looks_like_person_name(name):
+        return 0.0
+    name_tokens = set(_tokenize(name))
+    usable_slug = {t for t in slug_tokens if len(t) > 1 and not t.isdigit()}
+    if not usable_slug:
+        return 0.0
+    overlap = name_tokens & usable_slug
+    return len(overlap) / max(len(name_tokens), 1)
+
+
+def _extract_linkedin_profile_header(lines: List[str], linkedin_url: Optional[str] = None) -> Dict[str, Optional[str]]:
+    slug = _slug_tokens(linkedin_url)
     resumo_idx = _find_first_section_index(lines, {"resumo", "summary"})
-    search_end = resumo_idx if resumo_idx is not None else min(len(lines), 100)
-    search_start = max(0, search_end - 14)
-    clean_window = [
-        l for l in lines[search_start:search_end]
-        if not _looks_like_page_marker(l) and not _is_section(l)
-    ]
+    search_end = resumo_idx if resumo_idx is not None else min(len(lines), 140)
+    search_start = max(0, search_end - 25)
+    clean_window = [l for l in lines[search_start:search_end] if not _looks_like_page_marker(l) and not _is_section(l)]
 
-    if not clean_window:
-        return {"name": None, "headline": None, "location": None}
-
-    location = None
-    if _looks_like_location(clean_window[-1]):
-        location = clean_window[-1]
-        clean_window = clean_window[:-1]
-
+    best: Tuple[Optional[str], Optional[str], Optional[str], float] = (None, None, None, 0.0)
     for idx, line in enumerate(clean_window):
         if not _looks_like_person_name(line):
             continue
-        after = clean_window[idx + 1:]
-        if after and any(_looks_like_professional_headline(h) for h in after):
-            return {
-                "name": line,
-                "headline": " ".join(after).strip() or None,
-                "location": location,
-            }
+        after = clean_window[idx + 1: idx + 5]
+        location = next((l for l in after if _looks_like_location(l)), None)
+        headline_parts = [l for l in after if l and not _looks_like_location(l) and not _looks_like_person_name(l)]
+        headline = " ".join(headline_parts).strip() or None
+        score = 0.45
+        if any(_looks_like_professional_headline(h) for h in after):
+            score += 0.2
+        if location:
+            score += 0.15
+        score += min(_score_name_against_slug(line, slug), 1.0) * 0.5
+        if score > best[3]:
+            best = (line, headline, location, score)
 
-    return {"name": None, "headline": None, "location": location}
+    # Se a URL contém slug do candidato, ela é o desempate principal contra nomes de empresa.
+    if best[0] and best[3] >= 0.55:
+        return {"name": best[0], "headline": best[1], "location": best[2]}
+    return {"name": None, "headline": None, "location": best[2]}
 
 
-def _extract_name_headline_location(lines: List[str]) -> Dict[str, Optional[str]]:
-    anchored = _extract_linkedin_profile_header(lines)
+def _extract_name_headline_location(lines: List[str], linkedin_url: Optional[str] = None) -> Dict[str, Optional[str]]:
+    anchored = _extract_linkedin_profile_header(lines, linkedin_url)
     if anchored.get("name"):
         return anchored
 
-    for idx, line in enumerate(lines[:100]):
+    slug = _slug_tokens(linkedin_url)
+    best: Tuple[Optional[str], Optional[str], Optional[str], float] = (None, None, None, 0.0)
+    for idx, line in enumerate(lines[:140]):
         if not _looks_like_person_name(line):
             continue
-        next_lines = lines[idx + 1:idx + 4]
-        if not any(_looks_like_professional_headline(l) for l in next_lines):
-            continue
+        next_lines = lines[idx + 1:idx + 5]
         location = next((l for l in next_lines if _looks_like_location(l)), None)
-        headline = " ".join(l for l in next_lines if l and not _looks_like_location(l) and not _is_section(l))
-        return {"name": line, "headline": headline or None, "location": location}
+        headline = " ".join(l for l in next_lines if l and not _looks_like_location(l) and not _is_section(l)) or None
+        score = 0.2 + _score_name_against_slug(line, slug) * 0.7
+        if any(_looks_like_professional_headline(l) for l in next_lines):
+            score += 0.2
+        if location:
+            score += 0.1
+        if score > best[3]:
+            best = (line, headline, location, score)
 
+    if best[0] and best[3] >= 0.45:
+        return {"name": best[0], "headline": best[1], "location": best[2]}
     return {"name": None, "headline": None, "location": anchored.get("location")}
 
 
@@ -243,10 +333,11 @@ def _dedupe(items: List[str], limit: int = 50) -> List[str]:
 def extract_linkedin_pdf_metadata(text: str) -> Dict[str, Any]:
     cleaned = _strip_pdf_noise(text)
     raw_lines = _lines(cleaned)
+    canonical_url = _canonical_linkedin_url_from_lines(raw_lines)
     rebuilt_text = _join_broken_linkedin(raw_lines)
     lines = _lines(rebuilt_text)
 
-    linkedin_url = _first_match(r"https?://(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9._%/-]+", rebuilt_text)
+    linkedin_url = canonical_url or _first_match(r"https?://(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9._%/-]+", rebuilt_text)
     email = _first_match(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", rebuilt_text, flags=0)
 
     sites = re.findall(r"(?i)\b(?:https?://)?(?:www\.)?(?!linkedin\.com)[A-Za-z0-9-]+\.[A-Za-z]{2,}(?:/[\w./%-]*)?", rebuilt_text)
@@ -257,7 +348,7 @@ def extract_linkedin_pdf_metadata(text: str) -> Dict[str, Any]:
         portfolio = site if site.startswith("http") else f"https://{site}"
         break
 
-    name_data = _extract_name_headline_location(lines)
+    name_data = _extract_name_headline_location(lines, linkedin_url)
     name_idx = next((idx for idx, line in enumerate(lines) if line == name_data.get("name")), None)
 
     stop = {"languages", "idiomas", "certifications", "certificações", "certificacoes", "resumo", "summary", "experiência", "experiencia", "experience"}
@@ -266,7 +357,7 @@ def extract_linkedin_pdf_metadata(text: str) -> Dict[str, Any]:
     languages = _collect_between(lines, {"languages", "idiomas"}, {"certifications", "certificações", "certificacoes", "resumo", "summary"}, hard_stop_index=name_idx)
 
     return {
-        "is_linkedin_pdf": bool(linkedin_url and ("Page" in text or "Contato" in text or "Principais" in text)),
+        "is_linkedin_pdf": bool(linkedin_url and ("Page" in text or "Contato" in text or "Principais" in text or "Languages" in text or "Certifications" in text)),
         "cleaned_text": rebuilt_text,
         "name": name_data.get("name"),
         "headline": name_data.get("headline"),
@@ -277,13 +368,14 @@ def extract_linkedin_pdf_metadata(text: str) -> Dict[str, Any]:
         "skills": _dedupe(skills, limit=20),
         "languages": _dedupe(languages, limit=10),
         "certifications": _dedupe(certifications, limit=30),
+        "layout_detected": "linkedin_two_column_pdf" if linkedin_url else None,
     }
 
 
 def build_structured_prefix(metadata: Dict[str, Any]) -> str:
     if not metadata.get("is_linkedin_pdf"):
         return ""
-    lines = ["DADOS ESTRUTURADOS DETECTADOS - LINKEDIN PDF", "Origem: LinkedIn PDF Export"]
+    lines = ["DADOS ESTRUTURADOS DETECTADOS - LINKEDIN PDF", "Origem: LinkedIn PDF Export", "Layout: duas colunas reconstruido"]
     for label, key in (("Nome", "name"), ("Titulo profissional", "headline"), ("Localizacao", "location"), ("Email", "email"), ("LinkedIn", "linkedin"), ("Portfolio", "portfolio")):
         value = metadata.get(key)
         if value:
