@@ -21,6 +21,7 @@ from app.schemas.candidate import (
 from app.services.linkedin_service import LinkedInService
 from app.services.candidate_service import CandidateService
 from app.core.dependencies import require_permission, get_current_user
+from app.core.config import settings
 from app.db.models import User
 
 router = APIRouter(prefix="/linkedin", tags=["linkedin"])
@@ -351,7 +352,7 @@ def get_linkedin_integration_guide(
     """
     return {
         "title": "Guia Completo - Integracao LinkedIn para Busca de Curriculos",
-        "updated_at": "2025-01-01",
+        "app_version": settings.app_version,
 
         "overview": (
             "Este guia explica como configurar a integracao com o LinkedIn "
