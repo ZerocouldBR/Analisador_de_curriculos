@@ -191,16 +191,18 @@ def process_document_task(
                         f"Could not parse birth_date: {personal['birth_date']}"
                     )
 
-            # Update location from resume
+            # Update location from resume. parse_brazilian_location aceita
+            # "Cidade, UF", "Cidade - UF", "Cidade/UF" e "Cidade, Estado por
+            # extenso, Pais" (comum em exports do LinkedIn) e devolve cidade
+            # e UF normalizadas.
             if personal.get("location"):
-                location = personal["location"]
-                loc_match = re.match(
-                    r'([A-ZÁÉÍÓÚÂÊÔÃÕÇa-záéíóúâêôãõç\s]+),?\s*[-–]?\s*([A-Z]{2})',
-                    location
-                )
-                if loc_match:
-                    candidate.city = loc_match.group(1).strip()
-                    candidate.state = loc_match.group(2).strip()
+                from app.services.brazilian_validators import parse_brazilian_location
+                parsed_loc = parse_brazilian_location(personal["location"])
+                if parsed_loc:
+                    if parsed_loc.get("city"):
+                        candidate.city = parsed_loc["city"]
+                    if parsed_loc.get("state"):
+                        candidate.state = parsed_loc["state"]
 
             # Endereco completo
             if personal.get("full_address"):

@@ -24,6 +24,7 @@ from app.services.brazilian_validators import (
     normalize_linkedin_url,
     normalize_phone_br,
     parse_birth_date,
+    parse_brazilian_location,
 )
 
 _LINKEDIN_BREAK_STOPWORDS = {
@@ -619,24 +620,70 @@ class ResumeParserService:
             if best_candidate:
                 info["name"] = best_candidate
 
-        # Localizacao (mais padroes)
-        location_patterns = [
-            r'(?:endereço|endereco|moradia|resido|residência|residencia|localização|localizacao)[\s:]+(.+?)(?:\n|$)',
-            r'([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+),\s*([A-Z]{2})\b',
-            r'([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+)\s+[-–]\s+([A-Z]{2})\b',
-            r'(?:cidade|city|local)[\s:]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç\s]+)',
-        ]
-
-        for pattern in location_patterns:
-            location_match = re.search(pattern, text)
-            if location_match:
-                loc = location_match.group().strip()
-                # Nao confundir com cabecalhos de experiencia
-                if len(loc) < 80 and not any(h in loc.lower() for h in ['experiencia', 'formacao']):
-                    info["location"] = loc
-                    break
+        # Localizacao: priorizar linhas do cabecalho (top 40 linhas) para evitar
+        # capturar a localizacao de uma vaga antiga da secao Experiencia.
+        # Estrategia por ordem de preferencia:
+        #   1) Linha rotulada ("Endereco:", "Localizacao:", "Cidade:", etc.)
+        #   2) Linha no cabecalho que o parser reconheca como
+        #      "Cidade, Estado, Pais" ou "Cidade, UF"
+        #   3) Fallback: primeira ocorrencia no texto completo
+        info["location"] = ResumeParserService._extract_location(text)
 
         return info
+
+    @staticmethod
+    def _extract_location(text: str) -> Optional[str]:
+        """Extrai localizacao canonica 'Cidade, UF' do texto do curriculo."""
+        if not text:
+            return None
+
+        label_re = re.compile(
+            r"(?:endere[cç]o|moradia|resido|resid[eê]ncia|localiza[cç][aã]o|cidade|city|local)\s*[:\-]\s*(.+)",
+            re.IGNORECASE,
+        )
+
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        header_lines = lines[:40]
+
+        # 1) Linhas rotuladas no cabecalho.
+        for line in header_lines:
+            m = label_re.match(line)
+            if not m:
+                continue
+            candidate = m.group(1).strip()
+            if len(candidate) > 160:
+                candidate = candidate[:160]
+            parsed = parse_brazilian_location(candidate)
+            if parsed and parsed.get("display"):
+                return parsed["display"]
+
+        # 2) Linhas "soltas" do cabecalho (LinkedIn PDF coloca cidade/estado/pais
+        #    em uma linha isolada logo apos o nome).
+        for line in header_lines:
+            if "@" in line or "http" in line.lower() or "linkedin" in line.lower():
+                continue
+            if len(line) < 5 or len(line) > 120:
+                continue
+            # Precisa ter "," (cidade/estado/pais) ou separadores "-" / "/"
+            if not re.search(r"[,\-–/]", line):
+                continue
+            parsed = parse_brazilian_location(line)
+            if parsed and parsed.get("display") and (parsed.get("city") or parsed.get("state")):
+                return parsed["display"]
+
+        # 3) Fallback global: primeira ocorrencia reconhecivel em todo o texto.
+        for line in lines:
+            if "@" in line or "http" in line.lower():
+                continue
+            if len(line) < 5 or len(line) > 120:
+                continue
+            if not re.search(r"[,\-–/]", line):
+                continue
+            parsed = parse_brazilian_location(line)
+            if parsed and parsed.get("display") and (parsed.get("city") and parsed.get("state")):
+                return parsed["display"]
+
+        return None
 
     @staticmethod
     def _normalize_broken_linkedin_text(text: str) -> str:

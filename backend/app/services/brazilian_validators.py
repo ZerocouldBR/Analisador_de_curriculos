@@ -354,3 +354,154 @@ def name_appears_in_text(name: Optional[str], raw_text: Optional[str]) -> float:
         if re.search(rf"\b{re.escape(t)}\b", text_norm):
             hits += 1
     return hits / len(tokens)
+
+
+# ============================================================
+# Localizacao brasileira (Cidade, UF / Cidade, Estado por extenso, Pais)
+# ============================================================
+
+_BR_STATE_NAME_TO_UF = {
+    "acre": "AC",
+    "alagoas": "AL",
+    "amapa": "AP",
+    "amazonas": "AM",
+    "bahia": "BA",
+    "ceara": "CE",
+    "distrito federal": "DF",
+    "espirito santo": "ES",
+    "goias": "GO",
+    "maranhao": "MA",
+    "mato grosso": "MT",
+    "mato grosso do sul": "MS",
+    "minas gerais": "MG",
+    "para": "PA",
+    "paraiba": "PB",
+    "parana": "PR",
+    "pernambuco": "PE",
+    "piaui": "PI",
+    "rio de janeiro": "RJ",
+    "rio grande do norte": "RN",
+    "rio grande do sul": "RS",
+    "rondonia": "RO",
+    "roraima": "RR",
+    "santa catarina": "SC",
+    "sao paulo": "SP",
+    "sergipe": "SE",
+    "tocantins": "TO",
+}
+
+_BR_VALID_UFS = set(_BR_STATE_NAME_TO_UF.values())
+
+_COUNTRY_NAMES = {
+    "brasil", "brazil", "br", "portugal", "pt", "argentina", "chile", "uruguai",
+    "uruguay", "paraguai", "paraguay", "estados unidos", "united states", "usa",
+    "us", "canada", "canada", "mexico", "méxico", "espanha", "spain", "franca",
+    "franca", "frança", "france", "alemanha", "germany", "italia", "italy", "italia",
+    "reino unido", "united kingdom", "uk", "inglaterra", "england", "japao", "japan",
+    "china", "india", "australia",
+}
+
+
+def _looks_like_country(token: str) -> bool:
+    return _strip_accents(token.strip().lower()) in _COUNTRY_NAMES
+
+
+def parse_brazilian_location(raw: Optional[str]) -> Optional[dict]:
+    """
+    Interpreta uma string de localizacao e devolve um dict normalizado.
+
+    Aceita formatos comuns em curriculos/LinkedIn:
+        - "Cidade, UF"
+        - "Cidade - UF" / "Cidade/UF"
+        - "Cidade, Estado por extenso, Pais" (ex: "Sao Leopoldo, Rio Grande do Sul, Brasil")
+        - "Estado por extenso, Pais"
+        - Apenas "Cidade" (sem UF)
+
+    Retorna None se a entrada nao parece uma localizacao valida. Caso contrario:
+        {
+            "city": Optional[str],
+            "state": Optional[str],       # sigla de 2 letras (UF) quando possivel
+            "state_full": Optional[str],  # nome por extenso quando reconhecido
+            "country": Optional[str],
+            "display": str                # string canonica "Cidade, UF" ou "Cidade, UF, Pais"
+        }
+    """
+    if not raw:
+        return None
+
+    text = re.sub(r"\s+", " ", str(raw)).strip(" \t\r\n.,;:-–—/")
+    if not text or len(text) > 160:
+        return None
+
+    # Normaliza separadores alternativos para virgulas ("Cidade/UF", "Cidade - UF").
+    normalized = re.sub(r"\s*[/]\s*", ", ", text)
+    normalized = re.sub(r"\s*[-–—]\s*", ", ", normalized)
+    segments = [seg.strip() for seg in normalized.split(",") if seg.strip()]
+    if not segments:
+        return None
+
+    city: Optional[str] = None
+    state: Optional[str] = None
+    state_full: Optional[str] = None
+    country: Optional[str] = None
+
+    remaining = list(segments)
+
+    # Pais geralmente vem por ultimo em exports do LinkedIn.
+    if remaining and _looks_like_country(remaining[-1]):
+        country = remaining.pop().strip()
+
+    # Proximo candidato: estado (UF de 2 letras ou nome por extenso).
+    if remaining:
+        last = remaining[-1].strip()
+        upper_only = re.fullmatch(r"[A-Za-z]{2}", last)
+        if upper_only and last.upper() in _BR_VALID_UFS:
+            state = last.upper()
+            remaining.pop()
+        else:
+            key = _strip_accents(last.lower())
+            if key in _BR_STATE_NAME_TO_UF:
+                state = _BR_STATE_NAME_TO_UF[key]
+                state_full = last.title()
+                remaining.pop()
+
+    # Exigimos ancora geografica (estado ou pais) para evitar capturar
+    # listas de palavras aleatorias como "Python, Docker, AWS" ou
+    # "Gestao, Lideranca, Agile" como se fossem localizacoes.
+    if not state and not state_full and not country:
+        return None
+
+    # Apenas pais, sem cidade e sem estado, nao eh util para queries.
+    if country and not state and not state_full and len(remaining) == 0:
+        return None
+
+    # Cidade: apenas o segmento mais proximo do estado (ultimo restante).
+    # Isso descarta enderecos residuais como "Rua Foo 123" quando a linha
+    # traz "Rua Foo 123, Curitiba, Parana, Brasil".
+    if remaining:
+        city_raw = remaining[-1].strip(" \t.-–—/")
+        if city_raw and not _looks_like_country(city_raw):
+            # Rejeita segmentos que sao claramente enderecos numericos
+            # ou so dígitos/siglas.
+            if not re.fullmatch(r"\d+", city_raw) and not re.fullmatch(r"[A-Z]{1,3}", city_raw):
+                city = city_raw
+
+    # Monta string canonica para display/armazenamento compativel com a UI.
+    display_parts = []
+    if city:
+        display_parts.append(city)
+    if state:
+        display_parts.append(state)
+    elif state_full:
+        display_parts.append(state_full)
+    if country and not display_parts:
+        display_parts.append(country)
+    display = ", ".join(display_parts)
+
+    return {
+        "city": city,
+        "state": state,
+        "state_full": state_full,
+        "country": country,
+        "display": display,
+    }
