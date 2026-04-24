@@ -2,11 +2,12 @@
 Pipeline de enriquecimento de curriculos
 
 Orquestra as etapas de:
-1. Extracao por regex (ResumeParserService)
-2. Extracao por IA (ResumeAIExtractionService)
-3. Validacao e reconciliacao (ResumeAIExtractionService.validate_extraction)
-4. Scoring de confianca (ResumeValidationService)
-5. Consultoria de carreira opcional (CareerAdvisoryService)
+1. Normalizacao de layouts conhecidos (LinkedIn PDF export)
+2. Extracao por regex (ResumeParserService)
+3. Extracao por IA (ResumeAIExtractionService)
+4. Validacao e reconciliacao (ResumeAIExtractionService.validate_extraction)
+5. Scoring de confianca (ResumeValidationService)
+6. Consultoria de carreira opcional (CareerAdvisoryService)
 
 Retorna estrutura enriquecida padronizada para o frontend.
 """
@@ -18,6 +19,7 @@ from app.services.resume_parser_service import ResumeParserService
 from app.services.resume_ai_extraction_service import ResumeAIExtractionService
 from app.services.resume_validation_service import ResumeValidationService
 from app.services.career_advisory_service import CareerAdvisoryService
+from app.services.linkedin_pdf_normalizer import normalize_linkedin_pdf_text
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +58,24 @@ class ResumeEnrichmentPipeline:
             "metadata": {},
         }
 
+        original_text = text or ""
+
+        # ETAPA 0: Normalizacao de layouts conhecidos.
+        # PDFs exportados do LinkedIn frequentemente chegam em leitura linear
+        # de duas colunas: contato/skills/certificacoes antes do nome e resumo.
+        # O normalizador cria um cabecalho estruturado para regex e IA sem
+        # descartar o texto original.
+        logger.info("Pipeline: Etapa 0 - Normalizacao de layout")
+        linkedin_normalized = normalize_linkedin_pdf_text(original_text)
+        text_for_extraction = linkedin_normalized.get("text") or original_text
+        linkedin_metadata = linkedin_normalized.get("metadata") or {}
+        if linkedin_normalized.get("is_linkedin_pdf"):
+            result["metadata"]["linkedin_pdf"] = linkedin_metadata
+            result["metadata"].setdefault("normalization", {})["linkedin_pdf"] = True
+
         # ETAPA 1: Extracao por regex (sempre executa, e rapida)
         logger.info("Pipeline: Etapa 1 - Extracao por regex")
-        regex_data = ResumeParserService.parse_resume(text)
+        regex_data = ResumeParserService.parse_resume(text_for_extraction)
 
         # ETAPA 2: Extracao por IA (se habilitado)
         ai_result = None
@@ -66,7 +83,7 @@ class ResumeEnrichmentPipeline:
             logger.info("Pipeline: Etapa 2 - Extracao por IA")
             try:
                 ai_result = await ResumeAIExtractionService.extract_with_ai(
-                    text, regex_data
+                    text_for_extraction, regex_data
                 )
             except Exception as e:
                 logger.error(f"Pipeline: Erro na extracao por IA: {e}")
@@ -76,7 +93,7 @@ class ResumeEnrichmentPipeline:
         logger.info("Pipeline: Etapa 3 - Validacao e reconciliacao")
         if ai_result and ai_result.get("ai_available") and ai_result.get("data"):
             validated = await ResumeAIExtractionService.validate_extraction(
-                regex_data, ai_result, text
+                regex_data, ai_result, text_for_extraction
             )
             result["extraction_method"] = "ai_validated"
             result["ai_enhanced"] = True
@@ -91,19 +108,34 @@ class ResumeEnrichmentPipeline:
             if ai_result and ai_result.get("error"):
                 result["metadata"]["ai_error"] = ai_result["error"]
 
+        # A normalizacao do LinkedIn atua como camada de alta confianca para
+        # campos que o parser/LLM costuma confundir no layout em duas colunas.
+        if linkedin_normalized.get("is_linkedin_pdf"):
+            enriched_data = ResumeEnrichmentPipeline._apply_linkedin_metadata(
+                enriched_data, linkedin_metadata
+            )
+            if result["extraction_method"] == "regex_only":
+                result["extraction_method"] = "linkedin_pdf_regex"
+            else:
+                result["extraction_method"] = "linkedin_pdf_ai_validated"
+
         result["data"] = enriched_data
 
         # ETAPA 4: Scoring de confianca (considerando metadata de OCR)
         logger.info("Pipeline: Etapa 4 - Scoring de confianca")
+        validation_metadata = dict(extraction_metadata or {})
+        if linkedin_normalized.get("is_linkedin_pdf"):
+            validation_metadata["layout_normalizer"] = "linkedin_pdf"
         validation = ResumeValidationService.validate_resume_data(
-            enriched_data, text, extraction_metadata=extraction_metadata,
+            enriched_data, text_for_extraction, extraction_metadata=validation_metadata or None,
         )
         result["validation"] = validation
-        if extraction_metadata:
+        if validation_metadata:
             result["metadata"]["extraction"] = {
-                k: v for k, v in extraction_metadata.items()
+                k: v for k, v in validation_metadata.items()
                 if k in {"ocr_confidence", "pages_with_ocr", "pages_with_text",
-                         "pages_processed", "language", "extraction_method"}
+                         "pages_processed", "language", "extraction_method",
+                         "layout_normalizer"}
             }
 
         # ETAPA 5: Consultoria de carreira (opcional)
@@ -111,7 +143,7 @@ class ResumeEnrichmentPipeline:
             logger.info("Pipeline: Etapa 5 - Consultoria de carreira")
             try:
                 advisory = await CareerAdvisoryService.generate_advisory(
-                    enriched_data, text
+                    enriched_data, text_for_extraction
                 )
                 if advisory.get("available") and advisory.get("data"):
                     result["career_advisory"] = advisory["data"]
@@ -195,6 +227,70 @@ class ResumeEnrichmentPipeline:
             enable_career_advisory=enable_career_advisory,
             extraction_metadata=None,
         )
+
+    @staticmethod
+    def _apply_linkedin_metadata(
+        enriched_data: Dict[str, Any],
+        linkedin_metadata: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Aplica campos detectados no layout LinkedIn PDF ao dado final.
+
+        A regra e conservadora: preenche ausentes e sobrescreve apenas campos
+        que vieram com baixa confianca ou que sao notoriamente ambíguos nesse
+        layout (nome, headline, LinkedIn e portfolio).
+        """
+        if not linkedin_metadata:
+            return enriched_data
+
+        personal = enriched_data.setdefault("personal_info", {})
+        professional = enriched_data.setdefault("professional_objective", {})
+
+        if linkedin_metadata.get("name"):
+            current_conf = float(personal.get("name_confidence") or 0)
+            if not personal.get("name") or current_conf < 0.9:
+                personal["name"] = linkedin_metadata["name"]
+                personal["name_confidence"] = 0.98
+
+        scalar_map = {
+            "email": ("email", "email_confidence", 0.99),
+            "location": ("location", "location_confidence", 0.95),
+            "linkedin": ("linkedin", "linkedin_confidence", 0.99),
+            "portfolio": ("portfolio", None, None),
+        }
+        for source_key, (target_key, confidence_key, confidence_value) in scalar_map.items():
+            value = linkedin_metadata.get(source_key)
+            if not value:
+                continue
+            if not personal.get(target_key):
+                personal[target_key] = value
+                if confidence_key:
+                    personal[confidence_key] = confidence_value
+
+        if linkedin_metadata.get("headline") and not professional.get("title"):
+            professional["title"] = linkedin_metadata["headline"]
+            professional["confidence"] = max(float(professional.get("confidence") or 0), 0.95)
+
+        skills = enriched_data.setdefault(
+            "skills", {"technical": [], "soft": [], "tools": [], "frameworks": []}
+        )
+        technical = skills.setdefault("technical", [])
+        existing_skills = {str(item).lower() for item in technical}
+        for skill in linkedin_metadata.get("skills") or []:
+            if skill.lower() not in existing_skills:
+                technical.append(skill)
+                existing_skills.add(skill.lower())
+
+        certs = enriched_data.setdefault("certifications", [])
+        existing_certs = {
+            (cert.get("name") if isinstance(cert, dict) else str(cert)).lower()
+            for cert in certs
+        }
+        for cert in linkedin_metadata.get("certifications") or []:
+            if cert.lower() not in existing_certs:
+                certs.append({"name": cert, "institution": None, "year": None, "code": None})
+                existing_certs.add(cert.lower())
+
+        return enriched_data
 
     @staticmethod
     def _convert_regex_to_enriched(regex_data: Dict[str, Any]) -> Dict[str, Any]:
